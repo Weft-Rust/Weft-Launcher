@@ -2,8 +2,10 @@ use futures_util::StreamExt;
 use reqwest::header::USER_AGENT;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fs::File as StdFile;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 use thiserror::Error;
 use tokio::fs;
@@ -13,50 +15,56 @@ use zip::result::ZipError;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-// Import from launch module to check running versions
-use crate::launch::is_version_running;
+use crate::config::WEFT_REPO;
 use crate::error::AppError;
+use crate::launch::running_game;
 
-const USER_AGENT_VALUE: &str = "weft-launcher/0.1.0";
+const USER_AGENT_VALUE: &str = concat!("weft-launcher/", env!("CARGO_PKG_VERSION"));
+const TEMP_EXTRACT_PREFIX: &str = ".tmp-";
+const REMOVING_PREFIX: &str = ".removing-";
 
 #[derive(Debug, Error)]
 pub enum InstallError {
-    #[error("Erro de rede: {0}")]
+    #[error("Network error: {0}")]
     Network(#[from] reqwest::Error),
-    #[error("Erro de I/O: {0}")]
+    #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Erro de serialização: {0}")]
+    #[error("Serialization error: {0}")]
     Serde(#[from] serde_json::Error),
-    #[error("Erro de zip: {0}")]
+    #[error("Zip error: {0}")]
     Zip(#[from] ZipError),
-    #[error("Erro ao criar diretório: {0}")]
+    #[error("Failed to create directory: {0}")]
     CreateDir(String),
-    #[error("SHA256 não confere: esperado {expected}, obtido {actual}")]
+    #[error("SHA256 mismatch: expected {expected}, got {actual}")]
     Sha256Mismatch { expected: String, actual: String },
-    #[error("Digest SHA256 ausente no asset")]
+    #[error("SHA256 digest missing in asset")]
     MissingDigest,
-    #[error("Digest SHA256 obrigatório não fornecido")]
+    #[error("Required SHA256 not provided")]
     HashMissing,
-    #[error("Asset não encontrado para a plataforma atual")]
+    #[error("Asset not found for the current platform")]
     AssetNotFound,
-    #[error("Versão já instalada: {0}")]
+    #[error("Version already installed: {0}")]
     AlreadyInstalled(String),
-    #[error("Versão não instalada: {0}")]
+    #[error("Version not installed: {0}")]
     NotInstalled(String),
-    #[error("Limite de taxa da API GitHub excedido")]
+    #[error("GitHub API rate limit exceeded")]
     RateLimited,
-    #[error("Acesso negado à API GitHub (403)")]
+    #[error("GitHub API access denied (403)")]
     Forbidden,
-    #[error("Sem conexão e sem cache disponível")]
+    #[error("Offline and no cache available")]
     OfflineNoCache,
-    #[error("Falha no download: {0}")]
+    #[error("Download failed: {0}")]
     DownloadFailed(String),
-    #[error("Falha na extração: {0}")]
+    #[error("Extraction failed: {0}")]
     ExtractFailed(String),
-    #[error("Versão está em execução: {0}")]
+    #[error("A game is running: {0}")]
     GameRunning(String),
-    #[error("Versão em uso (arquivo bloqueado): {0}")]
+    #[error("Version in use (file locked): {0}")]
     VersionInUse(String),
+    #[error("Invalid name: {0}")]
+    InvalidName(String),
+    #[error("Already installing: {0}")]
+    InstallInProgress(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +73,43 @@ pub struct InstalledVersion {
     pub path: String,
     pub executable: String,
     pub installed_at: String,
+}
+
+/// Tags that are being installed: two installs of one tag would share their temporary files.
+#[derive(Default, Clone)]
+pub struct ActiveInstalls(Arc<Mutex<HashSet<String>>>);
+
+struct InstallClaim {
+    active: ActiveInstalls,
+    tag: String,
+}
+
+impl InstallClaim {
+    fn new(active: &ActiveInstalls, tag: &str) -> Result<Self, InstallError> {
+        if !active.0.lock().unwrap().insert(tag.to_string()) {
+            return Err(InstallError::InstallInProgress(tag.to_string()));
+        }
+        Ok(Self {
+            active: active.clone(),
+            tag: tag.to_string(),
+        })
+    }
+}
+
+impl Drop for InstallClaim {
+    fn drop(&mut self) {
+        self.active.0.lock().unwrap().remove(&self.tag);
+    }
+}
+
+/// Tags and asset names become folder and file names, so they must stay one path component.
+/// A leading dot is also how the launcher marks its own temporary folders.
+pub fn validate_name(name: &str) -> Result<(), InstallError> {
+    let bad = name.is_empty() || name.starts_with('.') || name.contains(['/', '\\', ':', '\0']);
+    if bad {
+        return Err(InstallError::InvalidName(name.to_string()));
+    }
+    Ok(())
 }
 
 fn get_versions_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, InstallError> {
@@ -83,10 +128,43 @@ fn get_downloads_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, InstallEr
     Ok(app_data.join("downloads"))
 }
 
-// Cleanup helper
-async fn cleanup_temp(temp_download: PathBuf, temp_extract: PathBuf) {
+fn executable_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "weft.exe"
+    } else {
+        "weft"
+    }
+}
+
+fn temp_extract_dir(versions_dir: &Path, tag: &str) -> PathBuf {
+    versions_dir.join(format!("{TEMP_EXTRACT_PREFIX}{tag}"))
+}
+
+async fn cleanup_temp(temp_download: &Path, temp_extract: &Path) {
     fs::remove_file(temp_download).await.ok();
     fs::remove_dir_all(temp_extract).await.ok();
+}
+
+/// Removes what an interrupted install or delete left behind. Only for startup, when nothing of
+/// the kind can be running.
+pub fn sweep_leftovers(app_handle: &tauri::AppHandle) {
+    if let Ok(dir) = get_versions_dir(app_handle)
+        && let Ok(entries) = std::fs::read_dir(dir)
+    {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with(TEMP_EXTRACT_PREFIX) || name.starts_with(REMOVING_PREFIX) {
+                std::fs::remove_dir_all(entry.path()).ok();
+            }
+        }
+    }
+    if let Ok(dir) = get_downloads_dir(app_handle)
+        && let Ok(entries) = std::fs::read_dir(dir)
+    {
+        for entry in entries.flatten() {
+            std::fs::remove_file(entry.path()).ok();
+        }
+    }
 }
 
 #[tauri::command]
@@ -97,23 +175,58 @@ pub async fn install_version(
     asset_name: String,
     expected_sha256: Option<String>,
 ) -> Result<InstalledVersion, AppError> {
+    validate_name(&tag)?;
+    validate_name(&asset_name)?;
+    let expected_sha256 = expected_sha256
+        .filter(|s| !s.is_empty())
+        .ok_or(InstallError::HashMissing)?;
+    let allowed = format!("https://github.com/{WEFT_REPO}/releases/download/");
+    if !asset_url.starts_with(&allowed) {
+        return Err(InstallError::DownloadFailed(format!("unexpected URL: {asset_url}")).into());
+    }
+
+    let active = app_handle.state::<ActiveInstalls>().inner().clone();
+    let _claim = InstallClaim::new(&active, &tag)?;
+
     let versions_dir = get_versions_dir(&app_handle)?;
     let downloads_dir = get_downloads_dir(&app_handle)?;
-
     fs::create_dir_all(&versions_dir).await?;
     fs::create_dir_all(&downloads_dir).await?;
 
-    let version_dir = versions_dir.join(&tag);
-    let executable_name = if cfg!(target_os = "windows") {
-        "weft.exe"
-    } else {
-        "weft"
-    };
-    let executable_path = version_dir.join(executable_name);
+    let temp_download = downloads_dir.join(format!("{asset_name}.tmp"));
+    let temp_extract = temp_extract_dir(&versions_dir, &tag);
+
+    let result = download_and_install(
+        &app_handle,
+        &tag,
+        &asset_url,
+        &asset_name,
+        &expected_sha256,
+        &versions_dir,
+        &temp_download,
+    )
+    .await;
+    // After a success the extract folder has already become the version.
+    cleanup_temp(&temp_download, &temp_extract).await;
+    result
+}
+
+async fn download_and_install(
+    app_handle: &tauri::AppHandle,
+    tag: &str,
+    asset_url: &str,
+    asset_name: &str,
+    expected_sha256: &str,
+    versions_dir: &Path,
+    temp_download: &Path,
+) -> Result<InstalledVersion, AppError> {
+    let version_dir = versions_dir.join(tag);
+    let executable_path = version_dir.join(executable_name());
+    let temp_extract = temp_extract_dir(versions_dir, tag);
 
     // Check if already properly installed (directory exists AND executable exists)
     if executable_path.exists() {
-        return Err(InstallError::AlreadyInstalled(tag).into());
+        return Err(InstallError::AlreadyInstalled(tag.to_string()).into());
     }
 
     // Directory exists but executable is missing -> remove stale directory and reinstall
@@ -121,28 +234,20 @@ pub async fn install_version(
         fs::remove_dir_all(&version_dir).await?;
     }
 
-    // Require SHA256
-    let expected_sha256 = expected_sha256
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| InstallError::HashMissing)?;
-
-    // Download to temp file with progress
-    let temp_download = downloads_dir.join(format!("{}.tmp", asset_name));
-    let temp_extract = versions_dir.join(format!(".tmp-{}", tag));
-
+    // No total timeout: a slow connection may take long, as long as data keeps coming.
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .read_timeout(std::time::Duration::from_secs(60))
         .build()?;
 
     let response = client
-        .get(&asset_url)
+        .get(asset_url)
         .header(USER_AGENT, USER_AGENT_VALUE)
         .send()
         .await
         .map_err(|e| InstallError::DownloadFailed(e.to_string()))?;
 
     if !response.status().is_success() {
-        cleanup_temp(temp_download.clone(), temp_extract.clone()).await;
         return Err(InstallError::DownloadFailed(format!("HTTP {}", response.status())).into());
     }
 
@@ -155,7 +260,7 @@ pub async fn install_version(
     #[cfg(debug_assertions)]
     let download_start = std::time::Instant::now();
 
-    let mut file = fs::File::create(&temp_download).await?;
+    let mut file = fs::File::create(temp_download).await?;
 
     // Stream download with progress
     let mut stream = response.bytes_stream();
@@ -167,8 +272,12 @@ pub async fn install_version(
         downloaded += chunk.len() as u64;
 
         // Throttle progress: emit every ~1% or 100KB
+        let percent = if total_size > 0 {
+            ((downloaded as f64 / total_size as f64) * 100.0) as u32
+        } else {
+            0
+        };
         let should_report = if total_size > 0 {
-            let percent = ((downloaded as f64 / total_size as f64) * 100.0) as u32;
             percent > last_reported_percent
         } else {
             downloaded >= last_reported_bytes + 100_000
@@ -184,11 +293,6 @@ pub async fn install_version(
                 0.0
             };
 
-            let percent = if total_size > 0 {
-                ((downloaded as f64 / total_size as f64) * 100.0) as u32
-            } else {
-                0
-            };
             let _ = app_handle.emit(
                 "install-progress",
                 serde_json::json!({
@@ -200,11 +304,7 @@ pub async fn install_version(
                     "speedMbps": speed_mbps
                 }),
             );
-            last_reported_percent = if total_size > 0 {
-                ((downloaded as f64 / total_size as f64) * 100.0) as u32
-            } else {
-                0
-            };
+            last_reported_percent = percent;
             last_reported_bytes = downloaded;
             last_report_time = now;
         }
@@ -243,7 +343,7 @@ pub async fn install_version(
     );
 
     // Verify SHA256
-    let mut file = fs::File::open(&temp_download).await?;
+    let mut file = fs::File::open(temp_download).await?;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; 8192];
     loop {
@@ -254,10 +354,9 @@ pub async fn install_version(
         hasher.update(&buffer[..n]);
     }
     let actual = format!("{:x}", hasher.finalize());
-    if actual != expected_sha256 {
-        cleanup_temp(temp_download.clone(), temp_extract.clone()).await;
+    if !actual.eq_ignore_ascii_case(expected_sha256) {
         return Err(InstallError::Sha256Mismatch {
-            expected: expected_sha256,
+            expected: expected_sha256.to_string(),
             actual,
         }
         .into());
@@ -283,24 +382,19 @@ pub async fn install_version(
     fs::create_dir_all(&temp_extract).await?;
 
     // Extract based on file extension
-    let extract_result = if asset_name.ends_with(".zip") {
-        extract_zip(temp_download.clone(), temp_extract.clone()).await
+    if asset_name.ends_with(".zip") {
+        extract_zip(temp_download.to_path_buf(), temp_extract.clone()).await?;
     } else if asset_name.ends_with(".tar.gz") || asset_name.ends_with(".tgz") {
-        extract_tar_gz(temp_download.clone(), temp_extract.clone()).await
+        extract_tar_gz(temp_download.to_path_buf(), temp_extract.clone()).await?;
     } else {
-        cleanup_temp(temp_download.clone(), temp_extract.clone()).await;
-        return Err(
-            InstallError::ExtractFailed("Formato de arquivo não suportado".to_string()).into(),
-        );
-    };
-
-    extract_result?;
+        return Err(InstallError::ExtractFailed("unsupported archive format".to_string()).into());
+    }
 
     // Normalize structure (handle top-level folder)
-    normalize_install_structure(&temp_extract, &tag).await?;
+    normalize_install_structure(&temp_extract).await?;
 
     // Verify executable exists in temp directory before finalizing
-    let temp_executable = temp_extract.join(executable_name);
+    let temp_executable = temp_extract.join(executable_name());
     if !temp_executable.exists() {
         // List first 10 items in temp directory for diagnostics
         let mut items = Vec::new();
@@ -313,34 +407,26 @@ pub async fn install_version(
             }
         }
         let items_str = if items.is_empty() {
-            " (diretório vazio)".to_string()
+            " (empty folder)".to_string()
         } else {
-            format!(" (primeiros itens: {})", items.join(", "))
+            format!(" (first items: {})", items.join(", "))
         };
-        cleanup_temp(temp_download.clone(), temp_extract.clone()).await;
-        return Err(
-            InstallError::ExtractFailed(format!(
-                "Executável não encontrado após extração{}",
-                items_str
-            ))
-            .into(),
-        );
+        return Err(InstallError::ExtractFailed(format!(
+            "executable not found after extraction{items_str}"
+        ))
+        .into());
     }
 
     // On Unix, set executable permission on the binary before finalizing
     #[cfg(unix)]
     {
-        use std::fs::Permissions;
         let mut perms = fs::metadata(&temp_executable).await?.permissions();
         perms.set_mode(0o755);
-        if let Err(e) = fs::set_permissions(&temp_executable, perms).await {
-            cleanup_temp(temp_download.clone(), temp_extract.clone()).await;
-            return Err(InstallError::ExtractFailed(format!(
-                "Falha ao definir permissão de execução: {}",
-                e
-            ))
-            .into());
-        }
+        fs::set_permissions(&temp_executable, perms)
+            .await
+            .map_err(|e| {
+                InstallError::ExtractFailed(format!("failed to set execute permission: {e}"))
+            })?;
     }
 
     // Finalizing
@@ -362,16 +448,13 @@ pub async fn install_version(
     }
     fs::rename(&temp_extract, &version_dir).await?;
 
-    // Clean up temp download
-    fs::remove_file(&temp_download).await.ok();
-
     let now = time::OffsetDateTime::now_utc();
     let installed_at = now
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_default();
 
     Ok(InstalledVersion {
-        tag,
+        tag: tag.to_string(),
         path: version_dir.to_string_lossy().to_string(),
         executable: executable_path.to_string_lossy().to_string(),
         installed_at,
@@ -392,7 +475,7 @@ async fn extract_zip(zip_path: PathBuf, dest: PathBuf) -> Result<(), InstallErro
             // Use enclosed_name() which returns None if path tries to escape
             let Some(entry_path) = entry.enclosed_name() else {
                 return Err(InstallError::ExtractFailed(
-                    "entrada insegura no arquivo (zip-slip)".to_string(),
+                    "unsafe entry in archive (zip-slip)".to_string(),
                 ));
             };
 
@@ -404,7 +487,7 @@ async fn extract_zip(zip_path: PathBuf, dest: PathBuf) -> Result<(), InstallErro
                 )
             }) {
                 return Err(InstallError::ExtractFailed(
-                    "entrada insegura no arquivo".to_string(),
+                    "unsafe entry in archive".to_string(),
                 ));
             }
 
@@ -424,8 +507,7 @@ async fn extract_zip(zip_path: PathBuf, dest: PathBuf) -> Result<(), InstallErro
 
         if extracted_count == 0 {
             return Err(InstallError::ExtractFailed(
-                "nenhum arquivo extraído (arquivo vazio ou todas as entradas inseguras)"
-                    .to_string(),
+                "nothing extracted (empty archive)".to_string(),
             ));
         }
 
@@ -444,44 +526,31 @@ async fn extract_tar_gz(tar_gz_path: PathBuf, dest: PathBuf) -> Result<(), Insta
 
         let mut extracted_count = 0;
 
-        // Collect all entries first
-        let entries: Vec<_> = archive.entries()?.collect::<Result<Vec<_>, _>>()?;
-
-        for mut entry in entries {
-            let entry_path = entry.path()?;
+        // Entries share one stream, so each has to be unpacked before asking for the next.
+        for entry in archive.entries()? {
+            let mut entry = entry?;
 
             // Path traversal protection: reject .. components, absolute paths, and Windows prefixes
-            if entry_path
+            let unsafe_path = entry
+                .path()?
                 .components()
-                .any(|c| matches!(c, Component::RootDir | Component::Prefix(_)))
-            {
+                .any(|c| !matches!(c, Component::Normal(_) | Component::CurDir));
+            if unsafe_path {
                 return Err(InstallError::ExtractFailed(
-                    "entrada insegura no arquivo".to_string(),
-                ));
-            }
-            if entry_path.components().any(|c| c.as_os_str() == "..") {
-                return Err(InstallError::ExtractFailed(
-                    "entrada insegura no arquivo".to_string(),
+                    "unsafe entry in archive".to_string(),
                 ));
             }
 
-            let target_path = dest.join(entry_path);
-
-            if entry.header().entry_type().is_dir() {
-                std::fs::create_dir_all(&target_path)?;
-            } else {
-                if let Some(parent) = target_path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                entry.unpack(&target_path)?;
+            // unpack_in also refuses to write through a symlink that leaves `dest`. It returns
+            // false for a path with nothing to create, like "./".
+            if entry.unpack_in(&dest)? {
+                extracted_count += 1;
             }
-            extracted_count += 1;
         }
 
         if extracted_count == 0 {
             return Err(InstallError::ExtractFailed(
-                "nenhum arquivo extraído (arquivo vazio ou todas as entradas inseguras)"
-                    .to_string(),
+                "nothing extracted (empty archive)".to_string(),
             ));
         }
 
@@ -491,7 +560,7 @@ async fn extract_tar_gz(tar_gz_path: PathBuf, dest: PathBuf) -> Result<(), Insta
     .map_err(|e| InstallError::ExtractFailed(e.to_string()))?
 }
 
-async fn normalize_install_structure(extract_dir: &Path, _tag: &str) -> Result<(), InstallError> {
+async fn normalize_install_structure(extract_dir: &Path) -> Result<(), InstallError> {
     // Check if there's a single top-level folder
     let mut entries = fs::read_dir(extract_dir).await?;
     let mut first_entry = None;
@@ -509,12 +578,15 @@ async fn normalize_install_structure(extract_dir: &Path, _tag: &str) -> Result<(
         && let Some(single_dir) = first_entry
         && single_dir.is_dir()
     {
-        let mut entries = fs::read_dir(&single_dir).await?;
+        // Moved aside first: where names ignore case, `Weft/weft` would land on its own parent.
+        let staging = extract_dir.join(".unpacked");
+        fs::rename(&single_dir, &staging).await?;
+        let mut entries = fs::read_dir(&staging).await?;
         while let Some(entry) = entries.next_entry().await? {
             let target = extract_dir.join(entry.file_name());
             fs::rename(entry.path(), target).await?;
         }
-        fs::remove_dir(single_dir).await?;
+        fs::remove_dir(staging).await?;
     }
 
     Ok(())
@@ -540,17 +612,17 @@ pub async fn get_installed_versions(
         }
 
         let tag = entry.file_name().to_string_lossy().to_string();
-        let executable_name = if cfg!(target_os = "windows") {
-            "weft.exe"
-        } else {
-            "weft"
-        };
-        let executable = path.join(executable_name);
+        // The launcher's own temporary folders can hold an executable too.
+        if tag.starts_with('.') {
+            continue;
+        }
+        let executable = path.join(executable_name());
 
         if executable.exists() {
             let metadata = fs::metadata(&path).await?;
             let installed_at = metadata
                 .created()
+                .or_else(|_| metadata.modified())
                 .ok()
                 .and_then(|t| {
                     time::OffsetDateTime::from_unix_timestamp(
@@ -579,6 +651,7 @@ pub async fn get_installed_versions(
 
 #[tauri::command]
 pub async fn remove_version(app_handle: tauri::AppHandle, tag: String) -> Result<(), AppError> {
+    validate_name(&tag)?;
     let versions_dir = get_versions_dir(&app_handle)?;
     let version_dir = versions_dir.join(&tag);
 
@@ -586,13 +659,15 @@ pub async fn remove_version(app_handle: tauri::AppHandle, tag: String) -> Result
         return Err(InstallError::NotInstalled(tag).into());
     }
 
-    // Check if version is currently running
-    if is_version_running(&app_handle, &tag).await {
-        return Err(InstallError::GameRunning(tag).into());
+    // Nothing is deleted while any game is running
+    if let Some(running) = running_game(&app_handle) {
+        return Err(InstallError::GameRunning(running).into());
     }
 
     // Try to rename the folder first (atomic on Windows, fails if file in use)
-    let removing_dir = versions_dir.join(format!(".removing-{}", tag));
+    let removing_dir = versions_dir.join(format!("{REMOVING_PREFIX}{tag}"));
+    // A delete that failed halfway would otherwise block this rename for good.
+    fs::remove_dir_all(&removing_dir).await.ok();
     match fs::rename(&version_dir, &removing_dir).await {
         Ok(_) => {
             // Rename succeeded, now delete the renamed folder
@@ -612,5 +687,72 @@ pub async fn remove_version(app_handle: tauri::AppHandle, tag: String) -> Result
                 Err(e.into())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir()
+                .join(format!("weft-launcher-test-{name}-{}", std::process::id()));
+            std::fs::remove_dir_all(&dir).ok();
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).ok();
+        }
+    }
+
+    fn append(builder: &mut tar::Builder<impl std::io::Write>, path: &str, body: &[u8]) {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(body.len() as u64);
+        header.set_mode(0o755);
+        header.set_cksum();
+        builder.append_data(&mut header, path, body).unwrap();
+    }
+
+    // The layout of a real release: everything in `Weft/`, with the executable named `weft`.
+    #[test]
+    fn tar_release_installs_with_its_contents() {
+        let temp = TempDir::new("tar");
+        let archive = temp.0.join("game.tar.gz");
+        let gz = flate2::write::GzEncoder::new(
+            StdFile::create(&archive).unwrap(),
+            flate2::Compression::fast(),
+        );
+        let mut builder = tar::Builder::new(gz);
+        append(&mut builder, "Weft/weft", b"the game");
+        append(&mut builder, "Weft/assets/core/icon.png", b"an icon");
+        builder.into_inner().unwrap().finish().unwrap();
+
+        let dest = temp.0.join("out");
+        std::fs::create_dir_all(&dest).unwrap();
+        tauri::async_runtime::block_on(async {
+            extract_tar_gz(archive, dest.clone()).await.unwrap();
+            normalize_install_structure(&dest).await.unwrap();
+        });
+
+        assert_eq!(std::fs::read(dest.join("weft")).unwrap(), b"the game");
+        assert_eq!(
+            std::fs::read(dest.join("assets/core/icon.png")).unwrap(),
+            b"an icon"
+        );
+    }
+
+    #[test]
+    fn names_stay_one_path_component() {
+        for bad in ["", "..", ".tmp-v1", "a/b", "a\\b", "C:", "../v1"] {
+            assert!(validate_name(bad).is_err(), "{bad:?} should be refused");
+        }
+        assert!(validate_name("v26.10.4").is_ok());
     }
 }

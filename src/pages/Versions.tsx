@@ -1,7 +1,6 @@
 import { useI18n } from "../i18n/useI18n";
 import { useInstall } from "../hooks/useInstall";
 import { VersionActions } from "../components/VersionActions";
-import { translateError } from "../i18n/errors";
 import { getLocale } from "../i18n";
 
 interface Release {
@@ -25,8 +24,7 @@ interface VersionsPageProps {
   error: string | null;
   fromCache: boolean;
   onRefresh: (forceRefresh?: boolean) => void;
-  onNewVersionsChange?: (hasNew: boolean) => void;
-  latestTag: string | null;
+  newTag: string | null;
 }
 
 export function VersionsPage({
@@ -35,27 +33,12 @@ export function VersionsPage({
   error,
   fromCache,
   onRefresh,
-  onNewVersionsChange,
-  latestTag,
+  newTag,
 }: VersionsPageProps) {
   const { t, formatSize: fmtSize } = useI18n();
-  const { installedVersions, refreshInstalled } = useInstall();
+  const { installedVersions } = useInstall();
 
   const installedMap = new Map(installedVersions.map((v) => [v.tag, v]));
-
-  // NEW badge logic: show ONLY on the release whose tag === latestTag,
-  // AND only if latestTag is NOT installed AND there's at least one other installed version
-  const hasInstalledVersions = installedVersions.length > 0;
-  const isLatestInstalled = latestTag ? installedMap.has(latestTag) : false;
-  const showNewBadgeOnTag = latestTag && !isLatestInstalled && hasInstalledVersions ? latestTag : null;
-
-  // Compute if there are any new versions (for the tab indicator)
-  const hasNewVersions = releases.some((r) => r.tag === showNewBadgeOnTag);
-
-  // Notify parent about new versions state change
-  if (onNewVersionsChange) {
-    onNewVersionsChange(hasNewVersions);
-  }
 
   const sortedReleases = [...releases].sort((a, b) =>
     new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
@@ -71,7 +54,7 @@ export function VersionsPage({
           )}
           {error && (
             <div className="error-banner" role="alert">
-              {t("errorPrefix")}{translateError(error)}
+              {t("errorPrefix")}{error}
             </div>
           )}
           <button className="btn-refresh" onClick={() => onRefresh(true)} disabled={loading}>
@@ -87,7 +70,7 @@ export function VersionsPage({
           {sortedReleases.map((release) => {
             const installedVersion = installedMap.get(release.tag) ?? null;
             const asset = release.asset;
-            const isNew = release.tag === showNewBadgeOnTag;
+            const isNew = release.tag === newTag;
 
             return (
               <article
@@ -129,7 +112,6 @@ export function VersionsPage({
                     },
                   }}
                   installedVersion={installedVersion}
-                  onInstallComplete={refreshInstalled}
                 />
               </article>
             );

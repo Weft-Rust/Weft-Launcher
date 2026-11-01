@@ -1,6 +1,5 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { useI18n } from "../i18n/useI18n";
 import { translateError } from "../i18n/errors";
 import { useInstall } from "../hooks/useInstall";
@@ -8,86 +7,40 @@ import { useGameState } from "../hooks/useGameState";
 import { PixelBanner } from "../components/PixelBanner";
 import { compareTags } from "../utils/version";
 
-export function Home({ onGoToVersions, latestTag }: { onGoToVersions: () => void; latestTag: string | null }) {
-  const { t, locale } = useI18n();
-  const { installedVersions } = useInstall();
-  const { anyRunning, isRunning, launch } = useGameState();
+interface HomeProps {
+  onGoToVersions: () => void;
+  latestTag: string | null;
+  selectedTag: string | null;
+  onSelectTag: (tag: string | null) => void;
+}
 
-  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+export function Home({ onGoToVersions, latestTag, selectedTag, onSelectTag }: HomeProps) {
+  const { t, locale } = useI18n();
+  const { installedVersions, loaded } = useInstall();
+  const { anyRunning, isRunning, launch, lastCrash, clearCrash } = useGameState();
+
   const [launchError, setLaunchError] = useState<string | null>(null);
-  const [gameError, setGameError] = useState<{ tag: string; exitCode: number } | null>(null);
 
   const sortedVersions = useMemo(
   () => [...installedVersions].sort((a, b) => compareTags(b.tag, a.tag)),
   [installedVersions]
   );
 
-  // Initialize selectedTag from localStorage (lastPlayed) on mount
-  useEffect(() => {
-    try {
-      const lastPlayed = localStorage.getItem("lastPlayed");
-      if (lastPlayed && installedVersions.some((v) => v.tag === lastPlayed)) {
-        setSelectedTag(lastPlayed);
-      }
-    } catch {
-      // ignore localStorage errors
-    }
-  }, [installedVersions]);
-
-  // Listen for game-state events to detect error exit codes
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    let mounted = true;
-
-    listen<{ tag: string; state: string; exit_code: number | null }>("game-state", (event) => {
-      if (!mounted) return;
-      const { tag, state, exit_code } = event.payload;
-      if (state === "stopped" && exit_code !== null) {
-        // Only show error for CLEARLY abnormal exits:
-        // - Negative exit codes on Windows = exception codes (e.g., -1073741819 = Access Violation, STATUS_DLL_NOT_FOUND, etc.)
-        // - Codes >= 128 = Unix signals (128 + signal number, e.g., SIGSEGV=11 -> 139, SIGKILL=9 -> 137)
-        // All small positive codes (0, 1, 2, 3... up to 127) = normal closes (X button, Alt+F4, Quit Game, etc.)
-        // Weft may return various small codes for normal shutdown depending on code path.
-        const isLikelyCrash = exit_code < 0 || exit_code >= 128;
-        if (isLikelyCrash) {
-          setGameError({ tag, exitCode: exit_code });
-        }
-      }
-    }).then((fn) => {
-      unlisten = fn;
-    });
-
-    return () => {
-      mounted = false;
-      if (unlisten) unlisten();
-    };
-  }, []);
-
-  const effectiveTag = selectedTag ?? sortedVersions[0]?.tag ?? null;
-
+  // The selection may be a version that has been deleted since.
   const selectedVersion = useMemo(
-  () => sortedVersions.find((v) => v.tag === effectiveTag) ?? null,
-  [sortedVersions, effectiveTag]
+  () => sortedVersions.find((v) => v.tag === selectedTag) ?? sortedVersions[0] ?? null,
+  [sortedVersions, selectedTag]
 );
+
+  const effectiveTag = selectedVersion?.tag ?? null;
 
   const handleLaunch = async (tag: string) => {
     setLaunchError(null);
-    setGameError(null);
-    const err = await launch(tag);
-    if (err) {
-      setLaunchError(translateError(err));
-    } else {
-      // Save lastPlayed on successful launch
-      try {
-        localStorage.setItem("lastPlayed", tag);
-      } catch {
-        // ignore localStorage errors
-      }
-    }
+    setLaunchError(await launch(tag));
   };
 
   const handleOpenLog = async (tag: string) => {
-    setGameError(null);
+    clearCrash();
     try {
       await invoke("open_log", { tag });
     } catch (err) {
@@ -107,6 +60,10 @@ export function Home({ onGoToVersions, latestTag }: { onGoToVersions: () => void
 
   const isSelectedRunning = effectiveTag ? isRunning(effectiveTag) : false;
   const playDisabled = anyRunning || isSelectedRunning;
+
+  if (!loaded) {
+    return <main className="page home-page" />;
+  }
 
   if (installedVersions.length === 0) {
     return (
@@ -141,7 +98,7 @@ export function Home({ onGoToVersions, latestTag }: { onGoToVersions: () => void
             <select
               id="version-select"
               value={effectiveTag || ""}
-              onChange={(e) => setSelectedTag(e.target.value || null)}
+              onChange={(e) => onSelectTag(e.target.value || null)}
               disabled={anyRunning}
             >
               {sortedVersions.map((v) => (
@@ -165,10 +122,10 @@ export function Home({ onGoToVersions, latestTag }: { onGoToVersions: () => void
             {launchError}
           </div>
         )}
-        {gameError && (
+        {lastCrash && (
           <div className="launch-error" role="alert">
-            <span>{t("gameClosedError", String(gameError.exitCode))}</span>
-            <button className="btn-flat btn-secondary" onClick={() => handleOpenLog(gameError.tag)}>
+            <span>{t("gameClosedError", String(lastCrash.exitCode ?? "?"))}</span>
+            <button className="btn-flat btn-secondary" onClick={() => handleOpenLog(lastCrash.tag)}>
               {t("openLogButton")}
             </button>
           </div>

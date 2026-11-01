@@ -10,7 +10,7 @@ export function useLauncherUpdate() {
   const [percent, setPercent] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Ao abrir o launcher, procura uma versão nova. Sem internet ou no modo dev, ignora em silêncio.
+  // Looks for a new version on start. Offline or in dev mode this fails silently.
   useEffect(() => {
     let cancelled = false;
     check()

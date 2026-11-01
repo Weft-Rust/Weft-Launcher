@@ -90,6 +90,8 @@ updateCloseGame: string;
     gameFolderNotFound: string;
     unsupportedPlatform: string;
     openerError: string;
+    invalidName: string;
+    installInProgress: string;
   };
   sizeUnits: {
     B: string;

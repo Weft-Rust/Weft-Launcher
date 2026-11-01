@@ -13,32 +13,6 @@ export function compareTags(a: string, b: string): number {
 }
 
 /**
- * Returns the highest version tag from an array of installed versions.
- * Returns null if the array is empty.
- */
-export function getHighestInstalledTag(installedVersions: { tag: string }[]): string | null {
-  if (installedVersions.length === 0) return null;
-  return [...installedVersions].sort((a, b) => compareTags(b.tag, a.tag))[0].tag;
-}
-
-/**
- * A release is "new" if:
- * - It is NOT installed
- * - There is at least one installed version
- * - Its tag is greater than the highest installed tag
- */
-export function isNewRelease(
-  releaseTag: string,
-  installedVersions: { tag: string }[],
-  installedMap: Map<string, { tag: string }>
-): boolean {
-  if (installedMap.has(releaseTag)) return false; // already installed
-  const highestInstalled = getHighestInstalledTag(installedVersions);
-  if (!highestInstalled) return false; // no versions installed yet
-  return compareTags(releaseTag, highestInstalled) > 0;
-}
-
-/**
  * Returns the latest release tag (highest published_at) from the releases list,
  * ignoring prereleases. Returns null if releases is empty or not loaded.
  */
@@ -50,4 +24,13 @@ export function getLatestTag(releases: { tag: string; published_at: string; prer
     (a, b) => new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
   );
   return sorted[0].tag;
+}
+
+/**
+ * The tag that gets the NEW badge: the latest release, if it isn't installed
+ * and at least one other version is.
+ */
+export function getNewTag(latestTag: string | null, installedVersions: { tag: string }[]): string | null {
+  if (!latestTag || installedVersions.length === 0) return null;
+  return installedVersions.some((v) => v.tag === latestTag) ? null : latestTag;
 }

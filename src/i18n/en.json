@@ -60,6 +60,8 @@
   "gameClosedError": "Game closed with error (code {0})",
   "openLogButton": "Open log",
   "errors": {
+    "invalidName": "Invalid name: {0}",
+    "installInProgress": "Already installing: {0}",
     "network": "Network error: {0}",
     "io": "I/O error: {0}",
     "serialization": "Serialization error: {0}",

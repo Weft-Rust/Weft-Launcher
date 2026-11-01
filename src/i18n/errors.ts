@@ -1,5 +1,16 @@
 import { t } from './index';
 
+// Rust sends variant names, the language files use camelCase keys.
+const KEY_FOR_CODE: Record<string, string> = {
+  Serde: 'serialization',
+  InvalidHeader: 'httpHeader',
+};
+
+export function errorKey(code: string): string {
+  const name = KEY_FOR_CODE[code] ?? code.charAt(0).toLowerCase() + code.slice(1);
+  return `errors.${name}`;
+}
+
 export function translateError(err: unknown): string {
   if (err === null || err === undefined) {
     return '';
@@ -18,7 +29,7 @@ export function translateError(err: unknown): string {
     if (typeof obj.code === 'string') {
       const code = obj.code;
       const detail = typeof obj.detail === 'string' ? obj.detail : '';
-      const translationKey = `errors.${code}`;
+      const translationKey = errorKey(code);
       const translated = t(translationKey, detail);
       if (translated !== translationKey) {
         return translated;

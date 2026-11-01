@@ -40,6 +40,7 @@ impl From<crate::releases::ReleasesError> for AppError {
             RateLimited => AppError::new("RateLimited", None),
             Forbidden => AppError::new("Forbidden", None),
             OfflineNoCache => AppError::new("OfflineNoCache", None),
+            UnexpectedStatus(status) => AppError::new("Network", Some(format!("HTTP {status}"))),
         }
     }
 }
@@ -55,7 +56,7 @@ impl From<crate::install::InstallError> for AppError {
             CreateDir(msg) => AppError::new("CreateDir", Some(msg)),
             Sha256Mismatch { expected, actual } => AppError::new(
                 "Sha256Mismatch",
-                Some(format!("esperado {}, obtido {}", expected, actual)),
+                Some(format!("expected {}, got {}", expected, actual)),
             ),
             MissingDigest => AppError::new("MissingDigest", None),
             HashMissing => AppError::new("HashMissing", None),
@@ -69,6 +70,8 @@ impl From<crate::install::InstallError> for AppError {
             ExtractFailed(msg) => AppError::new("ExtractFailed", Some(msg)),
             GameRunning(tag) => AppError::new("GameRunning", Some(tag)),
             VersionInUse(tag) => AppError::new("VersionInUse", Some(tag)),
+            InvalidName(name) => AppError::new("InvalidName", Some(name)),
+            InstallInProgress(tag) => AppError::new("InstallInProgress", Some(tag)),
         }
     }
 }

@@ -60,6 +60,8 @@
   "openLogButton": "Abrir registro",
   "heroBadge": "VERSIÓN {0} · LISTO",
   "errors": {
+    "invalidName": "Nombre no válido: {0}",
+    "installInProgress": "Ya se está instalando: {0}",
     "network": "Error de red: {0}",
     "io": "Error de E/S: {0}",
     "serialization": "Error de serialización: {0}",

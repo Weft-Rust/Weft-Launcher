@@ -1,33 +1,35 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_opener::{OpenerExt, Error as OpenerError};
+use tauri_plugin_opener::{Error as OpenerError, OpenerExt};
 use thiserror::Error;
 use tokio::fs;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
-use tokio::sync::mpsc;
+
 use crate::error::AppError;
+use crate::install::validate_name;
 
 #[derive(Debug, Error)]
 pub enum LaunchError {
-    #[error("Erro de I/O: {0}")]
+    #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Versão já está rodando: {0}")]
+    #[error("Version already running: {0}")]
     AlreadyRunning(String),
-    #[error("Outro jogo já está rodando: {0}")]
+    #[error("Another game is running: {0}")]
     AnotherGameRunning(String),
-    #[error("Executável não encontrado: {0}")]
+    #[error("Executable not found: {0}")]
     ExecutableNotFound(String),
-    #[error("Falha ao iniciar o processo: {0}")]
+    #[error("Failed to spawn process: {0}")]
     ProcessSpawnFailed(String),
-    #[error("Erro ao criar diretório de logs: {0}")]
+    #[error("Failed to create log directory: {0}")]
     LogDirCreateFailed(String),
-    #[error("Pasta do jogo não encontrada: {0}")]
+    #[error("Game folder not found: {0}")]
     GameFolderNotFound(String),
-    #[error("Erro ao abrir pasta: {0}")]
+    #[error("Failed to open: {0}")]
     OpenerError(#[from] OpenerError),
 }
 
@@ -107,49 +109,24 @@ pub struct GameStateEvent {
     pub tag: String,
     pub state: String,
     pub exit_code: Option<i32>,
+    /// The game only ends with an error of its own, a panic or a fault when something went
+    /// wrong. On Unix a signal leaves no exit code at all, so the code alone can't tell.
+    pub crashed: bool,
 }
 
-pub struct RunningProcess {
-    _tag: String,
-    child: tokio::process::Child,
-    _log_file: tokio::fs::File,
-    tx: mpsc::Sender<()>,
+/// Tags of the games this launcher has started and is waiting for.
+#[derive(Default, Clone)]
+pub struct RunningGames(Arc<Mutex<HashSet<String>>>);
+
+fn running_games(app_handle: &AppHandle) -> RunningGames {
+    app_handle.state::<RunningGames>().inner().clone()
 }
 
-type ProcessMap = Arc<Mutex<HashMap<String, RunningProcess>>>;
-
-/// Get the process map state, creating it if needed.
-/// Made public so install.rs can check running versions.
-pub fn get_process_state(app_handle: &AppHandle) -> Result<ProcessMap, LaunchError> {
-    let state = app_handle.try_state::<ProcessMap>();
-    match state {
-        Some(s) => Ok(s.inner().clone()),
-        None => {
-            let map: ProcessMap = Arc::new(Mutex::new(HashMap::new()));
-            app_handle.manage(map.clone());
-            Ok(map)
-        }
-    }
-}
-
-/// Check if a specific version is currently running.
-pub async fn is_version_running(app_handle: &AppHandle, tag: &str) -> bool {
-    if let Ok(process_map) = get_process_state(app_handle) {
-        let map = process_map.lock().unwrap();
-        map.contains_key(tag)
-    } else {
-        false
-    }
-}
-
-/// Get all currently running version tags.
-pub async fn get_running_tags(app_handle: &AppHandle) -> Vec<String> {
-    if let Ok(process_map) = get_process_state(app_handle) {
-        let map = process_map.lock().unwrap();
-        map.keys().cloned().collect()
-    } else {
-        Vec::new()
-    }
+/// The game that is running now, if any: only one runs at a time.
+pub fn running_game(app_handle: &AppHandle) -> Option<String> {
+    let games = running_games(app_handle);
+    let games = games.0.lock().unwrap();
+    games.iter().next().cloned()
 }
 
 fn get_versions_dir(app_handle: &AppHandle) -> Result<PathBuf, LaunchError> {
@@ -171,50 +148,77 @@ fn get_logs_dir(app_handle: &AppHandle) -> Result<PathBuf, LaunchError> {
     Ok(logs_dir)
 }
 
+// Reads bytes, not text: a driver printing in the system's code page must not end the log.
+async fn copy_to_log(stream: impl AsyncRead + Unpin, mut log: fs::File, label: &'static str) {
+    let mut reader = BufReader::new(stream);
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        match reader.read_until(b'\n', &mut line).await {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        let text = String::from_utf8_lossy(&line);
+        let entry = format!("[{label}] {}\n", text.trim_end());
+        let _ = log.write_all(entry.as_bytes()).await;
+    }
+    let _ = log.flush().await;
+}
+
 #[tauri::command]
 pub async fn launch_version(app_handle: AppHandle, tag: String) -> Result<(), AppError> {
+    validate_name(&tag)?;
     let versions_dir = get_versions_dir(&app_handle)?;
     let version_dir = versions_dir.join(&tag);
-    let executable_name = if cfg!(target_os = "windows") {
+    let executable = version_dir.join(if cfg!(target_os = "windows") {
         "weft.exe"
     } else {
         "weft"
-    };
-    let executable = version_dir.join(executable_name);
+    });
 
     if !executable.exists() {
         return Err(LaunchError::ExecutableNotFound(tag).into());
     }
 
-    let process_map = get_process_state(&app_handle)?;
+    let games = running_games(&app_handle);
 
-    // Check if already running (atomic check under lock)
+    // Checked and registered under one lock, before spawning, so two clicks can't both pass.
     {
-        let map = process_map.lock().unwrap();
-
-        // Check if THIS version is already running
-        if map.contains_key(&tag) {
+        let mut running = games.0.lock().unwrap();
+        if running.contains(&tag) {
             return Err(LaunchError::AlreadyRunning(tag).into());
         }
-
-        // Check if ANY other game is running (global single-instance)
-        if let Some((running_tag, _)) = map.iter().next() {
-            return Err(LaunchError::AnotherGameRunning(running_tag.clone()).into());
+        if let Some(other) = running.iter().next() {
+            return Err(LaunchError::AnotherGameRunning(other.clone()).into());
         }
-    } // lock released here
+        running.insert(tag.clone());
+    }
 
-    // Create log file (async, no lock held)
-    let logs_dir = get_logs_dir(&app_handle)?;
-    let log_path = logs_dir.join(format!("{}.log", tag));
-    let log_file = fs::OpenOptions::new()
+    if let Err(e) = start_game(&app_handle, &games, &tag, &executable, &version_dir).await {
+        games.0.lock().unwrap().remove(&tag);
+        return Err(e.into());
+    }
+    Ok(())
+}
+
+async fn start_game(
+    app_handle: &AppHandle,
+    games: &RunningGames,
+    tag: &str,
+    executable: &Path,
+    version_dir: &Path,
+) -> Result<(), LaunchError> {
+    let logs_dir = get_logs_dir(app_handle)?;
+    let log_path = logs_dir.join(format!("{tag}.log"));
+    let log_stdout = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&log_path)
         .await?;
+    let log_stderr = log_stdout.try_clone().await?;
 
-    // Prepare command
-    let mut cmd = TokioCommand::new(&executable);
-    cmd.current_dir(&version_dir)
+    let mut cmd = TokioCommand::new(executable);
+    cmd.current_dir(version_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -223,94 +227,46 @@ pub async fn launch_version(app_handle: AppHandle, tag: String) -> Result<(), Ap
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
 
-    // Spawn process
     let mut child = cmd
         .spawn()
         .map_err(|e| LaunchError::ProcessSpawnFailed(e.to_string()))?;
 
-    let app_handle_clone = app_handle.clone();
-    let tag_clone = tag.clone();
-
-    // If we got here, spawn succeeded. Set up logging and store process.
     let stdout = child.stdout.take().expect("stdout not captured");
     let stderr = child.stderr.take().expect("stderr not captured");
+    let stdout_log = tokio::spawn(copy_to_log(stdout, log_stdout, "stdout"));
+    let stderr_log = tokio::spawn(copy_to_log(stderr, log_stderr, "stderr"));
 
-    let log_file_clone = log_file.try_clone().await?;
+    let _ = app_handle.emit(
+        "game-state",
+        GameStateEvent {
+            tag: tag.to_string(),
+            state: "running".to_string(),
+            exit_code: None,
+            crashed: false,
+        },
+    );
 
-    let (tx, _rx) = mpsc::channel::<()>(1);
-
-    // Spawn stdout logging task
-    let log_file_stdout = log_file_clone
-        .try_clone()
-        .await?;
+    let app_handle = app_handle.clone();
+    let games = games.clone();
+    let tag = tag.to_string();
     tokio::spawn(async move {
-        let mut reader = BufReader::new(stdout).lines();
-        let mut log_file = log_file_stdout;
-        while let Ok(Some(line)) = reader.next_line().await {
-            let log_entry = format!("[stdout] {}\n", line);
-            let _ = log_file.write_all(log_entry.as_bytes()).await;
-        }
-    });
+        let status = child.wait().await.ok();
 
-    // Spawn stderr logging task
-    let log_file_stderr = log_file_clone
-        .try_clone()
-        .await?;
-    tokio::spawn(async move {
-        let mut reader = BufReader::new(stderr).lines();
-        let mut log_file = log_file_stderr;
-        while let Ok(Some(line)) = reader.next_line().await {
-            let log_entry = format!("[stderr] {}\n", line);
-            let _ = log_file.write_all(log_entry.as_bytes()).await;
-        }
-    });
+        // So the log is complete when the player opens it. Something the game left running may
+        // hold the pipes open, hence the limit.
+        let logs = futures_util::future::join(stdout_log, stderr_log);
+        let _ = tokio::time::timeout(Duration::from_secs(2), logs).await;
 
-    // Store process in map
-    let running_process = RunningProcess {
-        _tag: tag_clone.clone(),
-        child,
-        _log_file: log_file_clone,
-        tx,
-    };
-
-    {
-        let mut map = process_map.lock().unwrap();
-        map.insert(tag_clone.clone(), running_process);
-    }
-
-    // Emit "running" event
-    let event = GameStateEvent {
-        tag: tag_clone.clone(),
-        state: "running".to_string(),
-        exit_code: None,
-    };
-    let _ = app_handle_clone.emit("game-state", &event);
-
-    // Spawn task to wait for process completion
-    let app_handle_wait = app_handle_clone;
-    let process_map_wait = process_map.clone();
-    let tag_wait = tag_clone;
-    tokio::spawn(async move {
-        let process = {
-            let mut map = process_map_wait.lock().unwrap();
-            map.remove(&tag_wait)
-        };
-
-        if let Some(mut process) = process {
-            let exit_status = process.child.wait().await;
-            let exit_code = exit_status.ok().and_then(|s| s.code());
-
-            // Emit "stopped" event
-            let event = GameStateEvent {
-                tag: tag_wait.clone(),
+        games.0.lock().unwrap().remove(&tag);
+        let _ = app_handle.emit(
+            "game-state",
+            GameStateEvent {
+                tag,
                 state: "stopped".to_string(),
-                exit_code,
-            };
-            let _ = app_handle_wait.emit("game-state", &event);
-
-            // Signal completion
-            let _ = process.tx.send(()).await;
-        }
+                exit_code: status.and_then(|s| s.code()),
+                crashed: status.is_some_and(|s| !s.success()),
+            },
+        );
     });
 
     Ok(())
@@ -318,9 +274,7 @@ pub async fn launch_version(app_handle: AppHandle, tag: String) -> Result<(), Ap
 
 #[tauri::command]
 pub async fn get_running_versions(app_handle: AppHandle) -> Result<Vec<String>, AppError> {
-    let process_map = get_process_state(&app_handle)?;
-    let map = process_map.lock().unwrap();
-    Ok(map.keys().cloned().collect())
+    Ok(running_game(&app_handle).into_iter().collect())
 }
 
 #[tauri::command]
@@ -365,19 +319,27 @@ pub async fn open_game_folder(app_handle: AppHandle, _tag: String) -> Result<(),
     }
 
     // No valid game folder found in any log
-    Err(LaunchError::GameFolderNotFound(
-        "Game folder not found in logs (game may not have been launched yet)".to_string(),
+    Err(
+        LaunchError::GameFolderNotFound("not in the logs yet, start the game once".to_string())
+            .into(),
     )
-    .into())
 }
 
 #[tauri::command]
 pub async fn open_log(app_handle: AppHandle, tag: String) -> Result<(), AppError> {
+    validate_name(&tag)?;
     let logs_dir = get_logs_dir(&app_handle)?;
-    let log_file = logs_dir.join(format!("{}.log", tag));
+    let log_file = logs_dir.join(format!("{tag}.log"));
     if !log_file.exists() {
-        return Err(LaunchError::GameFolderNotFound(format!("Log file not found: {}", log_file.display())).into());
+        return Err(LaunchError::GameFolderNotFound(format!(
+            "log file not found: {}",
+            log_file.display()
+        ))
+        .into());
     }
-    app_handle.opener().open_path(log_file.to_string_lossy().as_ref(), None::<&str>).map_err(LaunchError::OpenerError)?;
+    app_handle
+        .opener()
+        .open_path(log_file.to_string_lossy().as_ref(), None::<&str>)
+        .map_err(LaunchError::OpenerError)?;
     Ok(())
 }

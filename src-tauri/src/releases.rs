@@ -10,31 +10,33 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use tokio::fs;
 
-const USER_AGENT_VALUE: &str = "weft-launcher/0.1.0";
+const USER_AGENT_VALUE: &str = concat!("weft-launcher/", env!("CARGO_PKG_VERSION"));
 const GITHUB_API_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 #[derive(Debug, Error)]
 pub enum ReleasesError {
-    #[error("Erro de rede: {0}")]
+    #[error("Network error: {0}")]
     Network(#[from] reqwest::Error),
-    #[error("Erro de I/O: {0}")]
+    #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Erro de serialização: {0}")]
+    #[error("Serialization error: {0}")]
     Serde(#[from] serde_json::Error),
-    #[error("Erro de cabeçalho HTTP: {0}")]
+    #[error("HTTP header error: {0}")]
     InvalidHeader(#[from] InvalidHeaderValue),
-    #[error("Cache corrompido: {0}")]
+    #[error("Cache corrupted: {0}")]
     CacheCorrupted(String),
-    #[error("Asset não encontrado para a plataforma atual")]
+    #[error("Asset not found for the current platform")]
     AssetNotFound,
-    #[error("Digest SHA256 ausente no asset")]
+    #[error("SHA256 digest missing in asset")]
     MissingDigest,
-    #[error("Limite de taxa da API GitHub excedido. Tente novamente mais tarde.")]
+    #[error("GitHub API rate limit exceeded. Try again later.")]
     RateLimited,
-    #[error("Acesso negado à API GitHub (403). Usando cache se disponível.")]
+    #[error("GitHub API access denied (403). Using cache if available.")]
     Forbidden,
-    #[error("Sem conexão e sem cache disponível")]
+    #[error("Offline and no cache available")]
     OfflineNoCache,
+    #[error("Unexpected HTTP status: {0}")]
+    UnexpectedStatus(u16),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,7 +56,8 @@ pub struct Release {
     pub body: String,
     pub prerelease: bool,
     pub asset: AssetInfo,
-    #[serde(skip)]
+    // Goes to the frontend, but says nothing when read back from the cache file.
+    #[serde(skip_deserializing)]
     pub from_cache: bool,
 }
 
@@ -76,7 +79,7 @@ struct GitHubAsset {
 #[derive(Debug, Deserialize)]
 struct GitHubRelease {
     tag_name: String,
-    name: String,
+    name: Option<String>,
     published_at: String,
     body: Option<String>,
     prerelease: bool,
@@ -116,61 +119,64 @@ fn current_platform_asset_suffix() -> &'static str {
     )))]
     return "";
 }
-fn select_asset_for_platform(assets: &[GitHubAsset]) -> Result<AssetInfo, ReleasesError> {
-    let suffix = current_platform_asset_suffix();
-    if suffix.is_empty() {
-        return Err(ReleasesError::AssetNotFound);
-    }
 
-    for asset in assets {
-        if asset.name.contains("Source code") || asset.name.contains("source code") {
-            continue;
-        }
-        if asset.name.ends_with(suffix) {
-            let sha256 = asset
-                .digest
-                .as_ref()
-                .and_then(|d| d.strip_prefix("sha256:"))
-                .map(|s| s.to_string());
-            return Ok(AssetInfo {
-                name: asset.name.clone(),
-                url: asset.browser_download_url.clone(),
-                size: asset.size,
-                sha256,
-            });
-        }
+fn select_asset(assets: &[GitHubAsset], suffix: &str) -> Option<AssetInfo> {
+    if suffix.is_empty() {
+        return None;
     }
-    Err(ReleasesError::AssetNotFound)
+    let asset = assets.iter().find(|a| a.name.ends_with(suffix))?;
+    let sha256 = asset
+        .digest
+        .as_ref()
+        .and_then(|d| d.strip_prefix("sha256:"))
+        .map(|s| s.to_string());
+    Some(AssetInfo {
+        name: asset.name.clone(),
+        url: asset.browser_download_url.clone(),
+        size: asset.size,
+        sha256,
+    })
 }
 
-fn parse_github_releases(gh_releases: Vec<GitHubRelease>) -> Result<Vec<Release>, ReleasesError> {
-    let mut releases = Vec::new();
-    for gh in gh_releases {
-        if gh.prerelease {
-            continue;
-        }
-        let asset = select_asset_for_platform(&gh.assets)?;
-        releases.push(Release {
-            tag: gh.tag_name,
-            name: gh.name,
-            published_at: gh.published_at,
-            body: gh.body.unwrap_or_default(),
-            prerelease: gh.prerelease,
-            asset,
-            from_cache: false,
-        });
+fn parse_github_releases(
+    gh_releases: Vec<GitHubRelease>,
+    suffix: &str,
+) -> Result<Vec<Release>, ReleasesError> {
+    let published: Vec<_> = gh_releases.into_iter().filter(|r| !r.prerelease).collect();
+    let any_published = !published.is_empty();
+
+    // Early releases were Windows only: a release without this platform is just not offered.
+    let releases: Vec<_> = published
+        .into_iter()
+        .filter_map(|gh| {
+            let asset = select_asset(&gh.assets, suffix)?;
+            Some(Release {
+                name: gh.name.unwrap_or_else(|| gh.tag_name.clone()),
+                tag: gh.tag_name,
+                published_at: gh.published_at,
+                body: gh.body.unwrap_or_default(),
+                prerelease: gh.prerelease,
+                asset,
+                from_cache: false,
+            })
+        })
+        .collect();
+
+    if any_published && releases.is_empty() {
+        return Err(ReleasesError::AssetNotFound);
     }
     Ok(releases)
 }
 
 fn github_api_url() -> String {
-    format!("https://api.github.com/repos/{}/releases", WEFT_REPO)
+    format!("https://api.github.com/repos/{WEFT_REPO}/releases?per_page=100")
 }
 
+/// `None` means GitHub answered that the list behind `etag` hasn't changed.
 async fn fetch_from_github(
     client: &reqwest::Client,
     etag: Option<&str>,
-) -> Result<(Vec<Release>, Option<String>), ReleasesError> {
+) -> Result<Option<(Vec<Release>, Option<String>)>, ReleasesError> {
     let url = github_api_url();
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
@@ -189,10 +195,10 @@ async fn fetch_from_github(
     match response.status().as_u16() {
         200 => {
             let gh_releases: Vec<GitHubRelease> = response.json().await?;
-            let releases = parse_github_releases(gh_releases)?;
-            Ok((releases, new_etag))
+            let releases = parse_github_releases(gh_releases, current_platform_asset_suffix())?;
+            Ok(Some((releases, new_etag)))
         }
-        304 => Ok((Vec::new(), None)),
+        304 => Ok(None),
         403 => {
             let remaining = response
                 .headers()
@@ -207,9 +213,10 @@ async fn fetch_from_github(
             }
         }
         429 => Err(ReleasesError::RateLimited),
-        _ => Err(ReleasesError::Network(
-            response.error_for_status().unwrap_err(),
-        )),
+        status => match response.error_for_status() {
+            Err(e) => Err(ReleasesError::Network(e)),
+            Ok(_) => Err(ReleasesError::UnexpectedStatus(status)),
+        },
     }
 }
 
@@ -242,8 +249,17 @@ async fn save_cache(
         fetched_at,
     };
     let content = serde_json::to_string_pretty(&cached)?;
-    fs::write(&cache_file, content).await?;
+    let temp_file = cache_file.with_extension("json.tmp");
+    fs::write(&temp_file, content).await?;
+    fs::rename(&temp_file, &cache_file).await?;
     Ok(())
+}
+
+fn mark_cached(mut releases: Vec<Release>) -> Vec<Release> {
+    for r in &mut releases {
+        r.from_cache = true;
+    }
+    releases
 }
 
 #[tauri::command]
@@ -256,48 +272,86 @@ pub async fn list_versions(
         .build()
         .map_err(ReleasesError::Network)?;
 
-    let cached = load_cache(&app_handle).await?;
+    // A damaged cache is only a missed shortcut: the list is still on GitHub.
+    let cached = load_cache(&app_handle).await.ok().flatten();
 
     if !force_refresh && let Some(cached) = cached {
-        let mut releases = cached.releases;
-        for r in &mut releases {
-            r.from_cache = true;
-        }
-        return Ok(releases);
+        return Ok(mark_cached(cached.releases));
     }
 
     let etag = cached.as_ref().and_then(|c| c.etag.clone());
-    let etag_ref = etag.as_deref();
 
-    match fetch_from_github(&client, etag_ref).await {
-        Ok((new_releases, new_etag)) => {
-            let final_releases = match cached {
-                Some(cached) if new_releases.is_empty() => {
-                    let mut releases = cached.releases;
-                    for r in &mut releases {
-                        r.from_cache = true;
-                    }
-                    releases
-                }
-                _ => new_releases,
-            };
-
-            if !final_releases.is_empty() {
-                save_cache(&app_handle, new_etag, &final_releases).await?;
-            }
-
-            Ok(final_releases)
+    match fetch_from_github(&client, etag.as_deref()).await {
+        Ok(Some((releases, new_etag))) => {
+            // Without the file the list is just fetched again next time.
+            save_cache(&app_handle, new_etag, &releases).await.ok();
+            Ok(releases)
         }
-        Err(e) => {
-            if let Some(cached) = cached {
-                let mut releases = cached.releases;
-                for r in &mut releases {
-                    r.from_cache = true;
-                }
-                Ok(releases)
-            } else {
-                Err(e.into())
-            }
+        // Confirmed current, so this isn't "showing the cache". The cache file stays as it is.
+        Ok(None) => Ok(cached.map(|c| c.releases).unwrap_or_default()),
+        Err(e) => match cached {
+            Some(cached) => Ok(mark_cached(cached.releases)),
+            None => Err(e.into()),
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn release(tag: &str, assets: &[&str]) -> GitHubRelease {
+        GitHubRelease {
+            tag_name: tag.to_string(),
+            name: None,
+            published_at: "2026-10-31T18:49:37Z".to_string(),
+            body: None,
+            prerelease: false,
+            assets: assets
+                .iter()
+                .map(|name| GitHubAsset {
+                    name: name.to_string(),
+                    browser_download_url: format!("https://example.com/{name}"),
+                    size: 1,
+                    digest: Some("sha256:abc".to_string()),
+                })
+                .collect(),
         }
+    }
+
+    #[test]
+    fn release_without_this_platform_is_skipped() {
+        let list = vec![
+            release("v26.10.4", &["Weft-26.10.4-linux-x64.tar.gz"]),
+            release("v0.1.0", &["Weft-v0.1.0-windows-x64.zip"]),
+        ];
+        let releases = parse_github_releases(list, "linux-x64.tar.gz").unwrap();
+        assert_eq!(releases.len(), 1);
+        assert_eq!(releases[0].tag, "v26.10.4");
+        assert_eq!(releases[0].name, "v26.10.4");
+        assert_eq!(releases[0].asset.sha256.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn platform_with_no_release_at_all_is_an_error() {
+        let list = vec![release("v0.1.0", &["Weft-v0.1.0-windows-x64.zip"])];
+        assert!(matches!(
+            parse_github_releases(list, "linux-x64.tar.gz"),
+            Err(ReleasesError::AssetNotFound)
+        ));
+    }
+
+    #[test]
+    fn from_cache_reaches_the_frontend_but_not_back_from_the_file() {
+        let mut parsed = parse_github_releases(
+            vec![release("v1", &["a-windows-x64.zip"])],
+            "windows-x64.zip",
+        )
+        .unwrap();
+        parsed[0].from_cache = true;
+        let json = serde_json::to_string(&parsed[0]).unwrap();
+        assert!(json.contains("\"from_cache\":true"));
+        let back: Release = serde_json::from_str(&json).unwrap();
+        assert!(!back.from_cache);
     }
 }

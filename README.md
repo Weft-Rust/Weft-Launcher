@@ -165,8 +165,8 @@ Requirements:
 - The [Tauri 2 prerequisites](https://tauri.app/start/prerequisites/) for your system (on Windows: Microsoft C++ Build Tools and WebView2; on Linux: WebKitGTK and a few libraries)
 
 ```bash
-git clone https://github.com/Fernandes585/Weft-Launcher.git
-cd REPO
+git clone https://github.com/Weft-Rust/Weft-Launcher.git
+cd Weft-Launcher
 npm ci
 npm run tauri dev      # run in development mode
 npm run tauri build    # build the installer for your system
@@ -242,7 +242,7 @@ No. Worlds are stored outside the launcher and outside the version folders.
 Yes. They live side by side, and you choose one on the Home tab.
 
 **Is this the official launcher?**
-It is a community launcher made with the permission of the Weft maintainer. It is not affiliated with Mojang or Microsoft.
+It lives in the Weft organization and was started by [Fernandes585](https://github.com/Fernandes585). It is not affiliated with Mojang or Microsoft.
 
 **Does it support mods?**
 Not yet. Weft mods are native libraries tied to an exact engine version, so mod support needs more design work.
@@ -265,6 +265,7 @@ Translation fixes (especially Spanish and Russian) are very welcome.
 ## Credits
 
 - [Weft](https://github.com/Weft-Rust/Weft) by its maintainers.
+- The launcher was written by [Fernandes585](https://github.com/Fernandes585).
 - Built with [Tauri](https://tauri.app), [React](https://react.dev) and [Vite](https://vitejs.dev).
 - Pixel font: [Silkscreen](https://fonts.google.com/specimen/Silkscreen).
 - Community: [Discord](https://discord.gg/aWECX7EPmV).
