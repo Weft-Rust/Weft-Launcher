@@ -5,11 +5,11 @@ import { translateError } from "./i18n/errors";
 import { useInstall } from "./hooks/useInstall";
 import { Sidebar } from "./components/Sidebar";
 import { Tabs } from "./components/Tabs";
+import { VoxelField } from "./components/VoxelField";
 import { Home } from "./pages/Home";
 import { VersionsPage } from "./pages/Versions";
 import { NotesPage } from "./pages/Notes";
 import { getLatestTag, getNewTag } from "./utils/version";
-import "./App.css";
 
 interface AssetInfo {
   name: string;
@@ -112,6 +112,7 @@ function App() {
 
   return (
     <div className="app-layout">
+      <VoxelField page={`${activeTab}/${installedVersions.length}`} />
       <Sidebar />
       <div className="main-content">
         <Tabs activeTab={activeTab} onChange={setActiveTab} hasNewVersions={newTag !== null} />

@@ -9,7 +9,7 @@
   "appTitle": "Weft Launcher",
   "refreshButton": "Atualizar lista",
   "loading": "Carregando...",
-  "cacheBanner": "⚠ Mostrando cache (offline ou sem atualizações)",
+  "cacheBanner": "Mostrando cache (offline ou sem atualizações)",
   "errorPrefix": "Erro: ",
   "emptyState": "Nenhuma versão encontrada.",
   "prereleaseBadge": "Pré-lançamento",

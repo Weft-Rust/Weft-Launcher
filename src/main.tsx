@@ -4,9 +4,7 @@ import App from "./App";
 import { GameStateProvider } from "./hooks/useGameState";
 import { InstallProvider } from "./hooks/useInstall";
 import { initI18n } from "./i18n";
-import "@fontsource/silkscreen";
-import "./theme.css";
-import "./overrides.css";
+import "./style.css";
 
 initI18n();
 

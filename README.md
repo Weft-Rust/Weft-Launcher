@@ -172,6 +172,8 @@ npm run tauri dev      # run in development mode
 npm run tauri build    # build the installer for your system
 ```
 
+`cargo run` alone opens a window that says localhost refused to connect: a development build loads the interface from Vite on port 1420, which only `npm run tauri dev` starts. To use it from an IDE, keep `npm run dev` running in a terminal.
+
 Useful checks before sending a pull request:
 
 ```bash
@@ -191,8 +193,7 @@ src/                     React + TypeScript frontend
   components/            Sidebar, Tabs, language menu, banner, version actions
   hooks/                 install and game state
   i18n/                  translations (en, pt-BR, es, ru) and error mapping
-  theme.css              colors and base styles (CSS variables)
-  overrides.css          visual adjustments, loaded last
+  style.css              all styles, in the palette and pixel grid of Weft's site
 src-tauri/               Rust backend (Tauri 2)
   src/releases.rs        list and cache GitHub releases
   src/install.rs         download, verify, extract, install, remove
@@ -267,5 +268,5 @@ Translation fixes (especially Spanish and Russian) are very welcome.
 - [Weft](https://github.com/Weft-Rust/Weft) by its maintainers.
 - The launcher was written by [Fernandes585](https://github.com/Fernandes585).
 - Built with [Tauri](https://tauri.app), [React](https://react.dev) and [Vite](https://vitejs.dev).
-- Pixel font: [Silkscreen](https://fonts.google.com/specimen/Silkscreen).
+- The pixel font and the look come from Weft itself.
 - Community: [Discord](https://discord.gg/aWECX7EPmV).

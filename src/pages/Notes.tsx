@@ -22,11 +22,13 @@ export function NotesPage({ releases }: NotesPageProps) {
 
   return (
     <main className="page notes-page">
-      <h1>{t("tabNotes")}</h1>
+      <header className="page-header clear">
+        <h1>{t("tabNotes")}</h1>
+      </header>
       {sorted.length === 0 ? (
         <p className="empty-state">{t("emptyState")}</p>
       ) : (
-        <div className="notes-list">
+        <div className="notes-list clear">
           {sorted.map((release) => (
             <article key={release.tag} className="note-entry">
               <header className="note-header">

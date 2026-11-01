@@ -21,6 +21,7 @@ export function Tabs({ activeTab, onChange, hasNewVersions }: TabsProps) {
 
   return (
     <nav className="tabs" role="tablist" aria-label={t("tabsLabel")}>
+      <span className="bar-name">WEFT</span>
       {tabs.map((tab) => (
         <button
           key={tab.id}

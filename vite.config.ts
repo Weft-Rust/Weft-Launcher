@@ -16,7 +16,8 @@ export default defineConfig(() => ({
   server: {
     port: 1420,
     strictPort: true,
-    host: host || false,
+    // "localhost" can mean ::1 only on Windows, where `tauri dev` then waits for Vite forever.
+    host: host || "127.0.0.1",
     hmr: host
       ? {
           protocol: "ws",

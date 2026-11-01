@@ -8,7 +8,7 @@
 "updateCloseGame": "Cierra el juego antes de actualizar",
   "refreshButton": "Actualizar lista",
   "loading": "Cargando...",
-  "cacheBanner": "⚠ Mostrando caché (sin conexión o sin actualizaciones)",
+  "cacheBanner": "Mostrando caché (sin conexión o sin actualizaciones)",
   "errorPrefix": "Error: ",
   "emptyState": "No se encontraron versiones.",
   "prereleaseBadge": "Preliminar",

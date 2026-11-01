@@ -46,7 +46,7 @@ export function VersionsPage({
 
   return (
     <main className="page versions-page">
-      <header className="page-header">
+      <header className="page-header clear">
         <h1>{t("tabVersions")}</h1>
         <div className="header-actions">
           {fromCache && (
@@ -66,7 +66,7 @@ export function VersionsPage({
       {sortedReleases.length === 0 ? (
         <div className="empty-state">{t("emptyState")}</div>
       ) : (
-        <div className="versions-list" role="list">
+        <div className="versions-list clear" role="list">
           {sortedReleases.map((release) => {
             const installedVersion = installedMap.get(release.tag) ?? null;
             const asset = release.asset;

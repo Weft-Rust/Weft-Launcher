@@ -12,7 +12,6 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@fontsource/silkscreen": "^5.3.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-process": "^2.4.0",

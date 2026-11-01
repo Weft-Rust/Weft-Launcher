@@ -4,7 +4,6 @@ import { useI18n } from "../i18n/useI18n";
 import { translateError } from "../i18n/errors";
 import { useInstall } from "../hooks/useInstall";
 import { useGameState } from "../hooks/useGameState";
-import { PixelBanner } from "../components/PixelBanner";
 import { compareTags } from "../utils/version";
 
 interface HomeProps {
@@ -68,9 +67,8 @@ export function Home({ onGoToVersions, latestTag, selectedTag, onSelectTag }: Ho
   if (installedVersions.length === 0) {
     return (
       <main className="page home-page">
-        <section className="hero empty">
-          <PixelBanner />
-          <h1 className="hero-title">Weft</h1>
+        <section className="hero empty clear">
+          <h1 className="hero-title">WEFT</h1>
           <p className="empty-message">{t("noVersionsInstalled")}</p>
           <button className="btn-flat btn-primary" onClick={onGoToVersions}>
             {t("goToVersionsTab")}
@@ -82,10 +80,9 @@ export function Home({ onGoToVersions, latestTag, selectedTag, onSelectTag }: Ho
 
   return (
     <main className="page home-page">
-      <section className="hero">
-        <PixelBanner />
+      <section className="hero clear">
         <div className="hero-header">
-          <h1 className="hero-title">Weft</h1>
+          <h1 className="hero-title">WEFT</h1>
           <div className="hero-version-badge">
             {t("heroBadge", effectiveTag || "—")}
           </div>
@@ -132,7 +129,7 @@ export function Home({ onGoToVersions, latestTag, selectedTag, onSelectTag }: Ho
         )}
       </section>
 
-      <section className="card">
+      <section className="card clear">
         <div className="card-header">
           <h2 className="card-title">{t("instanceCardTitle")}</h2>
         </div>
@@ -151,7 +148,11 @@ export function Home({ onGoToVersions, latestTag, selectedTag, onSelectTag }: Ho
               </div>
               <div className="detail-row">
                 <span className="detail-label">{t("executableLabel")}</span>
-                <span className="detail-value path">{selectedVersion.executable}</span>
+                <span className="detail-value path">
+                  {selectedVersion.executable.split(/(?<=[\\/])/).map((part, i) => (
+                    <span key={i}>{part}<wbr /></span>
+                  ))}
+                </span>
               </div>
               <div className="detail-row">
   <span className="detail-label">{t("gameFolderTitle")}</span>
