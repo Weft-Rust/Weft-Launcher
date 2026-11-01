@@ -4,6 +4,8 @@ import { useI18n } from "../i18n/useI18n";
 import { translateError } from "../i18n/errors";
 import { useInstall } from "../hooks/useInstall";
 import { useGameState } from "../hooks/useGameState";
+import { StableLabel } from "../components/StableLabel";
+import { VersionSelect } from "../components/VersionSelect";
 import { compareTags } from "../utils/version";
 
 interface HomeProps {
@@ -70,7 +72,7 @@ export function Home({ onGoToVersions, latestTag, selectedTag, onSelectTag }: Ho
         <section className="hero empty clear">
           <h1 className="hero-title">WEFT</h1>
           <p className="empty-message">{t("noVersionsInstalled")}</p>
-          <button className="btn-flat btn-primary" onClick={onGoToVersions}>
+          <button className="btn-primary" onClick={onGoToVersions}>
             {t("goToVersionsTab")}
           </button>
         </section>
@@ -84,34 +86,30 @@ export function Home({ onGoToVersions, latestTag, selectedTag, onSelectTag }: Ho
         <div className="hero-header">
           <h1 className="hero-title">WEFT</h1>
           <div className="hero-version-badge">
-            {t("heroBadge", effectiveTag || "—")}
+            {t(isSelectedRunning ? "heroBadgePlaying" : "heroBadge", effectiveTag || "—")}
           </div>
         </div>
         <div className="hero-play-area">
-          <div className="version-selector">
-            <label htmlFor="version-select" className="visually-hidden">
-              {t("selectVersionLabel")}
-            </label>
-            <select
-              id="version-select"
-              value={effectiveTag || ""}
-              onChange={(e) => onSelectTag(e.target.value || null)}
-              disabled={anyRunning}
-            >
-              {sortedVersions.map((v) => (
-              <option key={v.tag} value={v.tag}>
-              {latestTag && v.tag === latestTag ? `${v.tag} — ${t("latestBadge")}` : v.tag}
-              </option>
-             ))}
-            </select>
-          </div>
+          <VersionSelect
+            value={effectiveTag || ""}
+            options={sortedVersions.map((v) => ({
+              value: v.tag,
+              label: latestTag && v.tag === latestTag ? `${v.tag} — ${t("latestBadge")}` : v.tag,
+            }))}
+            onChange={onSelectTag}
+            disabled={anyRunning}
+            label={t("selectVersionLabel")}
+          />
           <button
               className="btn-play"
               onClick={() => effectiveTag && handleLaunch(effectiveTag)}
               disabled={!effectiveTag || playDisabled}
               aria-label={isSelectedRunning ? t("playing") : t("playButton")}
             >
-            {isSelectedRunning ? t("playing") : t("playButton")}
+            <StableLabel
+              text={isSelectedRunning ? t("playing") : t("playButton")}
+              widest={[t("playing"), t("playButton")]}
+            />
           </button>
         </div>
         {launchError && (
@@ -122,7 +120,7 @@ export function Home({ onGoToVersions, latestTag, selectedTag, onSelectTag }: Ho
         {lastCrash && (
           <div className="launch-error" role="alert">
             <span>{t("gameClosedError", String(lastCrash.exitCode ?? "?"))}</span>
-            <button className="btn-flat btn-secondary" onClick={() => handleOpenLog(lastCrash.tag)}>
+            <button className="btn-secondary" onClick={() => handleOpenLog(lastCrash.tag)}>
               {t("openLogButton")}
             </button>
           </div>
@@ -147,16 +145,8 @@ export function Home({ onGoToVersions, latestTag, selectedTag, onSelectTag }: Ho
                 </span>
               </div>
               <div className="detail-row">
-                <span className="detail-label">{t("executableLabel")}</span>
-                <span className="detail-value path">
-                  {selectedVersion.executable.split(/(?<=[\\/])/).map((part, i) => (
-                    <span key={i}>{part}<wbr /></span>
-                  ))}
-                </span>
-              </div>
-              <div className="detail-row">
   <span className="detail-label">{t("gameFolderTitle")}</span>
-  <button className="btn-flat btn-secondary btn-open-folder" onClick={handleOpenFolder}>
+  <button className="btn-secondary btn-open-folder" onClick={handleOpenFolder}>
   {t("openFolderButton")}
 </button>
 </div>

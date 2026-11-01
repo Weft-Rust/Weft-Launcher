@@ -1,7 +1,17 @@
 import { useI18n } from "../i18n/useI18n";
 import { useInstall } from "../hooks/useInstall";
+import { PixelIcon } from "../components/PixelIcon";
 import { VersionActions } from "../components/VersionActions";
 import { getLocale } from "../i18n";
+
+const REFRESH_ICON = [
+  ".###.#",
+  "#...##",
+  "#..###",
+  "#.....",
+  "#...#.",
+  ".###..",
+];
 
 interface Release {
   tag: string;
@@ -49,7 +59,8 @@ export function VersionsPage({
       <header className="page-header clear">
         <h1>{t("tabVersions")}</h1>
         <div className="header-actions">
-          {fromCache && (
+          {/* Not while loading: at every start the cache shows for a moment before the refresh. */}
+          {fromCache && !loading && (
             <span className="cache-banner" role="status">{t("cacheBanner")}</span>
           )}
           {error && (
@@ -57,14 +68,21 @@ export function VersionsPage({
               {t("errorPrefix")}{error}
             </div>
           )}
-          <button className="btn-refresh" onClick={() => onRefresh(true)} disabled={loading}>
-            {loading ? t("loading") : t("refreshButton")}
+          <button
+            className="btn-refresh"
+            onClick={() => onRefresh(true)}
+            disabled={loading}
+            title={t("refreshButton")}
+            aria-label={t("refreshButton")}
+          >
+            {/* The pixel size of the page title beside it. */}
+            <PixelIcon rows={REFRESH_ICON} scale={4} />
           </button>
         </div>
       </header>
 
       {sortedReleases.length === 0 ? (
-        <div className="empty-state">{t("emptyState")}</div>
+        <div className="empty-state">{loading ? t("loading") : t("emptyState")}</div>
       ) : (
         <div className="versions-list clear" role="list">
           {sortedReleases.map((release) => {
@@ -88,16 +106,11 @@ export function VersionsPage({
                   </div>
                   <div className="version-meta">
                     <span className="version-date">
-                      {t("publishedDate")} {new Date(release.published_at).toLocaleDateString(getLocale())}
+                      {new Date(release.published_at).toLocaleDateString(getLocale())}
                     </span>
                     <span className="version-size">
-                      {t("sizeLabel")} {fmtSize(asset.size)}
+                      {fmtSize(asset.size)}
                     </span>
-                    {asset.sha256 && (
-                      <span className="version-sha256" title={asset.sha256}>
-                        {t("sha256Label", asset.sha256.slice(0, 16) + "...")}
-                      </span>
-                    )}
                   </div>
                 </div>
 

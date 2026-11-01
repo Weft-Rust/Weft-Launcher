@@ -15,7 +15,10 @@ document.addEventListener("keydown", (e) => {
   const blocked =
     e.key === "F12" ||
     (e.ctrlKey && e.shiftKey && ["i", "j", "c"].includes(key)) ||
-    (e.ctrlKey && key === "u");
+    (e.ctrlKey && ["u", "p", "f", "g"].includes(key)) ||
+    (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) ||
+    // A reload forgets the progress of a running install. Handy while developing, though.
+    (import.meta.env.PROD && (e.key === "F5" || (e.ctrlKey && key === "r")));
   if (blocked) e.preventDefault();
 });
 

@@ -31,7 +31,7 @@ Instead of downloading every new Weft release by hand and pasting files into a f
 
 ## Features
 
-- **Version list** pulled from the Weft GitHub releases, newest first, with a **New** marker for versions you have not installed yet.
+- **Version list** pulled from the Weft GitHub releases, newest first. The latest release is marked **New** if you have other versions but not that one.
 - **One-click install** with a live progress bar (percentage and speed in Mbps).
 - **Integrity check:** every download is verified against its SHA-256 before anything is extracted. No checksum means no install.
 - **Side-by-side versions.** Keep as many versions as you like and pick one in the selector. The latest one is marked.
@@ -97,7 +97,7 @@ Only Apple Silicon (M1 and newer) builds of Weft exist, so Intel Macs are not su
 
 1. Open the **Versions** tab and press **Install** on a release.
 2. Wait for the progress bar: download, verify, extract, finalize.
-3. Go to **Home**. The newest installed version is selected automatically.
+3. Go to **Home**. Your last played version is selected, or the newest one the first time.
 4. Press **Play**.
 
 To remove a version you no longer want, go to **Versions** and click **Delete** twice (the second click says "Delete for real"). You cannot delete anything while a game is running.
@@ -190,7 +190,7 @@ npm run build
 ```
 src/                     React + TypeScript frontend
   pages/                 Home, Versions, Notes
-  components/            Sidebar, Tabs, language menu, banner, version actions
+  components/            sidebar, tabs, version selector and actions, language menu, voxel background
   hooks/                 install and game state
   i18n/                  translations (en, pt-BR, es, ru) and error mapping
   style.css              all styles, in the palette and pixel grid of Weft's site
@@ -225,7 +225,7 @@ The workflow needs two repository secrets, `TAURI_SIGNING_PRIVATE_KEY` and `TAUR
 
 **The game closed with an error.** Press **Open log** in the error banner, or open `logs/<tag>.log` in the launcher's app data folder, and include it when you report the problem.
 
-**The version list is empty or stale.** GitHub limits unauthenticated requests. The launcher caches the list and shows a notice when it is using the cache. Wait a while and press **Refresh list**.
+**The version list is empty or stale.** GitHub limits unauthenticated requests. The launcher caches the list and shows a notice when it is using the cache. Wait a while and press the refresh button on the **Versions** tab.
 
 **Install fails with a checksum error.** The download was corrupted or incomplete. Nothing was installed. Try again; if it repeats, open an issue.
 

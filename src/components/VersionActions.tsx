@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useInstall, InstalledVersion, InstallProgress } from "../hooks/useInstall";
 import { useGameState } from "../hooks/useGameState";
 import { useI18n } from "../i18n/useI18n";
+import { StableLabel } from "./StableLabel";
 
 interface VersionActionsProps {
   release: {
@@ -90,7 +91,10 @@ export function VersionActions({ release, installedVersion }: VersionActionsProp
           title={playTooltip}
           aria-label={thisVersionRunning ? t("playing") : t("playButton")}
         >
-          {thisVersionRunning ? t("playing") : t("playButton")}
+          <StableLabel
+            text={thisVersionRunning ? t("playing") : t("playButton")}
+            widest={[t("playing"), t("playButton")]}
+          />
         </button>
         <button
           className={`delete-btn${confirmDelete ? " confirming" : ""}`}
@@ -99,7 +103,10 @@ export function VersionActions({ release, installedVersion }: VersionActionsProp
           title={anyRunning ? t("deleteDisabledTooltip") : undefined}
           aria-label={confirmDelete ? t("deleteForReal") : t("deleteButton")}
         >
-          {confirmDelete ? t("deleteForReal") : t("deleteButton")}
+          <StableLabel
+            text={confirmDelete ? t("deleteForReal") : t("deleteButton")}
+            widest={[t("deleteForReal"), t("deleteButton")]}
+          />
         </button>
         {(launchError || error) && (
           <div className="install-error" role="alert">
@@ -112,7 +119,14 @@ export function VersionActions({ release, installedVersion }: VersionActionsProp
 
   return (
     <div className="version-actions">
-      {currentProgress && (
+      {error && (
+        <div className="install-error" role="alert">
+          {error}
+        </div>
+      )}
+
+      {/* In the button's place and no taller than it, so the list doesn't jump during an install. */}
+      {currentProgress ? (
         <div className="progress-container">
           <div
             className="progress-bar"
@@ -124,27 +138,21 @@ export function VersionActions({ release, installedVersion }: VersionActionsProp
           >
             <div
               className="progress-fill"
-              style={{ width: `${currentProgress.percent ?? 0}%` }}
+              style={{ width: `round(down, ${currentProgress.percent ?? 0}%, 4px)` }}
             />
           </div>
           <span className="progress-label">{getProgressLabel(currentProgress)}</span>
         </div>
+      ) : (
+        <button
+          className="install-btn"
+          onClick={handleInstall}
+          disabled={busy}
+          aria-label={t("installButton")}
+        >
+          {t("installButton")}
+        </button>
       )}
-
-      {error && (
-        <div className="install-error" role="alert">
-          {error}
-        </div>
-      )}
-
-      <button
-        className="install-btn"
-        onClick={handleInstall}
-        disabled={busy}
-        aria-label={t("installButton")}
-      >
-        {currentProgress ? t("installing") : t("installButton")}
-      </button>
     </div>
   );
 }

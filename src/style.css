@@ -1,5 +1,4 @@
 @font-face { font-family: "Weft"; src: url("./fonts/weft.woff2") format("woff2"); font-display: block; }
-@font-face { font-family: "Weft Mono"; src: url("./fonts/weft-mono.woff2") format("woff2"); font-display: block; }
 
 /* The palette of the Weft banner and site. Font sizes stay multiples of 8 px and layout stays on
    whole pixels, so every font pixel lands on whole screen pixels. */
@@ -20,7 +19,7 @@
   --r2: #c2503c;
   --r3: #ff9a80;
   --px: 4px;
-  --sidebar: 224px;
+  --sidebar: 192px;
   color-scheme: dark;
 }
 
@@ -36,6 +35,8 @@ html, body, #root { height: 100%; margin: 0; overflow: hidden; }
 html { background: var(--seam); }
 
 body {
+  background: var(--seam) no-repeat;
+  image-rendering: pixelated;
   color: var(--pale);
   font: 16px/28px "Weft", monospace;
   font-kerning: none;
@@ -45,10 +46,10 @@ body {
   text-size-adjust: none;
 }
 
-h1, h2, h3, p, ul, pre { margin: 0; font-weight: normal; }
+h1, h2, h3, p, ul { margin: 0; font-weight: normal; }
 strong { font-weight: normal; }
-button, select { font: inherit; color: inherit; border: 0; border-radius: 0; }
-button { cursor: pointer; background: none; padding: 0; }
+code { font: inherit; }
+button { font: inherit; color: inherit; border: 0; border-radius: 0; cursor: pointer; background: none; padding: 0; }
 button:disabled { cursor: not-allowed; }
 :focus { outline: none; }
 :focus-visible { outline: var(--px) solid var(--pale); outline-offset: 2px; }
@@ -60,10 +61,6 @@ button:disabled { cursor: not-allowed; }
 ::-webkit-scrollbar-thumb:hover { background: var(--g4); }
 
 .notes-page, .notes-page * { -webkit-user-select: text; user-select: text; }
-
-.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-
-#field { position: fixed; left: 0; top: 0; z-index: -1; image-rendering: pixelated; }
 
 /* Layout */
 .app-layout {
@@ -80,7 +77,7 @@ button:disabled { cursor: not-allowed; }
 .tabs {
   grid-area: tabs;
   position: relative; z-index: 3;
-  display: flex; align-items: center; gap: 0;
+  display: flex; align-items: center;
   padding-right: 16px;
   background: var(--seam);
   box-shadow: 0 var(--px) 0 var(--ink);
@@ -105,74 +102,64 @@ button:disabled { cursor: not-allowed; }
 .tab-btn.active .new-dot { background: var(--ink); box-shadow: none; }
 .tabs-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 
-/* Blocks seen from the front: lit top edge, side face below, pressing pushes them in. */
-.btn-play, .install-btn, .play-btn, .btn-primary, .update-btn,
-.btn-refresh, .btn-secondary, .delete-btn, .lang-btn, .sf-link {
+/* Blocks seen from the front: lit top edge, side face below, pressing pushes them in. The side
+   belongs to the button, so it can be clicked too, and pressing moves only what's drawn: the box
+   stays put, so nothing around it shifts and a press on the top edge doesn't slip off it. */
+:is(.btn-play, .install-btn, .play-btn, .btn-primary, .btn-refresh, .btn-secondary, .delete-btn, .version-select-btn) {
+  --top: 8px;
+  --side: 16px;
+  --face: var(--g2);
+  --lit: var(--g3);
+  --edge: var(--g1);
   position: relative;
   display: inline-block;
-  white-space: nowrap;
+  padding: var(--top) var(--side) calc(var(--top) + 12px);
+  color: var(--pale);
   line-height: 24px;
+  white-space: nowrap;
+  background:
+    linear-gradient(var(--lit) 0 var(--px), var(--face) 0) 0 0 / 100% calc(100% - 12px) no-repeat,
+    linear-gradient(var(--edge) 0 8px, var(--ink) 0) 0 100% / 100% 12px no-repeat;
+}
+:is(.btn-refresh, .btn-secondary, .delete-btn, .version-select-btn):hover:not(:disabled) { --face: var(--g3); --lit: var(--g4); }
+
+:is(.btn-play, .install-btn, .play-btn, .btn-primary) { --face: var(--a2); --lit: var(--a3); --edge: var(--a1); color: var(--ink); }
+:is(.btn-play, .install-btn, .play-btn, .btn-primary):hover:not(:disabled) { --face: var(--a3); --lit: #ffe0a0; }
+
+.delete-btn.confirming, .delete-btn.confirming:hover:not(:disabled) { --face: var(--r2); --lit: var(--r3); --edge: var(--r1); color: var(--ink); }
+
+:is(.btn-play, .install-btn, .play-btn, .btn-primary, .btn-refresh, .btn-secondary, .delete-btn, .version-select-btn):is(:active:not(:disabled), :disabled) {
+  padding: calc(var(--top) + 8px) var(--side) calc(var(--top) + 4px);
+  background:
+    linear-gradient(var(--lit) 0 var(--px), var(--face) 0) 0 8px / 100% calc(100% - 12px) no-repeat,
+    linear-gradient(var(--ink), var(--ink)) 0 100% / 100% 4px no-repeat;
+}
+:is(.btn-play, .install-btn, .play-btn, .btn-primary, .btn-refresh, .btn-secondary, .delete-btn, .version-select-btn):disabled {
+  --face: var(--g1); --lit: var(--g1);
+  color: var(--g4);
 }
 
-.btn-play, .install-btn, .play-btn, .btn-primary, .update-btn {
-  padding: 8px 16px;
-  background: var(--a2); color: var(--ink);
-  box-shadow: inset 0 var(--px) 0 var(--a3), 0 8px 0 var(--a1), 0 12px 0 var(--ink);
-}
-.btn-play:hover:not(:disabled), .install-btn:hover:not(:disabled), .play-btn:hover:not(:disabled),
-.btn-primary:hover:not(:disabled), .update-btn:hover:not(:disabled) {
-  background: var(--a3);
-  box-shadow: inset 0 var(--px) 0 #ffe0a0, 0 8px 0 var(--a1), 0 12px 0 var(--ink);
-}
-.btn-play:active:not(:disabled), .install-btn:active:not(:disabled), .play-btn:active:not(:disabled),
-.btn-primary:active:not(:disabled), .update-btn:active:not(:disabled) {
-  top: 8px;
-  box-shadow: inset 0 var(--px) 0 var(--a3), 0 var(--px) 0 var(--ink);
-}
+/* Keeps the width of its longest text. Those differ by an even number of pixels at these sizes, so
+   centering stays on the grid. */
+.stable-label { display: inline-grid; text-align: center; }
+.stable-label > * { grid-area: 1 / 1; }
+.stable-label-spacer { visibility: hidden; }
 
-.btn-refresh, .btn-secondary, .delete-btn {
-  padding: 8px 16px;
-  background: var(--g2); color: var(--pale);
-  box-shadow: inset 0 var(--px) 0 var(--g3), 0 8px 0 var(--g1), 0 12px 0 var(--ink);
-}
-.btn-refresh:hover:not(:disabled), .btn-secondary:hover:not(:disabled), .delete-btn:hover:not(:disabled) {
-  background: var(--g3);
-  box-shadow: inset 0 var(--px) 0 var(--g4), 0 8px 0 var(--g1), 0 12px 0 var(--ink);
-}
-.btn-refresh:active:not(:disabled), .btn-secondary:active:not(:disabled), .delete-btn:active:not(:disabled) {
-  top: 8px;
-  box-shadow: inset 0 var(--px) 0 var(--g3), 0 var(--px) 0 var(--ink);
-}
+.pixel-icon { display: block; flex: none; shape-rendering: crispEdges; }
+.btn-refresh { --side: 12px; }
 
-.delete-btn.confirming, .delete-btn.confirming:hover:not(:disabled) {
-  background: var(--r2); color: var(--ink);
-  box-shadow: inset 0 var(--px) 0 var(--r3), 0 8px 0 var(--r1), 0 12px 0 var(--ink);
-}
-.delete-btn.confirming:active:not(:disabled) {
-  top: 8px;
-  box-shadow: inset 0 var(--px) 0 var(--r3), 0 var(--px) 0 var(--ink);
-}
-
-.btn-play:disabled, .install-btn:disabled, .play-btn:disabled, .btn-primary:disabled, .update-btn:disabled,
-.btn-refresh:disabled, .btn-secondary:disabled, .delete-btn:disabled {
-  top: 8px;
-  background: var(--g1); color: var(--g4);
-  box-shadow: 0 var(--px) 0 var(--ink);
-}
-
-.update-btn { padding: 2px 16px; box-shadow: inset 0 var(--px) 0 var(--a3), inset 0 calc(-1 * var(--px)) 0 var(--a1); }
-.update-btn:hover:not(:disabled) { box-shadow: inset 0 var(--px) 0 #ffe0a0, inset 0 calc(-1 * var(--px)) 0 var(--a1); }
-.update-btn:active:not(:disabled), .update-btn:disabled { top: 0; box-shadow: none; }
+/* Flat ones in the bar, which has no room for a side face. */
+.update-btn, .lang-btn { height: 32px; padding: 2px 16px; white-space: nowrap; }
+.update-btn { background: var(--a2); color: var(--ink); box-shadow: inset 0 var(--px) 0 var(--a3), inset 0 calc(-1 * var(--px)) 0 var(--a1); }
+.update-btn:hover:not(:disabled) { background: var(--a3); box-shadow: inset 0 var(--px) 0 #ffe0a0, inset 0 calc(-1 * var(--px)) 0 var(--a1); }
+.update-btn:disabled { background: var(--g1); color: var(--g4); box-shadow: none; }
 
 /* Language */
 .lang { position: relative; }
-.lang-btn { padding: 2px 16px; background: var(--g2); height: 32px; box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g1); }
+.lang-btn { background: var(--g2); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g1); }
 .lang-btn:hover { background: var(--g3); }
-.lang-menu {
-  position: absolute; right: 0; top: 40px;
-  min-width: 176px; margin: 0; padding: 4px; list-style: none;
-  background: var(--ink);
-}
+.lang-menu, .version-select-menu { margin: 0; padding: var(--px); list-style: none; background: var(--ink); }
+.lang-menu { position: absolute; right: 0; top: 40px; min-width: 176px; }
 .lang-item { display: flex; gap: 16px; width: 100%; padding: 2px 8px; text-align: left; }
 .lang-item:hover { background: var(--g2); }
 .lang-item strong { color: var(--g5); }
@@ -187,28 +174,17 @@ button:disabled { cursor: not-allowed; }
   background: var(--seam);
   box-shadow: var(--px) 0 0 var(--ink);
 }
-.sidebar-header { padding: 16px 16px 8px; }
-.sidebar-header h2 { font-size: 16px; line-height: 24px; color: var(--g5); }
-.sidebar-instance { padding: 0 8px; }
-.instance-item { display: flex; align-items: center; gap: 12px; padding: 8px; background: var(--g1); box-shadow: inset var(--px) 0 0 var(--a2); }
-.instance-icon { width: 48px; height: 48px; flex: none; image-rendering: pixelated; }
-.instance-info { display: flex; flex-direction: column; min-width: 0; }
-.instance-name { line-height: 24px; }
-.instance-status { display: flex; align-items: center; gap: 8px; line-height: 24px; color: var(--g5); }
-.status-dot { width: 8px; height: 8px; flex: none; background: var(--a2); box-shadow: 0 2px 0 var(--a1); }
-
 .sf { margin-top: auto; padding: 16px; }
-.sf-link { display: flex; align-items: center; gap: 8px; color: var(--pale); }
+.sf-link { display: flex; align-items: center; gap: 8px; color: var(--pale); line-height: 24px; }
 .sf-link:hover { color: var(--a3); }
-.sf-link svg { flex: none; shape-rendering: crispEdges; }
 .sf-version { margin-top: 8px; line-height: 24px; color: var(--g5); }
 
-/* Pages sit over the voxel field. */
-.page-container { grid-area: page; min-height: 0; overflow: hidden auto; }
+/* Pages sit over the voxel field. A long page's scrollbar must not shift it against a short one. */
+.page-container { grid-area: page; min-height: 0; overflow: hidden auto; scrollbar-gutter: stable; }
 .page { max-width: 960px; padding: 24px 32px 32px; }
 .page-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 24px; margin-bottom: 24px; }
 .page h1 { font-size: 32px; line-height: 44px; text-shadow: 2px 2px 0 var(--ink); }
-.header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding-bottom: 12px; }
+.header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
 .cache-banner { line-height: 24px; color: var(--a3); text-shadow: 2px 2px 0 var(--ink); }
 .empty-state { color: var(--g5); text-shadow: 2px 2px 0 var(--ink); }
 
@@ -232,63 +208,60 @@ button:disabled { cursor: not-allowed; }
 }
 
 /* Home */
-.hero { margin-bottom: 32px; }
+.hero { margin-bottom: 24px; }
 .page .hero-title { font-size: 80px; line-height: 72px; text-shadow: 4px 4px 0 var(--ink); }
 .hero-version-badge { margin-top: 8px; font-size: 16px; line-height: 24px; color: var(--a2); text-shadow: 2px 2px 0 var(--ink); }
 .hero-play-area { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; margin-top: 24px; }
-.btn-play { font-size: 24px; line-height: 32px; padding: 12px 32px; }
-.launch-error { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 28px; max-width: 640px; }
-.launch-error .btn-secondary { margin-bottom: 12px; }
+.btn-play { --top: 12px; --side: 32px; font-size: 32px; line-height: 32px; }
+.launch-error { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; max-width: 640px; }
 .empty-message { margin: 16px 0 24px; text-shadow: 2px 2px 0 var(--ink); }
 
-.version-selector select {
-  appearance: none;
-  min-width: 224px; height: 56px; padding: 0 44px 0 16px;
-  background-color: var(--g2);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='8' viewBox='0 0 8 4' shape-rendering='crispEdges'%3E%3Cpath fill='%23dee3ee' d='M0 0h8v1h-1v1h-1v1h-1v1h-2v-1h-1v-1h-1v-1h-1z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 16px center;
-  box-shadow: inset 0 var(--px) 0 var(--g3), 0 8px 0 var(--g1), 0 12px 0 var(--ink);
-  cursor: pointer;
-}
-.version-selector select:hover:not(:disabled) { background-color: var(--g3); }
-.version-selector select:disabled { background-color: var(--g1); color: var(--g4); cursor: not-allowed; }
-.version-selector option { background: var(--ink); color: var(--pale); }
+/* As tall as the play button beside it. */
+.version-select { position: relative; }
+.version-select-btn { --top: 16px; display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 240px; }
+.version-select-btn svg { flex: none; shape-rendering: crispEdges; }
+.version-select-menu { position: absolute; left: 0; top: 72px; z-index: 5; min-width: 100%; max-height: 216px; overflow-y: auto; }
+.version-select-item { display: block; width: 100%; padding: 4px 12px; line-height: 24px; text-align: left; white-space: nowrap; }
+.version-select-item.cursor { background: var(--g2); }
+.version-select-item.active { color: var(--a3); }
 
 .card { padding: 16px 24px 20px; }
 .card-title { font-size: 16px; line-height: 28px; color: var(--a3); margin-bottom: 8px; }
 .detail-row { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 24px; align-items: baseline; }
 .detail-row + .detail-row { margin-top: 4px; }
 .detail-label { color: var(--g5); }
-.detail-value.path { overflow-wrap: anywhere; line-height: 24px; color: #b9c1d3; }
-.btn-open-folder { justify-self: start; margin: 4px 0 12px; }
+.btn-open-folder { justify-self: start; margin-top: 4px; }
 .select-version-hint { color: var(--g5); }
 
 /* Versions */
 .versions-list, .notes-list { display: grid; gap: 8px; }
 .version-entry { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 24px; padding: 16px 24px 20px; }
 .version-entry.in-use { box-shadow: inset var(--px) 0 0 var(--a2); }
-.version-header { min-width: 0; flex: 1 1 280px; }
+.version-header { min-width: 0; flex: 1 1 200px; }
 .version-main { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
 .version-tag { font-size: 24px; line-height: 32px; color: var(--a3); }
 .new-badge, .prerelease-badge { padding: 0 8px; line-height: 24px; }
 .new-badge { background: var(--a2); color: var(--ink); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--a1); }
 .prerelease-badge { background: var(--g3); color: var(--pale); }
 .version-meta { display: flex; flex-wrap: wrap; gap: 0 24px; margin-top: 4px; line-height: 24px; color: var(--g5); }
-.version-sha256 { font-family: "Weft Mono", monospace; }
-.version-actions { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: flex-end; gap: 12px 16px; padding-bottom: 12px; }
-.version-entry:has(.progress-container) .version-header, .version-entry:has(.install-error) .version-header { flex-basis: 100%; }
-.version-entry:has(.progress-container) .version-actions, .version-entry:has(.install-error) .version-actions { flex-basis: 100%; }
+.version-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 16px; }
+.version-actions:has(.install-error) { flex-basis: 100%; }
 .install-error { flex-basis: 100%; }
 
-.progress-container { flex-basis: 100%; }
+.progress-container { width: 320px; }
 .progress-bar { height: 16px; padding: var(--px); background: var(--ink); }
 .progress-fill { height: 100%; background: var(--a2); box-shadow: inset 0 calc(var(--px) / 2) 0 var(--a3); }
-.progress-label { display: block; margin-top: 4px; line-height: 24px; color: var(--g5); }
+.progress-label { display: block; margin-top: 4px; line-height: 24px; color: var(--g5); white-space: nowrap; }
 
 /* Notes */
 .note-entry { padding: 16px 24px 20px; }
 .note-header { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-bottom: 8px; }
 .note-tag { font-size: 24px; line-height: 32px; color: var(--a3); }
 .note-date { color: var(--g5); }
-.note-body pre { font: 16px/24px "Weft", monospace; white-space: pre-wrap; overflow-wrap: anywhere; color: #b9c1d3; }
+.note-body { line-height: 24px; color: #b9c1d3; overflow-wrap: anywhere; }
+.note-body h3 { font-size: 16px; line-height: 24px; color: var(--a3); margin-top: 8px; }
+.note-body strong { color: var(--pale); }
+.note-body code { color: var(--a3); }
+.note-gap { height: 12px; }
+.note-item { position: relative; padding-left: 24px; margin-top: 4px; }
+.note-item::before { content: ""; position: absolute; left: 0; top: 8px; width: 8px; height: 8px; background: var(--a2); box-shadow: 0 2px 0 var(--a1); }

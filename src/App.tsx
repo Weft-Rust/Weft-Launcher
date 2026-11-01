@@ -69,8 +69,7 @@ function App() {
     }
   }
 
-  // The cache shows something at once, then GitHub says what is new. An unchanged list costs no
-  // API quota thanks to the ETag.
+  // The cache shows something at once, then GitHub says what is new.
   useEffect(() => {
     fetchReleases(false).then((cached) => {
       if (cached) fetchReleases(true);
@@ -104,7 +103,7 @@ function App() {
           />
         );
       case "notes":
-        return <NotesPage releases={releases} />;
+        return <NotesPage releases={releases} loading={loading} />;
       default:
         return null;
     }
@@ -112,11 +111,12 @@ function App() {
 
   return (
     <div className="app-layout">
-      <VoxelField page={`${activeTab}/${installedVersions.length}`} />
+      <VoxelField />
       <Sidebar />
       <div className="main-content">
         <Tabs activeTab={activeTab} onChange={setActiveTab} hasNewVersions={newTag !== null} />
-        <div className="page-container" role="main">
+        {/* Keyed so a page always opens at its top, not where the last one was scrolled to. */}
+        <div className="page-container" role="main" key={activeTab}>
           {renderPage()}
         </div>
       </div>

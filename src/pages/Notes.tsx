@@ -1,4 +1,5 @@
 import { useI18n } from "../i18n/useI18n";
+import { NoteBody } from "../components/NoteBody";
 import { formatDate } from "../utils/date";
 
 interface Release {
@@ -11,9 +12,10 @@ interface Release {
 
 interface NotesPageProps {
   releases: Release[];
+  loading: boolean;
 }
 
-export function NotesPage({ releases }: NotesPageProps) {
+export function NotesPage({ releases, loading }: NotesPageProps) {
   const { t, locale } = useI18n();
 
   const sorted = [...releases].sort((a, b) =>
@@ -26,7 +28,7 @@ export function NotesPage({ releases }: NotesPageProps) {
         <h1>{t("tabNotes")}</h1>
       </header>
       {sorted.length === 0 ? (
-        <p className="empty-state">{t("emptyState")}</p>
+        <p className="empty-state">{loading ? t("loading") : t("emptyState")}</p>
       ) : (
         <div className="notes-list clear">
           {sorted.map((release) => (
@@ -37,7 +39,7 @@ export function NotesPage({ releases }: NotesPageProps) {
                 {release.prerelease && <span className="prerelease-badge">{t("prereleaseBadge")}</span>}
               </header>
               <div className="note-body">
-                <pre>{release.body || t("noChangelog")}</pre>
+                {release.body ? <NoteBody text={release.body} /> : <p>{t("noChangelog")}</p>}
               </div>
             </article>
           ))}

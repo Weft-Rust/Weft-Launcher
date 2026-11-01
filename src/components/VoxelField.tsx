@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
 // The background of the Weft banner and site: voxel columns drawn at low resolution and scaled up
 // without smoothing. They stay put unless the cursor lifts them, so a window nobody touches draws
@@ -24,8 +24,13 @@ function shade(c: number[], t: number) {
   );
 }
 
-function startField(canvas: HTMLCanvasElement) {
-  const ctx = canvas.getContext("2d", { alpha: false })!;
+function startField() {
+  // Shown as the background image of the body, over its solid color, with the canvas itself off the
+  // page. Text is drawn sharply only where the browser knows it has something opaque behind it:
+  // over a canvas or anything else under the content, Windows smooths the pixel font into a blur.
+  const field = document.body;
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d", { alpha: false, willReadFrequently: true })!;
   const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const pointer = { x: 0, y: 0, sx: 0, sy: 0, on: false, lift: 0 };
 
@@ -41,8 +46,7 @@ function startField(canvas: HTMLCanvasElement) {
     H = Math.ceil((window.innerHeight * dpr) / pixel);
     canvas.width = W;
     canvas.height = H;
-    canvas.style.width = `${(W * pixel) / dpr}px`;
-    canvas.style.height = `${(H * pixel) / dpr}px`;
+    field.style.backgroundSize = `${(W * pixel) / dpr}px ${(H * pixel) / dpr}px`;
     img = ctx.createImageData(W, H);
     fb = new Uint32Array(img.data.buffer);
     owner = new Int32Array(W * H);
@@ -164,6 +168,7 @@ function startField(canvas: HTMLCanvasElement) {
       dash(dashes[i], dashes[i + 1], dashes[i + 2], dashes[i + 3]);
     }
     ctx.putImageData(img, 0, 0);
+    field.style.backgroundImage = `url(${canvas.toDataURL()})`;
 
     return (
       Math.abs(pointer.x - pointer.sx) + Math.abs(pointer.y - pointer.sy) >= 0.2 ||
@@ -201,6 +206,10 @@ function startField(canvas: HTMLCanvasElement) {
     wake();
   };
 
+  // New content means new text to clear the field around.
+  const changes = new MutationObserver(wake);
+  changes.observe(document.getElementById("root")!, { childList: true, subtree: true });
+
   resize();
   wake();
   window.addEventListener("resize", onResize);
@@ -211,9 +220,9 @@ function startField(canvas: HTMLCanvasElement) {
   }
 
   return {
-    wake,
     stop() {
       cancelAnimationFrame(frame);
+      changes.disconnect();
       window.removeEventListener("resize", onResize);
       window.removeEventListener("scroll", wake, true);
       window.removeEventListener("pointermove", onMove);
@@ -222,19 +231,11 @@ function startField(canvas: HTMLCanvasElement) {
   };
 }
 
-/** `page` is whatever decides what's on screen: a change means new text to clear the field around. */
-export function VoxelField({ page }: { page: string }) {
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const field = useRef<ReturnType<typeof startField> | null>(null);
-
+export function VoxelField() {
   useEffect(() => {
-    field.current = startField(canvas.current!);
-    return () => field.current?.stop();
+    const field = startField();
+    return () => field.stop();
   }, []);
 
-  useEffect(() => {
-    field.current?.wake();
-  }, [page]);
-
-  return <canvas id="field" ref={canvas} aria-hidden="true" />;
+  return null;
 }
