@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 // The background of the Weft banner and site: voxel columns drawn at low resolution and scaled up
 // without smoothing. They stay put unless the cursor lifts them, so a window nobody touches draws
@@ -24,12 +24,13 @@ function shade(c: number[], t: number) {
   );
 }
 
-function startField() {
-  // Shown as the background image of the body, over its solid color, with the canvas itself off the
-  // page. Text is drawn sharply only where the browser knows it has something opaque behind it:
-  // over a canvas or anything else under the content, Windows smooths the pixel font into a blur.
-  const field = document.body;
-  const canvas = document.createElement("canvas");
+function startField(canvas: HTMLCanvasElement) {
+  // Text is drawn sharply only where the browser knows it has something opaque behind it: in a layer
+  // of its own over the field, Windows smooths the pixel font into a blur. So the canvas must not get
+  // a layer of its own: drawn on the CPU (`willReadFrequently`), not fixed to the window (see
+  // `#field`), it is painted into the same opaque layer as the text. It is a real canvas and not a
+  // background image of the page, since WebKit (Linux, macOS) shows no background at all until a new
+  // image has loaded, and one a frame never has.
   const ctx = canvas.getContext("2d", { alpha: false, willReadFrequently: true })!;
   const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const pointer = { x: 0, y: 0, sx: 0, sy: 0, on: false, lift: 0 };
@@ -46,7 +47,8 @@ function startField() {
     H = Math.ceil((window.innerHeight * dpr) / pixel);
     canvas.width = W;
     canvas.height = H;
-    field.style.backgroundSize = `${(W * pixel) / dpr}px ${(H * pixel) / dpr}px`;
+    canvas.style.width = `${(W * pixel) / dpr}px`;
+    canvas.style.height = `${(H * pixel) / dpr}px`;
     img = ctx.createImageData(W, H);
     fb = new Uint32Array(img.data.buffer);
     owner = new Int32Array(W * H);
@@ -168,7 +170,6 @@ function startField() {
       dash(dashes[i], dashes[i + 1], dashes[i + 2], dashes[i + 3]);
     }
     ctx.putImageData(img, 0, 0);
-    field.style.backgroundImage = `url(${canvas.toDataURL()})`;
 
     return (
       Math.abs(pointer.x - pointer.sx) + Math.abs(pointer.y - pointer.sy) >= 0.2 ||
@@ -232,10 +233,16 @@ function startField() {
 }
 
 export function VoxelField() {
+  const canvas = useRef<HTMLCanvasElement>(null);
+
   useEffect(() => {
-    const field = startField();
+    const field = startField(canvas.current!);
     return () => field.stop();
   }, []);
 
-  return null;
+  return (
+    <div id="field" aria-hidden="true">
+      <canvas ref={canvas} />
+    </div>
+  );
 }
