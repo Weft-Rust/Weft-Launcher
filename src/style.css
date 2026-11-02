@@ -35,8 +35,6 @@ html, body, #root { height: 100%; margin: 0; overflow: hidden; }
 html { background: var(--seam); }
 
 body {
-  background: var(--seam) no-repeat;
-  image-rendering: pixelated;
   color: var(--pale);
   font: 16px/28px "Weft", monospace;
   font-kerning: none;
@@ -61,6 +59,12 @@ button:disabled { cursor: not-allowed; }
 ::-webkit-scrollbar-thumb:hover { background: var(--g4); }
 
 .notes-page, .notes-page * { -webkit-user-select: text; user-select: text; }
+
+/* The voxel field, under everything. Not fixed to the window, which would give it a layer of its
+   own: see VoxelField. Clipped, since the canvas is rounded up to whole voxel pixels and would
+   otherwise leave the page a few pixels to scroll. */
+#field { position: absolute; inset: 0; z-index: -1; overflow: clip; }
+#field canvas { display: block; image-rendering: pixelated; }
 
 /* Layout */
 .app-layout {
