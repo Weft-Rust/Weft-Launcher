@@ -307,10 +307,7 @@ pub async fn open_game_folder(app_handle: AppHandle, _tag: String) -> Result<(),
             if let Some(game_folder) = extract_game_folder_path(&line) {
                 let game_folder_path = PathBuf::from(&game_folder);
                 if game_folder_path.exists() {
-                    app_handle
-                        .opener()
-                        .open_path(game_folder_path.to_string_lossy().as_ref(), None::<&str>)
-                        .map_err(LaunchError::OpenerError)?;
+                    open_path(&app_handle, &game_folder_path)?;
                     return Ok(());
                 }
                 // Path from log doesn't exist, continue searching
@@ -337,9 +334,18 @@ pub async fn open_log(app_handle: AppHandle, tag: String) -> Result<(), AppError
         ))
         .into());
     }
+    open_path(&app_handle, &log_file)?;
+    Ok(())
+}
+
+fn open_path(app_handle: &AppHandle, path: &Path) -> Result<(), LaunchError> {
+    // Programs spawned from the AppImage crash on its bundled libraries; reveal goes over D-Bus.
+    if cfg!(target_os = "linux") && std::env::var_os("APPDIR").is_some() {
+        app_handle.opener().reveal_item_in_dir(path)?;
+        return Ok(());
+    }
     app_handle
         .opener()
-        .open_path(log_file.to_string_lossy().as_ref(), None::<&str>)
-        .map_err(LaunchError::OpenerError)?;
+        .open_path(path.to_string_lossy().as_ref(), None::<&str>)?;
     Ok(())
 }
