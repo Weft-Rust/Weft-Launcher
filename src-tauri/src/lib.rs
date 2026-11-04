@@ -1,7 +1,9 @@
 pub mod config;
+pub mod download;
 pub mod error;
 pub mod install;
 pub mod launch;
+pub mod mods;
 pub mod releases;
 
 use tauri::Manager;
@@ -16,7 +18,8 @@ pub fn run() {
                 let _ = w.set_focus();
             });
         }))
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init());
 
     #[cfg(desktop)]
     {
@@ -28,6 +31,8 @@ pub fn run() {
     builder
         .manage(install::ActiveInstalls::default())
         .manage(launch::RunningGames::default())
+        .manage(mods::catalog::CatalogState::default())
+        .manage(mods::commands::ModsLock::default())
         .setup(|app| {
             install::sweep_leftovers(app.handle());
             Ok(())
@@ -40,7 +45,20 @@ pub fn run() {
             launch::launch_version,
             launch::get_running_versions,
             launch::open_game_folder,
-            launch::open_log
+            launch::open_log,
+            mods::commands::list_mod_catalog,
+            mods::commands::get_mod_sources,
+            mods::commands::add_mod_source,
+            mods::commands::remove_mod_source,
+            mods::commands::get_mod_profile,
+            mods::commands::install_mod,
+            mods::commands::inspect_mod_file,
+            mods::commands::install_mod_file,
+            mods::commands::set_mod_enabled,
+            mods::commands::remove_mod,
+            mods::commands::copy_mod_profile,
+            mods::commands::get_mod_icon,
+            mods::commands::open_player_mods_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

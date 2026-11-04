@@ -3,15 +3,7 @@ import { useInstall } from "../hooks/useInstall";
 import { PixelIcon } from "../components/PixelIcon";
 import { VersionActions } from "../components/VersionActions";
 import { getLocale } from "../i18n";
-
-const REFRESH_ICON = [
-  ".###.#",
-  "#...##",
-  "#..###",
-  "#.....",
-  "#...#.",
-  ".###..",
-];
+import { REFRESH_ICON } from "../components/icons";
 
 interface Release {
   tag: string;

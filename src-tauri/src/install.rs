@@ -1,7 +1,4 @@
-use futures_util::StreamExt;
-use reqwest::header::USER_AGENT;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs::File as StdFile;
 use std::path::{Component, Path, PathBuf};
@@ -9,7 +6,6 @@ use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 use thiserror::Error;
 use tokio::fs;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use zip::result::ZipError;
 
 #[cfg(unix)]
@@ -19,7 +15,6 @@ use crate::config::WEFT_REPO;
 use crate::error::AppError;
 use crate::launch::running_game;
 
-const USER_AGENT_VALUE: &str = concat!("weft-launcher/", env!("CARGO_PKG_VERSION"));
 const TEMP_EXTRACT_PREFIX: &str = ".tmp-";
 const REMOVING_PREFIX: &str = ".removing-";
 
@@ -234,107 +229,30 @@ async fn download_and_install(
         fs::remove_dir_all(&version_dir).await?;
     }
 
-    // No total timeout: a slow connection may take long, as long as data keeps coming.
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .read_timeout(std::time::Duration::from_secs(60))
-        .build()?;
+    let client = crate::download::client()?;
+    let tag_owned = tag.to_string();
+    let downloaded = crate::download::to_file(&client, asset_url, temp_download, None, |p| {
+        let _ = app_handle.emit(
+            "install-progress",
+            serde_json::json!({
+                "tag": tag_owned,
+                "downloaded": p.downloaded,
+                "total": p.total,
+                "percent": p.percent,
+                "stage": "downloading",
+                "speedMbps": p.speed_mbps
+            }),
+        );
+    })
+    .await
+    .map_err(|e| InstallError::DownloadFailed(e.to_string()))?;
+    let total_size = downloaded.bytes;
 
-    let response = client
-        .get(asset_url)
-        .header(USER_AGENT, USER_AGENT_VALUE)
-        .send()
-        .await
-        .map_err(|e| InstallError::DownloadFailed(e.to_string()))?;
-
-    if !response.status().is_success() {
-        return Err(InstallError::DownloadFailed(format!("HTTP {}", response.status())).into());
-    }
-
-    let total_size = response.content_length().unwrap_or(0);
-    let mut downloaded: u64 = 0;
-    let mut last_reported_percent = 0u32;
-    let mut last_reported_bytes = 0u64;
-    let mut last_report_time = std::time::Instant::now();
-
-    #[cfg(debug_assertions)]
-    let download_start = std::time::Instant::now();
-
-    let mut file = fs::File::create(temp_download).await?;
-
-    // Stream download with progress
-    let mut stream = response.bytes_stream();
-    while let Some(chunk_result) = stream.next().await {
-        let chunk = chunk_result?;
-
-        file.write_all(&chunk).await?;
-
-        downloaded += chunk.len() as u64;
-
-        // Throttle progress: emit every ~1% or 100KB
-        let percent = if total_size > 0 {
-            ((downloaded as f64 / total_size as f64) * 100.0) as u32
-        } else {
-            0
-        };
-        let should_report = if total_size > 0 {
-            percent > last_reported_percent
-        } else {
-            downloaded >= last_reported_bytes + 100_000
-        };
-
-        if should_report {
-            let now = std::time::Instant::now();
-            let elapsed = now.duration_since(last_report_time).as_secs_f64();
-            let bytes_since_last = downloaded.saturating_sub(last_reported_bytes);
-            let speed_mbps = if elapsed > 0.0 {
-                (bytes_since_last as f64 * 8.0 / 1_000_000.0) / elapsed
-            } else {
-                0.0
-            };
-
-            let _ = app_handle.emit(
-                "install-progress",
-                serde_json::json!({
-                    "tag": tag,
-                    "downloaded": downloaded,
-                    "total": total_size,
-                    "percent": percent,
-                    "stage": "downloading",
-                    "speedMbps": speed_mbps
-                }),
-            );
-            last_reported_percent = percent;
-            last_reported_bytes = downloaded;
-            last_report_time = now;
-        }
-
-        #[cfg(debug_assertions)]
-        {
-            if let Ok(val) = std::env::var("WEFT_THROTTLE_KBPS")
-                && let Ok(kbps) = val.parse::<f64>()
-                && kbps > 0.0
-            {
-                let bytes_per_sec = kbps * 1024.0;
-                let expected_duration = downloaded as f64 / bytes_per_sec;
-                let actual_duration = download_start.elapsed().as_secs_f64();
-                if expected_duration > actual_duration {
-                    let sleep_secs = expected_duration - actual_duration;
-                    tokio::time::sleep(std::time::Duration::from_secs_f64(sleep_secs)).await;
-                }
-            }
-        }
-    }
-
-    file.flush().await?;
-    drop(file);
-
-    // Final download progress
     let _ = app_handle.emit(
         "install-progress",
         serde_json::json!({
             "tag": tag,
-            "downloaded": downloaded,
+            "downloaded": downloaded.bytes,
             "total": total_size,
             "percent": 100,
             "stage": "verifying",
@@ -342,26 +260,15 @@ async fn download_and_install(
         }),
     );
 
-    // Verify SHA256
-    let mut file = fs::File::open(temp_download).await?;
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0u8; 8192];
-    loop {
-        let n = file.read(&mut buffer).await?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buffer[..n]);
-    }
-    let actual = format!("{:x}", hasher.finalize());
-    if !actual.eq_ignore_ascii_case(expected_sha256) {
+    // Hashed while it downloaded.
+    if !downloaded.sha256.eq_ignore_ascii_case(expected_sha256) {
         return Err(InstallError::Sha256Mismatch {
             expected: expected_sha256.to_string(),
-            actual,
+            actual: downloaded.sha256,
         }
         .into());
     }
-    drop(file);
+    let downloaded = downloaded.bytes;
 
     // Extract to temp directory
     let _ = app_handle.emit(
@@ -672,6 +579,7 @@ pub async fn remove_version(app_handle: tauri::AppHandle, tag: String) -> Result
         Ok(_) => {
             // Rename succeeded, now delete the renamed folder
             fs::remove_dir_all(&removing_dir).await?;
+            crate::mods::profile::forget_version(&app_handle, &tag);
             Ok(())
         }
         Err(e) => {

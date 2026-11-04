@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import { GameStateProvider } from "./hooks/useGameState";
 import { InstallProvider } from "./hooks/useInstall";
+import { ModsProvider } from "./hooks/useMods";
 import { initI18n } from "./i18n";
 import "./style.css";
 
@@ -24,14 +25,28 @@ document.addEventListener("keydown", (e) => {
 
 import { I18nProvider } from "./i18n/I18nProvider";
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+// `npm run dev:mock` runs the UI in a browser against src/dev/mockBackend.ts. The check is on a
+// build-time constant, so a real build leaves the mock out entirely.
+async function start() {
+  if (import.meta.env.MODE === "mock") {
+    const { installMockBackend } = await import("./dev/mockBackend");
+    installMockBackend();
+  }
+  render();
+}
+
+const render = () => ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <I18nProvider>
       <GameStateProvider>
         <InstallProvider>
-          <App />
+          <ModsProvider>
+            <App />
+          </ModsProvider>
         </InstallProvider>
       </GameStateProvider>
     </I18nProvider>
   </React.StrictMode>,
 );
+
+start();

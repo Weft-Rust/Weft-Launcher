@@ -11,10 +11,12 @@ interface VersionSelectProps {
   onChange: (value: string) => void;
   disabled: boolean;
   label: string;
+  /** One line tall, for dialogs and page headers. */
+  compact?: boolean;
 }
 
 // Not a native <select>: its popup is drawn by the system and can't take the launcher's look.
-export function VersionSelect({ value, options, onChange, disabled, label }: VersionSelectProps) {
+export function VersionSelect({ value, options, onChange, disabled, label, compact = false }: VersionSelectProps) {
   const [open, setOpen] = useState(false);
   const [cursor, setCursor] = useState(0);
   const root = useRef<HTMLDivElement>(null);
@@ -67,7 +69,7 @@ export function VersionSelect({ value, options, onChange, disabled, label }: Ver
   };
 
   return (
-    <div className="version-select" ref={root} onKeyDown={onKeyDown}>
+    <div className={`version-select${compact ? " compact" : ""}`} ref={root} onKeyDown={onKeyDown}>
       <button
         type="button"
         className="version-select-btn"

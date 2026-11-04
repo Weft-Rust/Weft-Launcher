@@ -2,17 +2,21 @@ import { createContext, useContext, useEffect, useState, useCallback, ReactNode 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { translateError } from "../i18n/errors";
+import type { ModFailure } from "../mods/types";
 
 interface GameStateEvent {
   tag: string;
   state: "running" | "stopped";
   exitCode: number | null;
   crashed: boolean;
+  modFailure: ModFailure | null;
 }
 
 export interface GameCrash {
   tag: string;
   exitCode: number | null;
+  /** The mod the log blames, when the game stopped while loading mods. */
+  modFailure: ModFailure | null;
 }
 
 interface GameStateContextValue {
@@ -55,7 +59,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     let unlisten: (() => void) | undefined;
 
     listen<GameStateEvent>("game-state", (event) => {
-      const { tag, state, exitCode, crashed } = event.payload;
+      const { tag, state, exitCode, crashed, modFailure } = event.payload;
       setRunningTags((prev) => {
         const next = new Set(prev);
         if (state === "running") {
@@ -66,7 +70,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
         return next;
       });
       if (state === "stopped" && crashed) {
-        setLastCrash({ tag, exitCode });
+        setLastCrash({ tag, exitCode, modFailure: modFailure ?? null });
       }
     }).then((fn) => {
       if (cancelled) fn();
