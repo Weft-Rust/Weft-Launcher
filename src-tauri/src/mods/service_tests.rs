@@ -370,6 +370,16 @@ mod meanwhile {
     }
 
     #[test]
+    fn the_build_left_the_catalogue() {
+        let why = detail(refused(|ctx, world| {
+            let mut c = world.catalog.clone();
+            c.mods.retain(|m| m.id != "cogwork");
+            ctx.hold_catalog(c);
+        }));
+        assert!(why.contains("no longer"), "{why}");
+    }
+
+    #[test]
     fn the_game_was_started() {
         let why = detail(refused(|ctx, _| ctx.games.insert(TAG)));
         assert!(why.contains("started"), "{why}");

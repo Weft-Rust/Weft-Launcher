@@ -379,8 +379,9 @@ pub async fn fetch(ctx: &Ctx, staged: &Staged) -> Result<(), ModsError> {
 }
 
 /// Writes a downloaded install into the profile. Under `ModsLock`, it first checks that what
-/// the player agreed to still holds: the game version is still installed and not running, no
-/// build is revoked in the latest catalogue, and resolving again against the latest profile
+/// the player agreed to still holds: the game version is still installed and not running, the
+/// wanted builds are still in the latest catalogue and none of the builds is revoked there, and
+/// resolving again against the latest profile
 /// needs nothing more and changes nothing else. Otherwise `ModChangedMeanwhile`, and nothing is
 /// written.
 pub async fn commit(ctx: &Ctx, staged: Staged) -> Result<ChangeResult, ModsError> {
@@ -402,6 +403,14 @@ pub async fn commit(ctx: &Ctx, staged: Staged) -> Result<ChangeResult, ModsError
         return Err(changed(format!("{tag} was started")));
     }
     let catalog = ctx.held_catalog().unwrap_or(catalog);
+    for (m, v) in &wanted {
+        if catalog.find(&v.sha256).is_none() {
+            return Err(changed(format!(
+                "{} {} is no longer in the catalogue",
+                m.name, v.version
+            )));
+        }
+    }
     for (m, v) in &res.picks {
         if let Some(r) = catalog.revocation(&v.sha256) {
             return Err(changed(format!(
