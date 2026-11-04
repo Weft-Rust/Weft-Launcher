@@ -62,6 +62,29 @@ pub enum InstallError {
     InstallInProgress(String),
 }
 
+/// What a game version install is doing.
+#[derive(Debug, Clone, Copy, Serialize, ts_rs::TS)]
+#[serde(rename_all = "lowercase")]
+pub enum InstallStage {
+    Downloading,
+    Verifying,
+    Extracting,
+    Finalizing,
+}
+
+/// The `install-progress` event.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallProgress {
+    pub tag: String,
+    pub downloaded: u64,
+    /// 0 when the server doesn't say.
+    pub total: u64,
+    pub percent: u32,
+    pub stage: InstallStage,
+    pub speed_mbps: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub struct InstalledVersion {
     pub tag: String,
@@ -234,14 +257,14 @@ async fn download_and_install(
     let downloaded = crate::download::to_file(&client, asset_url, temp_download, None, |p| {
         let _ = app_handle.emit(
             crate::ipc::INSTALL_PROGRESS,
-            serde_json::json!({
-                "tag": tag_owned,
-                "downloaded": p.downloaded,
-                "total": p.total,
-                "percent": p.percent,
-                "stage": "downloading",
-                "speedMbps": p.speed_mbps
-            }),
+            InstallProgress {
+                tag: tag_owned.clone(),
+                downloaded: p.downloaded,
+                total: p.total,
+                percent: p.percent,
+                stage: InstallStage::Downloading,
+                speed_mbps: p.speed_mbps,
+            },
         );
     })
     .await
@@ -250,14 +273,14 @@ async fn download_and_install(
 
     let _ = app_handle.emit(
         crate::ipc::INSTALL_PROGRESS,
-        serde_json::json!({
-            "tag": tag,
-            "downloaded": downloaded.bytes,
-            "total": total_size,
-            "percent": 100,
-            "stage": "verifying",
-            "speedMbps": 0.0
-        }),
+        InstallProgress {
+            tag: tag.to_string(),
+            downloaded: downloaded.bytes,
+            total: total_size,
+            percent: 100,
+            stage: InstallStage::Verifying,
+            speed_mbps: 0.0,
+        },
     );
 
     // Hashed while it downloaded.
@@ -273,14 +296,14 @@ async fn download_and_install(
     // Extract to temp directory
     let _ = app_handle.emit(
         crate::ipc::INSTALL_PROGRESS,
-        serde_json::json!({
-            "tag": tag,
-            "downloaded": downloaded,
-            "total": total_size,
-            "percent": 100,
-            "stage": "extracting",
-            "speedMbps": 0.0
-        }),
+        InstallProgress {
+            tag: tag.to_string(),
+            downloaded,
+            total: total_size,
+            percent: 100,
+            stage: InstallStage::Extracting,
+            speed_mbps: 0.0,
+        },
     );
 
     if temp_extract.exists() {
@@ -339,14 +362,14 @@ async fn download_and_install(
     // Finalizing
     let _ = app_handle.emit(
         crate::ipc::INSTALL_PROGRESS,
-        serde_json::json!({
-            "tag": tag,
-            "downloaded": downloaded,
-            "total": total_size,
-            "percent": 100,
-            "stage": "finalizing",
-            "speedMbps": 0.0
-        }),
+        InstallProgress {
+            tag: tag.to_string(),
+            downloaded,
+            total: total_size,
+            percent: 100,
+            stage: InstallStage::Finalizing,
+            speed_mbps: 0.0,
+        },
     );
 
     // Atomic rename

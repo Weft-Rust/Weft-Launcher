@@ -103,11 +103,19 @@ fn extract_game_folder_path(line: &str) -> Option<String> {
     Some(cleaned[start..start + end].trim().to_string())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[serde(rename_all = "lowercase")]
+pub enum GameState {
+    Running,
+    Stopped,
+}
+
+/// The `game-state` event.
 #[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct GameStateEvent {
     pub tag: String,
-    pub state: String,
+    pub state: GameState,
     pub exit_code: Option<i32>,
     /// The game only ends with an error of its own, a panic or a fault when something went
     /// wrong. On Unix a signal leaves no exit code at all, so the code alone can't tell.
@@ -309,7 +317,7 @@ async fn start_game(
         crate::ipc::GAME_STATE,
         GameStateEvent {
             tag: tag.to_string(),
-            state: "running".to_string(),
+            state: GameState::Running,
             exit_code: None,
             crashed: false,
             mod_failure: None,
@@ -338,7 +346,7 @@ async fn start_game(
             crate::ipc::GAME_STATE,
             GameStateEvent {
                 tag,
-                state: "stopped".to_string(),
+                state: GameState::Stopped,
                 exit_code: status.and_then(|s| s.code()),
                 crashed,
                 mod_failure,
