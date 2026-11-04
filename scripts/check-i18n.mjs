@@ -5,10 +5,9 @@
 // - a counted message (`key_one`, `key_other`...) lacks a plural form the language needs, as
 //   Intl.PluralRules says (Russian: one, few, many, other), or has one it doesn't use;
 // - code under src/ uses a message key that en.json doesn't have;
-// - an error code the backend can send has no `errors.*` message. The codes come from
-//   src-tauri/src/error.rs and src-tauri/src/mods/error.rs, and from the ErrorCode union in
-//   src/mods/types.ts.
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+// - an error code the backend can send has no `errors.*` message, going by the generated
+//   ErrorCode union in src/mods/bindings/ErrorCode.ts.
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -108,35 +107,23 @@ for (const file of sources(join(root, "src"))) {
   }
 }
 
-// Every error code the backend can send has a message.
-const codes = new Map();
-const note = (code, where) => codes.set(code, [...(codes.get(code) ?? []), where]);
-for (const rs of ["src-tauri/src/error.rs", "src-tauri/src/mods/error.rs"]) {
-  const path = join(root, rs);
-  if (!existsSync(path)) continue;
-  const text = readFileSync(path, "utf8");
-  // `AppError::new("Code", ...)`, `=> ("Code", ...)` and, once codes are an enum, `ErrorCode::Code`.
-  const found = [
-    ...text.matchAll(/AppError::new\(\s*"([A-Z][A-Za-z0-9]*)"/g),
-    ...text.matchAll(/=>\s*\(\s*"([A-Z][A-Za-z0-9]*)"/g),
-    ...text.matchAll(/\(\s*\n\s*"([A-Z][A-Za-z0-9]*)",/g),
-    ...text.matchAll(/ErrorCode::([A-Z][A-Za-z0-9]*)/g),
-  ];
-  for (const m of found) note(m[1], rs);
-}
-const typesText = readFileSync(join(root, "src/mods/types.ts"), "utf8");
-const union = typesText.match(/export type ErrorCode =([\s\S]*?);/);
-const tsCodes = new Set(union ? [...union[1].matchAll(/"([A-Za-z0-9]+)"/g)].map((m) => m[1]) : []);
-if (!union) problems.push("src/mods/types.ts: no ErrorCode union found");
-for (const code of tsCodes) note(code, "src/mods/types.ts");
+// Every error code the backend can send has a message. The codes are the ErrorCode union that
+// the backend generates (src/mods/bindings/ErrorCode.ts); a Rust test keeps that file current.
+const codes = new Set();
+const unionPath = "src/mods/bindings/ErrorCode.ts";
+const union = readFileSync(join(root, unionPath), "utf8").match(/export type ErrorCode =([\s\S]*?);/);
+if (!union) problems.push(`${unionPath}: no ErrorCode union found`);
+else for (const m of union[1].matchAll(/"([A-Za-z0-9]+)"/g)) codes.add(m[1]);
 
 const errorsTs = readFileSync(join(dir, "errors.ts"), "utf8");
 const mapping = Object.fromEntries([...errorsTs.matchAll(/^\s*([A-Z][A-Za-z0-9]*):\s*'([^']+)'/gm)].map((m) => [m[1], m[2]]));
-for (const [code, where] of codes) {
-  if (!tsCodes.has(code)) problems.push(`${where[0]}: error code ${code} is missing from ErrorCode in src/mods/types.ts`);
+for (const code of codes) {
   const key = mapping[code];
   if (!key) problems.push(`src/i18n/errors.ts: error code ${code} has no message in ERROR_KEY`);
   else if (!(key in en.plain)) problems.push(`src/i18n/errors.ts: ${code} maps to ${key}, which en.json doesn't have`);
+}
+for (const code of Object.keys(mapping)) {
+  if (!codes.has(code)) problems.push(`src/i18n/errors.ts: ${code} is not an ErrorCode the backend sends`);
 }
 
 if (problems.length) {

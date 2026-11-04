@@ -42,7 +42,7 @@ npm run tauri dev     # dev mode (plain `cargo run` won't work - UI is served by
 npm run tauri build   # installer
 ```
 
-Before a PR: `cargo fmt --check && cargo clippy && cargo test` in `src-tauri`, and `npm run build`. UI strings go through `src/i18n` - add keys to all four languages (en, pt-BR, es, ru); `npm run check:i18n` (also part of `npm run build`) lists missing keys, placeholder mismatches, missing plural forms (counted messages have `_one`, `_other` and, per language, `_few`/`_many` keys), message keys used in `src` that don't exist, and backend error codes without an `errors.*` message. `npm test` runs the unit tests (vitest) for the pure logic in `src/mods` and `src/i18n`.
+Before a PR: `cargo fmt --check && cargo clippy && cargo test` in `src-tauri`, and `npm run build`. UI strings go through `src/i18n` - add keys to all four languages (en, pt-BR, es, ru); `npm run check:i18n` (also part of `npm run build`) lists missing keys, placeholder mismatches, missing plural forms (counted messages have `_one`, `_other` and, per language, `_few`/`_many` keys), message keys used in `src` that don't exist, and backend error codes without an `errors.*` message. `npm test` runs the unit tests (vitest) for the pure logic in `src/mods` and `src/i18n`. `npm run test:ui` runs the UI tests (Playwright, `e2e/`): every mock scenario in all four languages at the minimum 960×565 window, plus the install, launch-safety and keyboard flows. Run `npx playwright install chromium` once first. CI (`.github/workflows/ci.yml`) runs all of these on every pull request.
 
 ### UI without Tauri
 
