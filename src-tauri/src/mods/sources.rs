@@ -14,6 +14,7 @@ use super::index::{
 };
 use super::paths::{Paths, write_atomic};
 use super::profile::now;
+use crate::download::read_capped;
 
 const USER_AGENT_VALUE: &str = concat!("weft-launcher/", env!("CARGO_PKG_VERSION"));
 pub const MAX_MOD_JSON_BYTES: usize = 64 * 1024;
@@ -215,21 +216,6 @@ fn merge(entries: Vec<IndexMod>) -> Vec<IndexMod> {
     mods
 }
 
-/// Reads at most `max` bytes of a response; `None` if it is longer.
-async fn read_capped(mut response: reqwest::Response, max: usize) -> Option<Vec<u8>> {
-    if response.content_length().is_some_and(|n| n as usize > max) {
-        return None;
-    }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.ok()? {
-        if bytes.len() + chunk.len() > max {
-            return None;
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    Some(bytes)
-}
-
 async fn get_mod_json(client: &reqwest::Client, url: &str) -> Option<ModJson> {
     let response = client
         .get(url)
@@ -241,7 +227,7 @@ async fn get_mod_json(client: &reqwest::Client, url: &str) -> Option<ModJson> {
     if !response.status().is_success() {
         return None;
     }
-    let bytes = read_capped(response, MAX_MOD_JSON_BYTES).await?;
+    let bytes = read_capped(response, MAX_MOD_JSON_BYTES).await.ok()??;
     serde_json::from_slice(&bytes).ok()
 }
 
@@ -599,10 +585,15 @@ pub(crate) mod tests {
         assert_eq!(
             run(read_capped(response(vec![b'x'; 10]), 10))
                 .unwrap()
+                .unwrap()
                 .len(),
             10
         );
-        assert!(run(read_capped(response(vec![b'x'; 11]), 10)).is_none());
+        assert!(
+            run(read_capped(response(vec![b'x'; 11]), 10))
+                .unwrap()
+                .is_none()
+        );
     }
 
     fn http_response(body: Vec<u8>) -> ::http::Response<Vec<u8>> {

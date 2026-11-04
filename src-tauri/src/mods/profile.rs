@@ -456,6 +456,7 @@ pub(crate) mod tests {
             index: IndexStatus {
                 freshness: Freshness::Fresh,
                 generated: None,
+                signed_at: None,
                 error: None,
             },
             sources: vec![],

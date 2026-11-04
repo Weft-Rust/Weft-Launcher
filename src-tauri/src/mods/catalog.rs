@@ -103,6 +103,8 @@ pub struct CatalogMod {
 pub struct IndexStatus {
     pub freshness: Freshness,
     pub generated: Option<String>,
+    /// RFC 3339, from the signature's trusted comment (`timestamp:`).
+    pub signed_at: Option<String>,
     pub error: Option<AppError>,
 }
 
@@ -325,6 +327,7 @@ pub(crate) mod tests {
         IndexStatus {
             freshness: Freshness::Fresh,
             generated: None,
+            signed_at: None,
             error: None,
         }
     }

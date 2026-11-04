@@ -104,7 +104,8 @@ pub async fn load_catalog(app: &AppHandle, refresh: bool) -> Result<Catalog, Mod
     let client = http().unwrap_or_else(|_| reqwest::Client::new());
     let cache = IndexCache::new(&paths.cache_dir(), index::public_key());
     let url = index::index_url();
-    let state = index::load(&cache, refresh, async {
+    let now = time::OffsetDateTime::now_utc();
+    let state = index::load(&cache, refresh, now, async {
         let bytes = index::fetch_bytes(&client, &url).await?;
         let sig = index::fetch_bytes(&client, &format!("{url}.minisig")).await?;
         let sig = String::from_utf8(sig)
@@ -115,6 +116,10 @@ pub async fn load_catalog(app: &AppHandle, refresh: bool) -> Result<Catalog, Mod
     let status = IndexStatus {
         freshness: state.freshness,
         generated: state.index.as_ref().map(|i| i.generated.clone()),
+        signed_at: state.signed_at.map(|t| {
+            t.format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_default()
+        }),
         error: state.error.map(AppError::from),
     };
     let mut fetched = Vec::new();

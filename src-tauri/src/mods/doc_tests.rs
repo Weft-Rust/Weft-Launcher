@@ -51,6 +51,7 @@ fn the_index_example_parses_and_keeps_everything() {
     let status = IndexStatus {
         freshness: Freshness::Fresh,
         generated: None,
+        signed_at: None,
         error: None,
     };
     let catalog = catalog::build(Some(&index), status, vec![]);

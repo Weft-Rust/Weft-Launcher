@@ -2,4 +2,8 @@
 import type { AppErrorPayload } from "./AppErrorPayload";
 import type { Freshness } from "./Freshness";
 
-export type IndexStatus = { freshness: Freshness, generated: string | null, error: AppErrorPayload | null, };
+export type IndexStatus = { freshness: Freshness, generated: string | null, 
+/**
+ * RFC 3339, from the signature's trusted comment (`timestamp:`).
+ */
+signedAt: string | null, error: AppErrorPayload | null, };

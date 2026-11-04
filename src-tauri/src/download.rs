@@ -36,12 +36,59 @@ pub struct Downloaded {
     pub sha256: String,
 }
 
+/// Where a redirect may lead: https, on GitHub's own hosts. Release downloads redirect from
+/// `github.com` to `objects.githubusercontent.com` or `release-assets.githubusercontent.com`,
+/// and GitHub Pages may redirect within `github.io`.
+pub fn redirect_allowed(url: &url::Url) -> bool {
+    let host = url.host_str().unwrap_or("");
+    let on = |domain: &str| host == domain || host.ends_with(&format!(".{domain}"));
+    url.scheme() == "https"
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && (on("github.com") || on("githubusercontent.com") || on("github.io"))
+}
+
+/// Follows at most 10 redirects, each to an allowed place (see [`redirect_allowed`]).
+pub fn redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() >= 10 {
+            attempt.error("too many redirects")
+        } else if redirect_allowed(attempt.url()) {
+            attempt.follow()
+        } else {
+            let to = attempt.url().to_string();
+            attempt.error(format!("refused a redirect to {to}"))
+        }
+    })
+}
+
 /// No total timeout: a slow connection may take long, as long as data keeps coming.
 pub fn client() -> Result<reqwest::Client, reqwest::Error> {
     reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(30))
         .read_timeout(std::time::Duration::from_secs(60))
+        .redirect(redirect_policy())
         .build()
+}
+
+/// Reads at most `max` bytes of a response, chunk by chunk; `None` if it is longer. Nothing past
+/// the limit is read, whatever the response claims its length is.
+pub async fn read_capped(
+    mut response: reqwest::Response,
+    max: usize,
+) -> Result<Option<Vec<u8>>, reqwest::Error> {
+    if response.content_length().is_some_and(|n| n > max as u64) {
+        return Ok(None);
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if bytes.len() + chunk.len() > max {
+            return Ok(None);
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(Some(bytes))
 }
 
 /// Reports about every 1% (or 100 KB when the size is unknown). `max_bytes` stops a download that
