@@ -365,7 +365,8 @@ button:disabled { cursor: not-allowed; }
 .mod-card-title { display: grid; gap: 4px; min-width: 0; }
 .mod-card-title .mod-name { display: block; }
 .mod-badges { display: flex; flex-wrap: wrap; gap: 8px; }
-.mod-summary { color: #b9c1d3; line-height: 24px; flex: 1; min-height: 48px; align-self: stretch; }
+.mod-summary { color: #b9c1d3; line-height: 24px; height: 48px; align-self: stretch; }
+.mod-card-foot { margin-top: auto; }
 .mod-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .mod-source { color: var(--g5); line-height: 24px; min-width: 0; }
 .installed-mark { color: var(--v3); line-height: 24px; white-space: nowrap; }
