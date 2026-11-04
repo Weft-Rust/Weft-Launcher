@@ -282,8 +282,8 @@ pub fn admit(
 }
 
 /// The same checks for a build the store already has. `None` when it has none, or only a
-/// damaged copy, which is deleted so it can be fetched again; an error when the stored bytes
-/// are right but aren't a mod that fits here.
+/// damaged copy, which a fresh download then replaces (deleting is left to garbage collection,
+/// under `ModsLock`); an error when the stored bytes are right but aren't a mod that fits here.
 pub fn admit_stored(
     paths: &Paths,
     sha256: &str,
@@ -296,10 +296,7 @@ pub fn admit_stored(
     }
     match check(&stored, sha256, id, platform) {
         Ok(info) => Ok(Some(info)),
-        Err(ModsError::Sha256Mismatch { .. }) => {
-            std::fs::remove_file(&stored)?;
-            Ok(None)
-        }
+        Err(ModsError::Sha256Mismatch { .. }) => Ok(None),
         Err(e) => Err(e),
     }
 }
@@ -475,7 +472,7 @@ mod tests {
     }
 
     /// The store checks what it already has too: right bytes for another mod or system are
-    /// refused, and a damaged copy is dropped so it is fetched again.
+    /// refused, and a damaged copy counts as missing, so it is fetched again and replaced.
     #[test]
     fn a_stored_file_is_checked_again() {
         let (_tmp, paths) = setup();
@@ -509,9 +506,14 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert!(
-            !paths.store_object(&sha).exists(),
-            "the damaged copy is gone"
+        let fresh = paths.downloads_dir().join("fresh.part");
+        std::fs::create_dir_all(paths.downloads_dir()).unwrap();
+        std::fs::write(&fresh, &zip).unwrap();
+        admit(&paths, &fresh, &sha, Some("cogwork"), linux).unwrap();
+        assert_eq!(
+            std::fs::read(paths.store_object(&sha)).unwrap(),
+            zip,
+            "replaced"
         );
     }
 
