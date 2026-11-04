@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useId, useRef } from "react";
+import { ReactNode, useCallback, useEffect, useId, useRef } from "react";
 
 interface DialogProps {
   title: ReactNode;
@@ -6,50 +6,91 @@ interface DialogProps {
   onClose: () => void;
   /** While true, Escape and the backdrop don't close it: work is in flight. */
   locked?: boolean;
+  /** The body. It scrolls; the title and the footer stay put. */
   children: ReactNode;
+  /** The action row, always visible at the bottom. */
+  footer: ReactNode;
 }
 
-const FOCUSABLE = 'button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"])';
+const FOCUSABLE =
+  'button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"]):not(:disabled)';
 
-// Keeps focus inside while open and gives it back to whatever opened it.
-export function Dialog({ title, subtitle, onClose, locked = false, children }: DialogProps) {
+function usable(el: Element | null): el is HTMLElement {
+  return el instanceof HTMLElement && !(el as HTMLButtonElement).disabled && el.getClientRects().length > 0;
+}
+
+/**
+ * A modal. Keeps focus inside, also when its content is replaced (an async inspection) or a
+ * focused button is disabled, and gives focus back to whatever opened it. It first focuses the
+ * element marked `data-autofocus` (the safe choice, e.g. Cancel), else its title.
+ */
+export function Dialog({ title, subtitle, onClose, locked = false, children, footer }: DialogProps) {
   const box = useRef<HTMLDivElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
   const titleId = useId();
   const close = useRef(onClose);
   close.current = onClose;
   const isLocked = useRef(locked);
   isLocked.current = locked;
 
+  /** Where focus goes when it has nowhere sensible to be. */
+  const settle = useCallback(() => {
+    const root = box.current;
+    if (!root) return;
+    const active = document.activeElement;
+    if (active && root.contains(active) && (active === heading.current || usable(active))) return;
+    const preferred = root.querySelector("[data-autofocus]");
+    (usable(preferred) ? preferred : heading.current)?.focus({ preventScroll: true });
+  }, []);
+
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
-    const first = box.current?.querySelector<HTMLElement>("[data-autofocus]") ??
-      box.current?.querySelector<HTMLElement>(FOCUSABLE);
-    // Without scrolling: a tall dialog should open at its title, not at its buttons.
-    first?.focus({ preventScroll: true });
+    settle();
+
+    // Content changes can take focus away: an element unmounts or gets disabled.
+    const observer = new MutationObserver(() => settle());
+    if (box.current) {
+      observer.observe(box.current, { childList: true, subtree: true, attributes: true, attributeFilter: ["disabled"] });
+    }
+
+    // Focus that lands outside (a click on the page behind, a stray script) comes back.
+    const onFocusIn = (e: FocusEvent) => {
+      if (box.current && e.target instanceof Node && !box.current.contains(e.target)) settle();
+    };
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !isLocked.current) {
+      const popupOpen = e.target instanceof Element && !!e.target.closest('[aria-expanded="true"]');
+      if (e.key === "Escape" && !isLocked.current && !popupOpen) {
         e.stopPropagation();
         close.current();
       } else if (e.key === "Tab" && box.current) {
-        const items = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
-        if (items.length === 0) return;
+        const items = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(usable);
+        if (items.length === 0) {
+          e.preventDefault();
+          heading.current?.focus();
+          return;
+        }
         const [head, tail] = [items[0], items[items.length - 1]];
-        if (e.shiftKey && document.activeElement === head) {
+        const active = document.activeElement as HTMLElement | null;
+        const inside = !!active && items.includes(active);
+        if (e.shiftKey && (!inside || active === head)) {
           e.preventDefault();
           tail.focus();
-        } else if (!e.shiftKey && document.activeElement === tail) {
+        } else if (!e.shiftKey && (!inside || active === tail)) {
           e.preventDefault();
           head.focus();
         }
       }
     };
     document.addEventListener("keydown", onKey, true);
+    document.addEventListener("focusin", onFocusIn);
     return () => {
+      observer.disconnect();
       document.removeEventListener("keydown", onKey, true);
-      opener?.focus?.();
+      document.removeEventListener("focusin", onFocusIn);
+      if (opener?.isConnected) opener.focus?.({ preventScroll: true });
     };
-  }, []);
+  }, [settle]);
 
   return (
     <div
@@ -58,12 +99,22 @@ export function Dialog({ title, subtitle, onClose, locked = false, children }: D
         if (e.target === e.currentTarget && !isLocked.current) onClose();
       }}
     >
-      <div className="dialog framed" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={box}>
-        <h2 className="dialog-title" id={titleId}>
-          {title}
-        </h2>
-        {subtitle && <p className="dialog-sub">{subtitle}</p>}
-        {children}
+      <div
+        className="dialog framed"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-busy={locked || undefined}
+        ref={box}
+      >
+        <div className="dialog-head">
+          <h2 className="dialog-title" id={titleId} tabIndex={-1} ref={heading}>
+            {title}
+          </h2>
+          {subtitle && <p className="dialog-sub">{subtitle}</p>}
+        </div>
+        <div className="dialog-body">{children}</div>
+        <div className="dialog-actions">{footer}</div>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useInstall, InstalledVersion, InstallProgress } from "../hooks/useInstall";
 import { useGameState } from "../hooks/useGameState";
+import { useMods } from "../hooks/useMods";
 import { useI18n } from "../i18n/useI18n";
 import { StableLabel } from "./StableLabel";
 
@@ -18,8 +19,12 @@ interface VersionActionsProps {
 }
 
 export function VersionActions({ release, installedVersion }: VersionActionsProps) {
-  const { t } = useI18n();
+  const { t, tn } = useI18n();
   const { progress, busy: busyTags, errors, install, remove } = useInstall();
+  const { profile } = useMods();
+  const report = installedVersion ? profile(release.tag) : undefined;
+  const modCount = report?.mods.length ?? 0;
+  const blocked = (report?.blocking.length ?? 0) > 0;
   const { anyRunning, isRunning, launch, runningTags } = useGameState();
 
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -55,7 +60,8 @@ export function VersionActions({ release, installedVersion }: VersionActionsProp
 
   const handleLaunch = async () => {
     setLaunchError(null);
-    setLaunchError(await launch(release.tag));
+    const r = await launch(release.tag);
+    if (r.status === "failed") setLaunchError(r.message);
   };
 
   const getProgressLabel = (current: InstallProgress): string => {
@@ -79,7 +85,9 @@ export function VersionActions({ release, installedVersion }: VersionActionsProp
   const playTooltip = anyRunning && otherRunningTag ? t("playDisabledTooltip", otherRunningTag) : undefined;
 
   const deleteDisabled = anyRunning || busy;
-  const playDisabled = anyRunning || thisVersionRunning || busy;
+  const playDisabled = anyRunning || thisVersionRunning || busy || blocked;
+  const blockedId = `blocked-${release.tag}`;
+  const confirmText = modCount > 0 ? tn("deleteWithMods", modCount) : t("deleteForReal");
 
   if (installedVersion) {
     return (
@@ -90,6 +98,7 @@ export function VersionActions({ release, installedVersion }: VersionActionsProp
           disabled={playDisabled}
           title={playTooltip}
           aria-label={thisVersionRunning ? t("playing") : t("playButton")}
+          aria-describedby={blocked ? blockedId : undefined}
         >
           <StableLabel
             text={thisVersionRunning ? t("playing") : t("playButton")}
@@ -101,13 +110,15 @@ export function VersionActions({ release, installedVersion }: VersionActionsProp
           onClick={handleRemove}
           disabled={deleteDisabled}
           title={anyRunning ? t("deleteDisabledTooltip") : undefined}
-          aria-label={confirmDelete ? t("deleteForReal") : t("deleteButton")}
+          aria-label={confirmDelete ? confirmText : t("deleteButton")}
         >
-          <StableLabel
-            text={confirmDelete ? t("deleteForReal") : t("deleteButton")}
-            widest={[t("deleteForReal"), t("deleteButton")]}
-          />
+          <StableLabel text={confirmDelete ? confirmText : t("deleteButton")} widest={[confirmText, t("deleteButton")]} />
         </button>
+        {blocked && !thisVersionRunning && (
+          <span className="version-note bad" id={blockedId}>
+            {t("versionModsBlocked")}
+          </span>
+        )}
         {(launchError || error) && (
           <div className="install-error" role="alert">
             {launchError || error}
