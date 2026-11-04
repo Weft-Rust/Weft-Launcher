@@ -1,5 +1,6 @@
 import { useI18n } from "../i18n/useI18n";
 import { useInstall } from "../hooks/useInstall";
+import { useMods } from "../hooks/useMods";
 import { PixelIcon } from "../components/PixelIcon";
 import { VersionActions } from "../components/VersionActions";
 import { getLocale } from "../i18n";
@@ -37,8 +38,9 @@ export function VersionsPage({
   onRefresh,
   newTag,
 }: VersionsPageProps) {
-  const { t, formatSize: fmtSize } = useI18n();
+  const { t, tn, formatSize: fmtSize } = useI18n();
   const { installedVersions } = useInstall();
+  const { profile } = useMods();
 
   const installedMap = new Map(installedVersions.map((v) => [v.tag, v]));
 
@@ -57,7 +59,7 @@ export function VersionsPage({
           )}
           {error && (
             <div className="error-banner" role="alert">
-              {t("errorPrefix")}{error}
+              {t("errorPrefix", error)}
             </div>
           )}
           <button
@@ -103,6 +105,9 @@ export function VersionsPage({
                     <span className="version-size">
                       {fmtSize(asset.size)}
                     </span>
+                    {installedVersion && profile(release.tag) && (
+                      <span className="version-mods">{tn("versionModCount", profile(release.tag)!.mods.length)}</span>
+                    )}
                   </div>
                 </div>
 

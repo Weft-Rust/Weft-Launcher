@@ -1,8 +1,9 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { translateError } from "../i18n/errors";
+import { COMMANDS, EVENTS } from "../mods/ipc";
 import type { ModFailure } from "../mods/types";
+import { failed, type ActionResult } from "./result";
 
 interface GameStateEvent {
   tag: string;
@@ -23,7 +24,8 @@ interface GameStateContextValue {
   runningTags: Set<string>;
   anyRunning: boolean;
   isRunning: (tag: string) => boolean;
-  launch: (tag: string) => Promise<string | null>;
+  launch: (tag: string) => Promise<ActionResult>;
+  /** The last crash, until its problem is fixed, the player dismisses it or the game starts again. */
   lastCrash: GameCrash | null;
   clearCrash: () => void;
 }
@@ -42,7 +44,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   // Fetch initially running versions on mount
   useEffect(() => {
     let mounted = true;
-    invoke<string[]>("get_running_versions")
+    invoke<string[]>(COMMANDS.getRunningVersions)
       .then((tags) => {
         if (mounted) setRunningTags(new Set(tags));
       })
@@ -58,7 +60,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
 
-    listen<GameStateEvent>("game-state", (event) => {
+    listen<GameStateEvent>(EVENTS.gameState, (event) => {
       const { tag, state, exitCode, crashed, modFailure } = event.payload;
       setRunningTags((prev) => {
         const next = new Set(prev);
@@ -83,18 +85,19 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const launch = useCallback(async (tag: string): Promise<string | null> => {
-    setLastCrash(null);
+  const launch = useCallback(async (tag: string): Promise<ActionResult> => {
     try {
-      await invoke("launch_version", { tag });
+      await invoke(COMMANDS.launchVersion, { tag });
+      // Only now: a launch the mods refused leaves the last crash's advice in place.
+      setLastCrash(null);
       try {
         localStorage.setItem("lastPlayed", tag);
       } catch {
         // ignore localStorage errors
       }
-      return null; // success
+      return { status: "done", result: undefined };
     } catch (err) {
-      return translateError(err);
+      return failed(err);
     }
   }, []);
 

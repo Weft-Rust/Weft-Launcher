@@ -10,6 +10,8 @@
     "dev:mock": "vite --mode mock",
     "build": "node scripts/check-i18n.mjs && tsc && vite build",
     "check:i18n": "node scripts/check-i18n.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "preview": "vite preview",
     "tauri": "tauri"
   },
@@ -28,6 +30,7 @@
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.2",
     "typescript": "~6.0.3",
-    "vite": "^8.0.16"
+    "vite": "^8.0.16",
+    "vitest": "^5.1.0"
   }
 }

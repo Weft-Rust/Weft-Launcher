@@ -1,8 +1,10 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useI18n } from "../../i18n/useI18n";
+import { translateError } from "../../i18n/errors";
 import { useMods } from "../../hooks/useMods";
 import type { CatalogMod, ProfileReport } from "../../mods/types";
 import { fittingVersions, installedFor, matchesSearch } from "../../mods/select";
+import { Truncate } from "../Truncate";
 import { ModIcon } from "./ModIcon";
 import { ModProgressBar } from "./ModProgressBar";
 import { InstallDialog } from "./InstallDialog";
@@ -14,12 +16,13 @@ interface BrowseListProps {
 }
 
 export function BrowseList({ report, locked }: BrowseListProps) {
-  const { t } = useI18n();
-  const { catalog, catalogLoading, progress } = useMods();
+  const { t, formatList } = useI18n();
+  const { catalog, catalogLoading, catalogError, refreshCatalog, progressFor } = useMods();
   const [query, setQuery] = useState("");
   const [onlyFitting, setOnlyFitting] = useState(true);
   const [prereleases, setPrereleases] = useState(false);
   const [open, setOpen] = useState<CatalogMod | null>(null);
+  const searchId = useId();
   const tag = report.tag;
   const abi = report.versionAbi;
 
@@ -35,38 +38,38 @@ export function BrowseList({ report, locked }: BrowseListProps) {
       .filter((r) => prereleases || r.mod.versions.some((v) => v.channel === "release") || r.installed);
   }, [catalog, query, abi, prereleases, onlyFitting, report.mods]);
 
-  const index = catalog?.index;
-  const sourceErrors = catalog?.sources.filter((s) => s.error) ?? [];
+  // No catalogue at all: say why and offer to try again, never "no mods fit".
+  if (!catalog) {
+    return catalogError && !catalogLoading ? (
+      <div className="empty-state framed-empty" role="alert">
+        <p>{t("mods.catalogFailed")}</p>
+        <p className="hint">{translateError(catalogError)}</p>
+        <div className="empty-actions">
+          <button className="btn-primary" onClick={refreshCatalog}>
+            {t("mods.retry")}
+          </button>
+        </div>
+      </div>
+    ) : (
+      <div className="empty-state" role="status">
+        {t("loading")}
+      </div>
+    );
+  }
 
   return (
     <>
-      {index && index.freshness !== "fresh" && !catalogLoading && (
-        <div className={`banner ${index.freshness === "cached" ? "info" : "warn"}`} role="status">
-          <span>
-            {index.error?.code === "IndexSignatureInvalid" || index.error?.code === "IndexInvalid"
-              ? t("mods.indexInvalid")
-              : index.error?.code === "IndexRollback"
-                ? t("mods.indexRollback")
-                : index.freshness === "cached"
-                  ? t("mods.indexCached")
-                  : t("mods.indexUnavailable")}
-          </span>
-        </div>
-      )}
-      {sourceErrors.map((s) => (
-        <div className="banner warn" role="status" key={s.repo}>
-          <span>{t("mods.sourceError", s.repo, s.error?.code === "ModSourceNotFound" ? t("mods.sourceGone") : t("mods.sourceUnreachable"))}</span>
-        </div>
-      ))}
-
       <div className="filters">
+        <label className="sr-only" htmlFor={searchId}>
+          {t("mods.searchPlaceholder")}
+        </label>
         <input
+          id={searchId}
           className="text-input search"
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t("mods.searchPlaceholder")}
-          aria-label={t("mods.searchPlaceholder")}
           spellCheck={false}
         />
         <label className="checkbox">
@@ -84,15 +87,13 @@ export function BrowseList({ report, locked }: BrowseListProps) {
       {rows.length === 0 ? (
         <div className="empty-state">
           <p>
-            {catalogLoading && !catalog
-              ? t("loading")
-              : query
-                ? t("mods.browseEmpty")
-                : onlyFitting
-                  ? t("mods.browseEmptyFits", tag)
-                  : t("mods.browseEmptyAll")}
+            {query
+              ? t("mods.browseEmpty")
+              : onlyFitting
+                ? t("mods.browseEmptyFits", tag)
+                : t("mods.browseEmptyAll")}
           </p>
-          {onlyFitting && !query && (catalog?.mods.length ?? 0) > 0 && (
+          {onlyFitting && !query && catalog.mods.length > 0 && (
             <button className="btn-secondary" onClick={() => setOnlyFitting(false)}>
               {t("mods.showAll")}
             </button>
@@ -105,27 +106,26 @@ export function BrowseList({ report, locked }: BrowseListProps) {
             // Installed and nothing better to offer: say so instead of a button that can't work.
             const isCurrent = installed && (!best || installed.sha256 === best.sha256);
             const onlyPre = !best && fittingVersions(catalog, mod, abi, true).length > 0;
-            const p = best ? progress[best.sha256] : undefined;
+            const p = best ? progressFor(best.sha256) : undefined;
+            const who = mod.origin.kind === "source" ? mod.origin.repo : formatList(mod.authors) || mod.id;
+            const what = best ? best.version : onlyPre ? t("mods.onlyPrerelease") : t("mods.notForVersion", tag);
             return (
               <li key={mod.key} className="mod-card framed">
                 <div className="mod-card-head">
                   <ModIcon id={mod.id} url={mod.icon} />
                   <div className="mod-card-title">
-                    <span className="mod-name">{mod.name}</span>
+                    <Truncate className="mod-name" text={mod.name} />
                     <span className="mod-badges">
-                      <TrustBadge trust={shown.trust} />
+                      {shown && <TrustBadge trust={shown.trust} />}
                       {best && <ChannelBadge channel={best.channel} />}
                     </span>
                   </div>
                 </div>
-                <p className="mod-summary">{mod.summary || t("mods.noSummary")}</p>
+                <Truncate className="mod-summary" text={mod.summary || t("mods.noSummary")} lines={2} />
                 <div className="mod-card-foot">
-                  <span className="mod-source">
-                    {best ? best.version : onlyPre ? t("mods.onlyPrerelease") : t("mods.notForVersion", tag)} ·{" "}
-                    {mod.origin.kind === "source" ? mod.origin.repo : mod.authors.join(", ") || mod.id}
-                  </span>
+                  <Truncate className="mod-source" text={`${what} · ${who}`} />
                   {p ? (
-                    <ModProgressBar progress={p} />
+                    <ModProgressBar progress={p} name={mod.name} />
                   ) : isCurrent ? (
                     <span className="installed-mark">{t("mods.installed")}</span>
                   ) : (
@@ -133,7 +133,7 @@ export function BrowseList({ report, locked }: BrowseListProps) {
                       className="btn-primary btn-small"
                       disabled={!best || locked}
                       onClick={() => setOpen(mod)}
-                      aria-label={`${t(installed ? "mods.updateButton" : "mods.install")} ${mod.name}`}
+                      aria-label={t(installed ? "mods.updateLabel" : "mods.installLabel", mod.name)}
                     >
                       {t(installed ? "mods.updateButton" : "mods.install")}
                     </button>
@@ -144,16 +144,7 @@ export function BrowseList({ report, locked }: BrowseListProps) {
           })}
         </ul>
       )}
-      {open && (
-        <InstallDialog
-          tag={tag}
-          versionAbi={abi}
-          mod={open}
-          installed={installedFor(open, report.mods)}
-          allowPrerelease={prereleases}
-          onClose={() => setOpen(null)}
-        />
-      )}
+      {open && <InstallDialog tag={tag} mod={open} allowPrerelease={prereleases} onClose={() => setOpen(null)} />}
     </>
   );
 }

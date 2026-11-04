@@ -1,10 +1,22 @@
-// Fails when a language file lacks a key English has, has one English doesn't, or drops a
-// `{n}` placeholder. Runs before every build: a missing string would show up as its key.
-import { readFileSync } from "node:fs";
+// Runs before every build: a missing string would show up as its key.
+//
+// Fails when
+// - a language lacks a key English has, has one English doesn't, or drops a `{n}` placeholder;
+// - a counted message (`key_one`, `key_other`...) lacks a plural form the language needs, as
+//   Intl.PluralRules says (Russian: one, few, many, other), or has one it doesn't use;
+// - code under src/ uses a message key that en.json doesn't have;
+// - an error code the backend can send has no `errors.*` message. The codes come from
+//   src-tauri/src/error.rs and src-tauri/src/mods/error.rs, and from the ErrorCode union in
+//   src/mods/types.ts.
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const dir = new URL("../src/i18n/", import.meta.url);
+const root = fileURLToPath(new URL("..", import.meta.url));
+const dir = join(root, "src/i18n");
 const locales = ["en", "pt-BR", "es", "ru"];
-const load = (l) => JSON.parse(readFileSync(new URL(`${l}.json`, dir), "utf8"));
+const load = (l) => JSON.parse(readFileSync(join(dir, `${l}.json`), "utf8"));
+const problems = [];
 
 function flatten(obj, prefix = "", out = {}) {
   for (const [k, v] of Object.entries(obj)) {
@@ -15,23 +27,123 @@ function flatten(obj, prefix = "", out = {}) {
   return out;
 }
 
-const placeholders = (s) => [...s.matchAll(/\{(\d+)\}/g)].map((m) => m[1]).sort().join(",");
-const base = flatten(load("en"));
-const problems = [];
-for (const locale of locales.slice(1)) {
-  const other = flatten(load(locale));
-  for (const key of Object.keys(base)) {
-    if (!(key in other)) problems.push(`${locale}: missing ${key}`);
-    else if (placeholders(base[key]) !== placeholders(other[key])) {
-      problems.push(`${locale}: ${key} has {${placeholders(other[key])}}, English has {${placeholders(base[key])}}`);
+const PLURAL = /^(.*)_(zero|one|two|few|many|other)$/;
+const placeholders = (s) => [...new Set([...s.matchAll(/\{(\d+|n)\}/g)].map((m) => m[1]))].sort().join(",");
+
+/** Plain keys, and counted messages by base key with their forms. */
+function split(flat) {
+  const plain = {};
+  const plural = {};
+  for (const [key, value] of Object.entries(flat)) {
+    const m = key.match(PLURAL);
+    if (m) (plural[m[1]] ??= {})[m[2]] = value;
+    else plain[key] = value;
+  }
+  return { plain, plural };
+}
+
+const en = split(flatten(load("en")));
+
+for (const locale of locales) {
+  const { plain, plural } = locale === "en" ? en : split(flatten(load(locale)));
+  const needed = new Intl.PluralRules(locale).resolvedOptions().pluralCategories.sort();
+
+  if (locale !== "en") {
+    for (const key of Object.keys(en.plain)) {
+      if (!(key in plain)) problems.push(`${locale}: missing ${key}`);
+      else if (placeholders(en.plain[key]) !== placeholders(plain[key])) {
+        problems.push(`${locale}: ${key} has {${placeholders(plain[key])}}, English has {${placeholders(en.plain[key])}}`);
+      }
+    }
+    for (const key of Object.keys(plain)) {
+      if (!(key in en.plain)) problems.push(`${locale}: ${key} is not in en.json`);
+    }
+    for (const base of Object.keys(plural)) {
+      if (!(base in en.plural)) problems.push(`${locale}: counted message ${base} is not in en.json`);
     }
   }
-  for (const key of Object.keys(other)) {
-    if (!(key in base)) problems.push(`${locale}: ${key} is not in en.json`);
+
+  for (const [base, enForms] of Object.entries(en.plural)) {
+    const forms = plural[base];
+    if (!forms) {
+      problems.push(`${locale}: missing counted message ${base} (${needed.map((c) => `${base}_${c}`).join(", ")})`);
+      continue;
+    }
+    const have = Object.keys(forms).sort();
+    for (const c of needed) if (!have.includes(c)) problems.push(`${locale}: ${base} needs a _${c} form`);
+    for (const c of have) if (!needed.includes(c)) problems.push(`${locale}: ${base}_${c} is a form ${locale} doesn't use`);
+    const want = placeholders(enForms.other ?? "");
+    for (const [c, text] of Object.entries(forms)) {
+      if (placeholders(text) !== want) problems.push(`${locale}: ${base}_${c} has {${placeholders(text)}}, English has {${want}}`);
+    }
   }
 }
+
+// Keys used in code.
+function sources(path, out = []) {
+  for (const name of readdirSync(path)) {
+    const full = join(path, name);
+    if (statSync(full).isDirectory()) {
+      if (name !== "bindings") sources(full, out);
+    } else if (/\.(ts|tsx)$/.test(name) && !/\.test\.tsx?$/.test(name)) out.push(full);
+  }
+  return out;
+}
+
+const known = (key) => key in en.plain || key in en.plural;
+const CALL = /\b(t|tn|tr)\(\s*["']([^"']+)["']/g;
+// Quoted only: backticks are comments' code spans here, not keys.
+const LITERAL = /["']((?:mods|errors|sizeUnits)\.[A-Za-z0-9_]+)["']/g;
+for (const file of sources(join(root, "src"))) {
+  const text = readFileSync(file, "utf8");
+  const rel = file.slice(root.length);
+  for (const m of text.matchAll(CALL)) {
+    const [, fn, key] = m;
+    if (fn === "tn" ? !(key in en.plural) : !(key in en.plain)) {
+      problems.push(`${rel}: ${fn}("${key}") is not ${fn === "tn" ? "a counted message" : "a message"} in en.json`);
+    }
+  }
+  for (const m of text.matchAll(LITERAL)) {
+    if (!known(m[1])) problems.push(`${rel}: "${m[1]}" is not in en.json`);
+  }
+}
+
+// Every error code the backend can send has a message.
+const codes = new Map();
+const note = (code, where) => codes.set(code, [...(codes.get(code) ?? []), where]);
+for (const rs of ["src-tauri/src/error.rs", "src-tauri/src/mods/error.rs"]) {
+  const path = join(root, rs);
+  if (!existsSync(path)) continue;
+  const text = readFileSync(path, "utf8");
+  // `AppError::new("Code", ...)`, `=> ("Code", ...)` and, once codes are an enum, `ErrorCode::Code`.
+  const found = [
+    ...text.matchAll(/AppError::new\(\s*"([A-Z][A-Za-z0-9]*)"/g),
+    ...text.matchAll(/=>\s*\(\s*"([A-Z][A-Za-z0-9]*)"/g),
+    ...text.matchAll(/\(\s*\n\s*"([A-Z][A-Za-z0-9]*)",/g),
+    ...text.matchAll(/ErrorCode::([A-Z][A-Za-z0-9]*)/g),
+  ];
+  for (const m of found) note(m[1], rs);
+}
+const typesText = readFileSync(join(root, "src/mods/types.ts"), "utf8");
+const union = typesText.match(/export type ErrorCode =([\s\S]*?);/);
+const tsCodes = new Set(union ? [...union[1].matchAll(/"([A-Za-z0-9]+)"/g)].map((m) => m[1]) : []);
+if (!union) problems.push("src/mods/types.ts: no ErrorCode union found");
+for (const code of tsCodes) note(code, "src/mods/types.ts");
+
+const errorsTs = readFileSync(join(dir, "errors.ts"), "utf8");
+const mapping = Object.fromEntries([...errorsTs.matchAll(/^\s*([A-Z][A-Za-z0-9]*):\s*'([^']+)'/gm)].map((m) => [m[1], m[2]]));
+for (const [code, where] of codes) {
+  if (!tsCodes.has(code)) problems.push(`${where[0]}: error code ${code} is missing from ErrorCode in src/mods/types.ts`);
+  const key = mapping[code];
+  if (!key) problems.push(`src/i18n/errors.ts: error code ${code} has no message in ERROR_KEY`);
+  else if (!(key in en.plain)) problems.push(`src/i18n/errors.ts: ${code} maps to ${key}, which en.json doesn't have`);
+}
+
 if (problems.length) {
   console.error(problems.join("\n"));
   process.exit(1);
 }
-console.log(`i18n: ${Object.keys(base).length} keys, same in ${locales.join(", ")}`);
+console.log(
+  `i18n: ${Object.keys(en.plain).length} messages and ${Object.keys(en.plural).length} counted messages in ${locales.join(", ")}; ` +
+    `${codes.size} error codes covered`
+);

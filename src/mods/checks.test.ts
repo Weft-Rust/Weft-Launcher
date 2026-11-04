@@ -1,0 +1,144 @@
+import { describe, expect, it } from "vitest";
+import { buildChecks, fileChecks, fileVerdict, installChecks, pinCheck, replaceNotes, type CheckRow } from "./checks";
+import { build } from "./fixtures";
+import type { FileInspection, InstallPlan } from "./types";
+
+const row = (rows: CheckRow[], id: string) => rows.find((r) => r.id === id);
+
+function plan(extra: Partial<InstallPlan> = {}): InstallPlan {
+  return {
+    target: { id: "hearth", name: "Hearth", version: "0.4.0", sha256: "h".repeat(64), trust: "reviewed", channel: "release", size: 1 },
+    replaces: null,
+    install: [],
+    enable: [],
+    missing: [],
+    problem: null,
+    ...extra,
+  };
+}
+
+const ctx = { tag: "v26.11.1", name: (id: string) => id.toUpperCase(), enabled: new Set<string>() };
+
+describe("provenance", () => {
+  it("is a green check only when the signed index vouches for it", () => {
+    expect(row(buildChecks(build("1.0.0")), "provenance")?.state).toBe("yes");
+  });
+
+  it("is unknown, never green, when only the repo claims it", () => {
+    const claimed = build("1.0.0", { trust: "unreviewed", reviewed: null, provenanceVerified: false });
+    const r = row(buildChecks(claimed), "provenance")!;
+    expect(r.state).toBe("unknown");
+    expect(r.title.key).toBe("mods.ckBuiltClaimed");
+  });
+
+  it("says 'no build record' as unknown", () => {
+    const r = row(buildChecks(build("1.0.0", { provenance: null })), "provenance")!;
+    expect(r).toMatchObject({ state: "unknown", title: { key: "mods.ckNoBuild" } });
+  });
+});
+
+describe("review and pin", () => {
+  it("says a Reviewed build is in the index, an Unreviewed one isn't", () => {
+    expect(row(buildChecks(build("1.0.0")), "review")?.state).toBe("yes");
+    expect(row(buildChecks(build("1.0.0", { trust: "unreviewed", reviewed: null })), "review")?.state).toBe("no");
+  });
+
+  it("only counts the index's pin as a check; GitHub's digest is unknown", () => {
+    expect(pinCheck(build("1.0.0")).state).toBe("yes");
+    const github = pinCheck(build("1.0.0", { trust: "unreviewed", reviewed: null }));
+    expect(github).toMatchObject({ state: "unknown", title: { key: "mods.ckPinnedGithub" } });
+  });
+});
+
+describe("installChecks", () => {
+  it("names each dependency and what happens to it", () => {
+    const v = build("0.4.0", { deps: ["base", "cogwork", "signals", "lamps", "glue"] });
+    const rows = installChecks(
+      plan({
+        install: [{ id: "cogwork", name: "Cogwork", version: "0.2.0", sha256: "c".repeat(64), trust: "unreviewed", channel: "release", size: 1 }],
+        enable: ["lamps"],
+        missing: ["signals"],
+      }),
+      v,
+      { ...ctx, enabled: new Set(["glue"]) }
+    );
+    expect(row(rows, "dep:cogwork")).toMatchObject({ state: "yes", title: { key: "mods.ckDepInstall", args: ["Cogwork", "0.2.0"] }, trust: "unreviewed" });
+    expect(row(rows, "dep:lamps")).toMatchObject({ state: "yes", title: { key: "mods.ckDepEnable", args: ["LAMPS"] } });
+    expect(row(rows, "dep:signals")).toMatchObject({ state: "no", title: { key: "mods.ckDepMissing", args: ["SIGNALS", "v26.11.1"] } });
+    expect(row(rows, "dep:glue")).toMatchObject({ state: "yes", title: { key: "mods.ckDepHave" } });
+    expect(rows.some((r) => r.id === "dep:base")).toBe(false);
+  });
+
+  it("doesn't call a dependency fine when the plan says nothing about it and it's off", () => {
+    const rows = installChecks(plan(), build("0.4.0", { deps: ["base", "glue"] }), ctx);
+    expect(row(rows, "dep:glue")?.state).toBe("unknown");
+  });
+
+  it("leads with the problem when the install would fail", () => {
+    const rows = installChecks(plan({ problem: { code: "ModIncompatible", detail: "Hearth" } }), build("0.4.0"), ctx);
+    expect(rows[0]).toMatchObject({ id: "problem", state: "no" });
+    expect(row(rows, "abi")?.state).toBe("no");
+  });
+});
+
+describe("replaceNotes", () => {
+  it("says when an update changes the tier and that an off mod stays off", () => {
+    const notes = replaceNotes(
+      plan({
+        target: { ...plan().target, trust: "unreviewed" },
+        replaces: { version: "0.1.2", sha256: "o".repeat(64), trust: "reviewed", enabled: false },
+      })
+    );
+    expect(notes[0]).toEqual({ key: "mods.ckReplacesTrust", args: ["0.1.2", { trust: "reviewed" }, { trust: "unreviewed" }] });
+    expect(notes[1]).toEqual({ key: "mods.ckReplacesOff" });
+  });
+
+  it("is a plain note when the tier stays", () => {
+    const notes = replaceNotes(plan({ replaces: { version: "0.3.0", sha256: "o".repeat(64), trust: "reviewed", enabled: true } }));
+    expect(notes).toEqual([{ key: "mods.ckReplaces", args: ["0.3.0"] }]);
+  });
+});
+
+describe("fileChecks", () => {
+  const inspection = (extra: Partial<FileInspection> = {}): FileInspection => ({
+    fileName: "x.zip",
+    size: 1,
+    sha256: "f".repeat(64),
+    archive: { id: "x", libraries: ["libx.so"], platforms: ["linux-x64"], hasAssets: false, entries: 2 },
+    problem: null,
+    name: "X",
+    summary: null,
+    fitsSystem: true,
+    catalogMatch: null,
+    revokedReason: null,
+    replaces: null,
+    ...extra,
+  });
+
+  it("shows a catalogued file's review and provenance like the catalogue does", () => {
+    const rows = fileChecks(
+      inspection({ catalogMatch: { key: "index:x", name: "X", fitsVersion: true, build: build("1.0.0") } }),
+      "v26.11.1"
+    );
+    expect(row(rows, "known")?.state).toBe("yes");
+    expect(row(rows, "review")?.state).toBe("yes");
+    expect(row(rows, "provenance")?.state).toBe("yes");
+    expect(fileVerdict(inspection({ catalogMatch: { key: "k", name: "X", fitsVersion: true, build: build("1.0.0") } }))).toEqual({
+      usable: true,
+      needsTyping: false,
+    });
+  });
+
+  it("uses one 'no build record' state for unknown files: unknown", () => {
+    const r = row(fileChecks(inspection(), "v26.11.1"), "provenance")!;
+    expect(r).toMatchObject({ state: "unknown", title: { key: "mods.ckNoBuild" } });
+    expect(fileVerdict(inspection())).toEqual({ usable: true, needsTyping: true });
+  });
+
+  it("refuses files that aren't mods, are for another system or were revoked", () => {
+    expect(fileVerdict(inspection({ archive: null })).usable).toBe(false);
+    expect(fileVerdict(inspection({ fitsSystem: false })).usable).toBe(false);
+    expect(fileVerdict(inspection({ revokedReason: "bad" })).usable).toBe(false);
+    expect(row(fileChecks(inspection({ revokedReason: "bad" }), "v"), "revoked")?.state).toBe("no");
+  });
+});
