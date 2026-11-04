@@ -1,6 +1,6 @@
 # Mod manager for Weft Launcher: proposal
 
-Status: draft, 2026-11-04. Nothing is implemented yet. Mockup: [`mockup.html`](mockup.html). Open it in a browser; it's drawn at 1:1 in the launcher's own pixel style.
+Status: Phases 1 and 2 are implemented on `feat/mod-manager` (see [What shipped](#what-shipped)); Phase 3 needs engine changes and is not started. Written 2026-11-04. Mockup (the first design; the app has moved on since): [`mockup.html`](mockup.html). Open it in a browser; it's drawn at 1:1 in the launcher's own pixel style.
 
 Sources:
 - Read-only research of the engine (`Weft` @ `7c69c9c`, `master`).
@@ -88,13 +88,16 @@ Launch becomes `weft --mods <profiles/<tag>/mods>`. Turning a mod on or off just
 
 | Module | Job |
 |---|---|
-| `abi.rs` | ABI hash of a Weft tag. **Now:** fetch `raw.githubusercontent.com/Weft-Rust/Weft/<tag>/crates/abi/src/lib.rs` and compute FNV-1a-64 (needs no engine change; verified against v26.10.2 and v26.10.4). **Later:** read a `weft-abi.txt` release asset. |
-| `catalog.rs` | Read the signed index, plus `*.mod.json` assets from the GitHub repos the user added, using the same ETag cache as `releases.rs`. Filter by platform, ABI and channel. |
-| `verify.rs` | Index signature (minisign), SHA-256, and provenance (§4). |
-| `store.rs` | Stream the download (reusing `install.rs`'s download and progress code), verify, check the zip structure, then move it into `store/`. |
-| `profile.rs` | Lock file, turning mods on and off, resolving dependencies, the pre-Play check. |
+| `abi.rs` | ABI hash of a Weft tag: the index's `weft[]` table, else a cache, else FNV-1a-64 of `raw.githubusercontent.com/Weft-Rust/Weft/<tag>/crates/abi/src/lib.rs` (verified against v26.10.2 and v26.10.4). **Later:** read a `weft-abi.txt` release asset. |
+| `index.rs` | Fetch the signed index, verify it (minisign), refuse an older one than the last verified copy, keep that copy for offline use, and drop entries that break [INDEX_FORMAT.md](INDEX_FORMAT.md). |
+| `sources.rs` | GitHub repos the player added: read their releases (ETag-cached) and accept a `<id>.mod.json` only where it agrees with GitHub on tag, asset name, URL, size and digest. |
+| `catalog.rs` | Merge the index and the sources into one list with a trust tier per version; a source build with a reviewed hash counts as Reviewed. |
+| `archive.rs` | Check the zip structure (below) before anything is stored. |
+| `profile.rs` | Lock file, the store and the per-version folders, the status of each mod, updates, revocations. |
+| `diagnose.rs` | Read the game log after a crash and name the mod that stopped it. |
+| `commands.rs` | The Tauri commands; installs go through `fetch_to_store`, which streams via the shared `download.rs`, checks the SHA-256 and the zip, then moves it into `store/`. |
 
-Tauri commands: `list_mod_catalog`, `get_profile_mods`, `install_mod`, `install_mod_from_file`, `set_mod_enabled`, `remove_mod`, `check_profile`, `copy_profile`.
+Tauri commands: `list_mod_catalog`, `get_mod_sources`, `add_mod_source`, `remove_mod_source`, `get_mod_profile`, `install_mod`, `inspect_mod_file`, `install_mod_file`, `set_mod_enabled`, `remove_mod`, `copy_mod_profile`, `get_mod_icon`, `open_player_mods_folder`. The pre-Play check runs inside `launch_version`.
 
 ### Checking the zip structure (before it is stored)
 - Only `<id>.dll`, `lib<id>.so`, `lib<id>.dylib` and `assets/**` are allowed.
@@ -135,7 +138,7 @@ What we can and can't promise:
 | Badge | Meaning | Checks that must pass |
 |---|---|---|
 | **Reviewed** (green) | In the curated Weft mod index | Index signature ✔, SHA-256 equals the index pin ✔, provenance ✔ (Phase 2) |
-| **CI-built** (grey) | From a GitHub repo the user added as a source; built in public CI, not reviewed | SHA-256 equals GitHub `digest` ✔. Phase 2 adds a provenance attestation: built by `release.yml` of repo R at commit C ✔ |
+| **Unreviewed** (grey) | From a GitHub repo the user added as a source; not reviewed by anyone | SHA-256 equals GitHub `digest` ✔. Phase 2 adds a provenance attestation: built by `release.yml` of repo R at commit C ✔ |
 | **Unverified** (red) | Local file, or a source without provenance | Zip structure only. Typed confirmation needed (mockup 3) |
 | **Revoked** | The index lists the sha256 as revoked | The launcher turns the mod off on the next refresh and says why |
 
@@ -204,5 +207,18 @@ The UI deliberately has **no permission list**. Native code has no permissions t
 1. **Isolation scope.** Per-version mod sets with **shared** saves (proposed), or full "instances" with `--run-dir` (separate saves and config per profile, like MultiMC)? Shared saves are friendlier. The engine already asks when a world's mods are missing.
 2. **Index ownership.** Who hosts the curated index (the `Weft-Rust` org?), who reviews, and where does the signing key live: offline, or a CI secret with required reviews?
 3. **Reading the player's mods folder.** Is a read-only listing for the warning acceptable, given the README says the launcher never reads game data?
-4. **Third-party sources.** Should users be able to add any GitHub repo (CI-built tier), or only use the index plus local files?
+4. **Third-party sources.** Should users be able to add any GitHub repo (Unreviewed tier), or only use the index plus local files?
 5. **Upstream engine changes.** The launcher targets `Weft-Rust/Weft`. Engine changes 1–3 would make Phase 1 much more robust. Are they something you can push upstream?
+
+---
+
+## What shipped
+
+Implemented on `feat/mod-manager`; names below are the ones in the code.
+
+- **Phase 1 and 2 together.** The signed index lives at `Zorro909/weft-mods-index` and is served from GitHub Pages; the launcher embeds its public key (`INDEX_PUBLIC_KEY` in `index.rs`). Sources, local files, revocation and "Bring mods from vX" (`copy_mod_profile`) all work.
+- **Renamed tier.** "CI-built" became **Unreviewed**: a source's release proves nothing about CI until it carries an attestation, so the name only claims what is known.
+- **Provenance** is shown when the index records it (`provenance` in INDEX_FORMAT) and is otherwise stated as "No build record". The launcher doesn't verify attestations itself; the index does that when a version is added.
+- **Matching is by ABI, not tag.** Builds made from untagged Weft commits fit every release with the same ABI.
+- **Deferred:** everything in Phase 3, and the open questions above. The player's own `mods` folder is listed read-only for the warning (question 3) and never written to.
+- **Working on the UI without Tauri:** `npm run dev:mock` (see the README).
