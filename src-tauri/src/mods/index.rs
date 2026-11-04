@@ -16,7 +16,7 @@ use super::paths::{cache_dir, write_atomic};
 pub const INDEX_URL: &str = "https://zorro909.github.io/weft-mods-index/v1/index.json";
 
 /// `keys/index.pub` of the index repository.
-pub const INDEX_PUBLIC_KEY: &str = "RWQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+pub const INDEX_PUBLIC_KEY: &str = "RWRelY1XUps7n+bc3RVDFwMAWzPYz4orZvxzRTo0M+hK2A0w02cQmfvh";
 
 const MAX_INDEX_BYTES: usize = 8 * 1024 * 1024;
 
@@ -468,6 +468,20 @@ pub(crate) mod tests {
             verify(FIXTURE, "not a signature", FIXTURE_KEY),
             Err(ModsError::IndexSignatureInvalid(_))
         ));
+    }
+
+    /// A copy of the live index, signed by the real key: the embedded key is the right
+    /// one, and nothing the index publishes is dropped by the contract checks here.
+    #[test]
+    fn the_published_index_verifies_and_keeps_every_entry() {
+        let bytes = include_bytes!("testdata/published-index.json");
+        let sig = include_str!("testdata/published-index.json.minisig");
+        let index = verify(bytes, sig, INDEX_PUBLIC_KEY).unwrap();
+        let raw: Index = serde_json::from_slice(bytes).unwrap();
+        let count = |i: &Index| i.mods.iter().map(|m| m.versions.len()).sum::<usize>();
+        assert!(count(&raw) > 0);
+        assert_eq!(count(&index), count(&raw));
+        assert_eq!(index.weft.len(), raw.weft.len());
     }
 
     #[test]
