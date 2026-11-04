@@ -5,51 +5,80 @@
 use serde::Serialize;
 use std::io::Read;
 use std::path::{Component, Path};
+use thiserror::Error;
+use ts_rs::TS;
 
 use super::error::ModsError;
-use super::index::is_mod_id;
+use super::index::{Platform, is_mod_id};
 
-const MAX_ENTRIES: usize = 20_000;
-const MAX_TOTAL_BYTES: u64 = 1024 * 1024 * 1024;
-const MAX_RATIO: u64 = 200;
+pub const MAX_ENTRIES: usize = 20_000;
+pub const MAX_TOTAL_BYTES: u64 = 1024 * 1024 * 1024;
+pub const MAX_RATIO: u64 = 200;
+/// Entries smaller than this are never called a zip bomb, however well they compress.
+const RATIO_FLOOR: u64 = 1024 * 1024;
 pub const MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
 
-/// `windows-x64`, `linux-x64` or `macos-arm64`; empty where the game isn't built.
-pub fn current_platform() -> &'static str {
-    if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
-        "windows-x64"
-    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        "linux-x64"
-    } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-        "macos-arm64"
-    } else {
-        ""
-    }
+/// The system this launcher runs on; `None` where the game isn't built.
+pub fn current_platform() -> Option<Platform> {
+    Platform::current()
 }
 
-fn platform_of_library(name: &str) -> Option<(&'static str, &str)> {
+fn platform_of_library(name: &str) -> Option<(Platform, &str)> {
     if let Some(id) = name.strip_suffix(".dll") {
-        return Some(("windows-x64", id));
+        return Some((Platform::WindowsX64, id));
     }
     let rest = name.strip_prefix("lib")?;
     if let Some(id) = rest.strip_suffix(".so") {
-        return Some(("linux-x64", id));
+        return Some((Platform::LinuxX64, id));
     }
-    rest.strip_suffix(".dylib").map(|id| ("macos-arm64", id))
+    rest.strip_suffix(".dylib")
+        .map(|id| (Platform::MacosArm64, id))
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ArchiveInfo {
     pub id: String,
     pub libraries: Vec<String>,
-    pub platforms: Vec<String>,
+    pub platforms: Vec<Platform>,
     pub has_assets: bool,
     pub entries: usize,
 }
 
-fn bad(reason: impl Into<String>) -> ModsError {
-    ModsError::ArchiveInvalid(reason.into())
+/// Why a zip is not a mod the launcher will store. The text goes to the player as the error
+/// detail.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ArchiveProblem {
+    #[error("not a zip file ({0})")]
+    NotZip(String),
+    #[error("more than {MAX_ENTRIES} files")]
+    TooManyEntries,
+    #[error("unpacks to more than 1 GB")]
+    TooLarge,
+    #[error("{0} is compressed suspiciously well")]
+    Ratio(String),
+    #[error("odd file name {0:?}")]
+    OddName(String),
+    #[error("unsafe path {0:?}")]
+    UnsafePath(String),
+    #[error("symbolic link {0:?}")]
+    Symlink(String),
+    #[error("unexpected folder {0:?}")]
+    UnexpectedFolder(String),
+    #[error("unexpected file {0:?}")]
+    UnexpectedFile(String),
+    #[error("library name {0:?}")]
+    LibraryName(String),
+    #[error("{file} belongs to mod {found:?}, not {expected:?}")]
+    WrongMod {
+        file: String,
+        found: String,
+        expected: String,
+    },
+    #[error("two libraries for {0}")]
+    TwoLibraries(&'static str),
+    #[error("no mod library inside")]
+    NoLibrary,
 }
 
 /// Checks the layout of a mod zip. With `expected_id`, the library names must say that id.
@@ -57,9 +86,11 @@ pub fn inspect<R: Read + std::io::Seek>(
     reader: R,
     expected_id: Option<&str>,
 ) -> Result<ArchiveInfo, ModsError> {
-    let mut zip = zip::ZipArchive::new(reader)?;
+    use ArchiveProblem as P;
+    let not_zip = |e: zip::result::ZipError| P::NotZip(e.to_string());
+    let mut zip = zip::ZipArchive::new(reader).map_err(not_zip)?;
     if zip.len() > MAX_ENTRIES {
-        return Err(bad("too many files"));
+        return Err(P::TooManyEntries.into());
     }
 
     let mut id: Option<String> = expected_id.map(str::to_string);
@@ -69,31 +100,31 @@ pub fn inspect<R: Read + std::io::Seek>(
     let mut total: u64 = 0;
 
     for i in 0..zip.len() {
-        let entry = zip.by_index_raw(i)?;
+        let entry = zip.by_index_raw(i).map_err(not_zip)?;
         let raw = entry.name().to_string();
         if raw.contains('\\') || raw.contains('\0') {
-            return Err(bad(format!("odd file name {raw:?}")));
+            return Err(P::OddName(raw).into());
+        }
+        if let Some(mode) = entry.unix_mode()
+            && mode & 0o170000 == 0o120000
+        {
+            return Err(P::Symlink(raw).into());
         }
         let Some(path) = entry.enclosed_name().map(Path::to_path_buf) else {
-            return Err(bad(format!("unsafe path {raw:?}")));
+            return Err(P::UnsafePath(raw).into());
         };
         if path
             .components()
             .any(|c| !matches!(c, Component::Normal(_)))
         {
-            return Err(bad(format!("unsafe path {raw:?}")));
-        }
-        if let Some(mode) = entry.unix_mode()
-            && mode & 0o170000 == 0o120000
-        {
-            return Err(bad(format!("symbolic link {raw:?}")));
+            return Err(P::UnsafePath(raw).into());
         }
         total = total.saturating_add(entry.size());
         if total > MAX_TOTAL_BYTES {
-            return Err(bad("unpacks to more than 1 GB"));
+            return Err(P::TooLarge.into());
         }
-        if entry.size() > 1024 * 1024 && entry.size() / entry.compressed_size().max(1) > MAX_RATIO {
-            return Err(bad(format!("{raw} is compressed suspiciously well")));
+        if entry.size() > RATIO_FLOOR && entry.size() / entry.compressed_size().max(1) > MAX_RATIO {
+            return Err(P::Ratio(raw).into());
         }
 
         let mut parts = path.components();
@@ -108,32 +139,35 @@ pub fn inspect<R: Read + std::io::Seek>(
             continue;
         }
         if nested || entry.is_dir() {
-            return Err(bad(format!("unexpected folder {raw:?}")));
+            return Err(P::UnexpectedFolder(raw).into());
         }
         let Some((platform, lib_id)) = platform_of_library(first) else {
-            return Err(bad(format!("unexpected file {raw:?}")));
+            return Err(P::UnexpectedFile(raw).into());
         };
         if !is_mod_id(lib_id) {
-            return Err(bad(format!("library name {raw:?}")));
+            return Err(P::LibraryName(raw).into());
         }
         match &id {
             Some(known) if known != lib_id => {
-                return Err(bad(format!(
-                    "{raw} belongs to mod {lib_id:?}, not {known:?}"
-                )));
+                return Err(P::WrongMod {
+                    file: raw,
+                    found: lib_id.to_string(),
+                    expected: known.clone(),
+                }
+                .into());
             }
             Some(_) => {}
             None => id = Some(lib_id.to_string()),
         }
-        if platforms.contains(&platform.to_string()) {
-            return Err(bad(format!("two libraries for {platform}")));
+        if platforms.contains(&platform) {
+            return Err(P::TwoLibraries(platform.as_str()).into());
         }
-        platforms.push(platform.to_string());
+        platforms.push(platform);
         libraries.push(first.to_string());
     }
 
     let Some(id) = id.filter(|_| !libraries.is_empty()) else {
-        return Err(bad("no mod library inside"));
+        return Err(P::NoLibrary.into());
     };
     platforms.sort();
     libraries.sort();
@@ -201,6 +235,13 @@ pub(crate) mod tests {
         inspect(Cursor::new(make_zip(files)), id)
     }
 
+    fn problem(result: Result<ArchiveInfo, ModsError>) -> ArchiveProblem {
+        match result {
+            Err(ModsError::ArchiveInvalid(p)) => p,
+            other => panic!("expected an archive problem, got {other:?}"),
+        }
+    }
+
     #[test]
     fn a_real_mod_layout_passes() {
         let info = check(
@@ -215,23 +256,177 @@ pub(crate) mod tests {
         )
         .unwrap();
         assert_eq!(info.id, "cogwork");
-        assert_eq!(info.platforms, ["linux-x64", "macos-arm64", "windows-x64"]);
+        assert_eq!(
+            info.platforms,
+            [
+                Platform::WindowsX64,
+                Platform::LinuxX64,
+                Platform::MacosArm64
+            ]
+        );
         assert!(info.has_assets);
     }
 
     #[test]
-    fn anything_else_is_refused() {
-        let cases: &[&[(&str, &[u8])]] = &[
-            &[("cogwork.dll", b""), ("run.exe", b"")],
-            &[("cogwork.dll", b""), ("libother.so", b"")],
-            &[("cogwork/cogwork.dll", b"")],
-            &[("../cogwork.dll", b"")],
-            &[("assets/x.png", b"")],
-            &[("Cogwork.dll", b"")],
+    fn anything_else_is_refused_for_its_own_reason() {
+        use ArchiveProblem as P;
+        type Case<'a> = (&'a [(&'a str, &'a [u8])], Option<&'a str>, P);
+        let cases: &[Case] = &[
+            (
+                &[("cogwork.dll", b""), ("run.exe", b"")],
+                None,
+                P::UnexpectedFile("run.exe".into()),
+            ),
+            (
+                &[("cogwork.dll", b""), ("libother.so", b"")],
+                None,
+                P::WrongMod {
+                    file: "libother.so".into(),
+                    found: "other".into(),
+                    expected: "cogwork".into(),
+                },
+            ),
+            (
+                &[("cogwork/cogwork.dll", b"")],
+                None,
+                P::UnexpectedFolder("cogwork/cogwork.dll".into()),
+            ),
+            (
+                &[("../cogwork.dll", b"")],
+                None,
+                P::UnsafePath("../cogwork.dll".into()),
+            ),
+            (
+                &[("/abs/cogwork.dll", b"")],
+                None,
+                P::UnsafePath("/abs/cogwork.dll".into()),
+            ),
+            (
+                &[("assets\\x.png", b""), ("cogwork.dll", b"")],
+                None,
+                P::OddName("assets\\x.png".into()),
+            ),
+            (&[("assets/x.png", b"")], None, P::NoLibrary),
+            (
+                &[("Cogwork.dll", b"")],
+                None,
+                P::LibraryName("Cogwork.dll".into()),
+            ),
+            (
+                &[("cogwork.dll", b"")],
+                Some("structures"),
+                P::WrongMod {
+                    file: "cogwork.dll".into(),
+                    found: "cogwork".into(),
+                    expected: "structures".into(),
+                },
+            ),
         ];
-        for files in cases {
-            assert!(check(files, None).is_err(), "{files:?}");
+        for (files, id, want) in cases {
+            assert_eq!(&problem(check(files, *id)), want, "{files:?}");
         }
-        assert!(check(&[("cogwork.dll", b"")], Some("structures")).is_err());
+        assert!(matches!(
+            problem(inspect(Cursor::new(b"not a zip".to_vec()), None)),
+            P::NotZip(_)
+        ));
+    }
+
+    #[test]
+    fn a_symbolic_link_is_refused() {
+        let mut buf = Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buf);
+            zip.start_file("libcogwork.so", FileOptions::default())
+                .unwrap();
+            zip.write_all(b"elf").unwrap();
+            zip.add_symlink("assets/link", "/etc/passwd", FileOptions::default())
+                .unwrap();
+            zip.finish().unwrap();
+        }
+        assert_eq!(
+            problem(inspect(Cursor::new(buf.into_inner()), None)),
+            ArchiveProblem::Symlink("assets/link".into())
+        );
+    }
+
+    #[test]
+    fn a_zip_bomb_is_refused() {
+        let zeros = vec![0u8; 4 * 1024 * 1024];
+        let mut buf = Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buf);
+            let deflate =
+                FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            zip.start_file("libcogwork.so", deflate).unwrap();
+            zip.write_all(b"elf").unwrap();
+            zip.start_file("assets/zeros.bin", deflate).unwrap();
+            zip.write_all(&zeros).unwrap();
+            zip.finish().unwrap();
+        }
+        assert_eq!(
+            problem(inspect(Cursor::new(buf.into_inner()), None)),
+            ArchiveProblem::Ratio("assets/zeros.bin".into())
+        );
+    }
+
+    /// The entry count and the total size come from the zip's directory, so a zip can claim
+    /// either without containing it. These build such directories by hand.
+    fn central_directory_zip(entries: &[(&str, u64)]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut central = Vec::new();
+        for (name, size) in entries {
+            let offset = out.len() as u32;
+            let n = name.as_bytes();
+            let size32 = (*size).min(u32::MAX as u64) as u32;
+            // Local header, stored, no data (only the central directory is read).
+            out.extend_from_slice(&0x04034b50u32.to_le_bytes());
+            out.extend_from_slice(&[20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            out.extend_from_slice(&0u32.to_le_bytes()); // crc
+            out.extend_from_slice(&size32.to_le_bytes()); // compressed
+            out.extend_from_slice(&size32.to_le_bytes()); // uncompressed
+            out.extend_from_slice(&(n.len() as u16).to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(n);
+            central.extend_from_slice(&0x02014b50u32.to_le_bytes());
+            central.extend_from_slice(&[20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            central.extend_from_slice(&0u32.to_le_bytes()); // crc
+            central.extend_from_slice(&size32.to_le_bytes());
+            central.extend_from_slice(&size32.to_le_bytes());
+            central.extend_from_slice(&(n.len() as u16).to_le_bytes());
+            central.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]);
+            central.extend_from_slice(&0u32.to_le_bytes()); // external attributes
+            central.extend_from_slice(&offset.to_le_bytes());
+            central.extend_from_slice(n);
+        }
+        let cd_offset = out.len() as u32;
+        let count = entries.len() as u16;
+        out.extend_from_slice(&central);
+        out.extend_from_slice(&0x06054b50u32.to_le_bytes());
+        out.extend_from_slice(&[0, 0, 0, 0]);
+        out.extend_from_slice(&count.to_le_bytes());
+        out.extend_from_slice(&count.to_le_bytes());
+        out.extend_from_slice(&(central.len() as u32).to_le_bytes());
+        out.extend_from_slice(&cd_offset.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out
+    }
+
+    #[test]
+    fn too_many_entries_or_bytes_are_refused() {
+        let names: Vec<String> = (0..=MAX_ENTRIES).map(|i| format!("assets/{i}")).collect();
+        let entries: Vec<(&str, u64)> = names.iter().map(|n| (n.as_str(), 0)).collect();
+        assert_eq!(
+            problem(inspect(Cursor::new(central_directory_zip(&entries)), None)),
+            ArchiveProblem::TooManyEntries
+        );
+
+        let big = [
+            ("libcogwork.so", 600 * 1024 * 1024),
+            ("assets/a", 600 * 1024 * 1024),
+        ];
+        assert_eq!(
+            problem(inspect(Cursor::new(central_directory_zip(&big)), None)),
+            ArchiveProblem::TooLarge
+        );
     }
 }

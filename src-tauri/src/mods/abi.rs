@@ -4,11 +4,10 @@
 
 use std::collections::BTreeMap;
 use std::time::Duration;
-use tauri::AppHandle;
 
 use super::error::ModsError;
 use super::index::WeftAbi;
-use super::paths::{cache_dir, write_atomic};
+use super::paths::{Paths, write_atomic};
 use crate::config::WEFT_REPO;
 
 pub fn fnv1a64(bytes: &[u8]) -> u64 {
@@ -36,34 +35,33 @@ pub fn is_safe_ref(s: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
 }
 
-fn cache_file(app: &AppHandle) -> Result<std::path::PathBuf, ModsError> {
-    Ok(cache_dir(app)?.join("abi.json"))
+fn cache_file(paths: &Paths) -> std::path::PathBuf {
+    paths.cache_dir().join("abi.json")
 }
 
-fn read_cache(app: &AppHandle) -> BTreeMap<String, String> {
-    cache_file(app)
+fn read_cache(paths: &Paths) -> BTreeMap<String, String> {
+    std::fs::read(cache_file(paths))
         .ok()
-        .and_then(|p| std::fs::read(p).ok())
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default()
 }
 
 /// The ABI of a cached tag, without going to the network. A tag's file never changes.
-pub fn cached_abi(app: &AppHandle, tag: &str, table: &[WeftAbi]) -> Option<String> {
+pub fn cached_abi(paths: &Paths, tag: &str, table: &[WeftAbi]) -> Option<String> {
     table
         .iter()
         .find(|w| w.tag == tag)
         .map(|w| w.abi.clone())
-        .or_else(|| read_cache(app).remove(tag))
+        .or_else(|| read_cache(paths).remove(tag))
 }
 
 pub async fn abi_for_tag(
-    app: &AppHandle,
+    paths: &Paths,
     client: &reqwest::Client,
     tag: &str,
     table: &[WeftAbi],
 ) -> Result<String, ModsError> {
-    if let Some(abi) = cached_abi(app, tag, table) {
+    if let Some(abi) = cached_abi(paths, tag, table) {
         return Ok(abi);
     }
     if !is_safe_ref(tag) {
@@ -85,12 +83,10 @@ pub async fn abi_for_tag(
         .map_err(|_| ModsError::AbiUnavailable(tag.to_string()))?;
     let abi = format_abi(fnv1a64(&bytes));
 
-    let mut cache = read_cache(app);
+    let mut cache = read_cache(paths);
     cache.insert(tag.to_string(), abi.clone());
     // Without the cache the hash is just fetched again next time.
-    if let Ok(path) = cache_file(app) {
-        let _ = serde_json::to_vec_pretty(&cache).map(|b| write_atomic(&path, &b));
-    }
+    let _ = serde_json::to_vec_pretty(&cache).map(|b| write_atomic(&cache_file(paths), &b));
     Ok(abi)
 }
 

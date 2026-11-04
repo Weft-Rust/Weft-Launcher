@@ -39,7 +39,7 @@ pub enum ReleasesError {
     UnexpectedStatus(u16),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub struct AssetInfo {
     pub name: String,
     pub url: String,
@@ -48,7 +48,7 @@ pub struct AssetInfo {
     pub sha256: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub struct Release {
     pub tag: String,
     pub name: String,

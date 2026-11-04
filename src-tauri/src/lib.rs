@@ -2,9 +2,13 @@ pub mod config;
 pub mod download;
 pub mod error;
 pub mod install;
+pub mod ipc;
 pub mod launch;
 pub mod mods;
 pub mod releases;
+
+#[cfg(test)]
+mod bindings;
 
 use tauri::Manager;
 
@@ -32,7 +36,8 @@ pub fn run() {
         .manage(install::ActiveInstalls::default())
         .manage(launch::RunningGames::default())
         .manage(mods::catalog::CatalogState::default())
-        .manage(mods::commands::ModsLock::default())
+        .manage(mods::service::ModsLock::default())
+        .manage(mods::store::Reservations::default())
         .setup(|app| {
             install::sweep_leftovers(app.handle());
             Ok(())
@@ -51,11 +56,13 @@ pub fn run() {
             mods::commands::add_mod_source,
             mods::commands::remove_mod_source,
             mods::commands::get_mod_profile,
+            mods::commands::plan_mod_install,
             mods::commands::install_mod,
             mods::commands::inspect_mod_file,
             mods::commands::install_mod_file,
             mods::commands::set_mod_enabled,
             mods::commands::remove_mod,
+            mods::commands::preview_copy_mod_profile,
             mods::commands::copy_mod_profile,
             mods::commands::get_mod_icon,
             mods::commands::open_player_mods_folder

@@ -62,7 +62,7 @@ pub enum InstallError {
     InstallInProgress(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub struct InstalledVersion {
     pub tag: String,
     pub path: String,
@@ -233,7 +233,7 @@ async fn download_and_install(
     let tag_owned = tag.to_string();
     let downloaded = crate::download::to_file(&client, asset_url, temp_download, None, |p| {
         let _ = app_handle.emit(
-            "install-progress",
+            crate::ipc::INSTALL_PROGRESS,
             serde_json::json!({
                 "tag": tag_owned,
                 "downloaded": p.downloaded,
@@ -249,7 +249,7 @@ async fn download_and_install(
     let total_size = downloaded.bytes;
 
     let _ = app_handle.emit(
-        "install-progress",
+        crate::ipc::INSTALL_PROGRESS,
         serde_json::json!({
             "tag": tag,
             "downloaded": downloaded.bytes,
@@ -272,7 +272,7 @@ async fn download_and_install(
 
     // Extract to temp directory
     let _ = app_handle.emit(
-        "install-progress",
+        crate::ipc::INSTALL_PROGRESS,
         serde_json::json!({
             "tag": tag,
             "downloaded": downloaded,
@@ -338,7 +338,7 @@ async fn download_and_install(
 
     // Finalizing
     let _ = app_handle.emit(
-        "install-progress",
+        crate::ipc::INSTALL_PROGRESS,
         serde_json::json!({
             "tag": tag,
             "downloaded": downloaded,
@@ -579,7 +579,7 @@ pub async fn remove_version(app_handle: tauri::AppHandle, tag: String) -> Result
         Ok(_) => {
             // Rename succeeded, now delete the renamed folder
             fs::remove_dir_all(&removing_dir).await?;
-            crate::mods::profile::forget_version(&app_handle, &tag);
+            crate::mods::forget_version(&app_handle, &tag);
             Ok(())
         }
         Err(e) => {

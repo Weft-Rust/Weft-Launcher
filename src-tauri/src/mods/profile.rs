@@ -1,25 +1,19 @@
-//! The mod set of one game version. `mods.lock.json` lists what is installed; the `mods/` folder
-//! beside it holds exactly the turned-on ones and is what the game gets with `--mods`. A mod
-//! that is off is not in that folder at all: the engine runs code even from mods it was told to
-//! skip, so leaving the file out is the only real "off".
+//! The mod set of one game version, as data. `mods.lock.json` lists what is installed; the `mods/`
+//! folder beside it holds exactly the turned-on ones (see `store.rs`). This module only decides:
+//! the status of each mod, what would block the game, which update fits, and revocations.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashSet};
-use std::path::{Path, PathBuf};
-use tauri::AppHandle;
+use std::collections::BTreeSet;
+use ts_rs::TS;
 
-use super::archive::current_platform;
 use super::catalog::{Catalog, CatalogMod, CatalogVersion, Origin, Trust};
-use super::error::ModsError;
-use super::index::Channel;
-use super::paths::{profile_dir, profiles_dir, store_dir, write_atomic};
-use crate::download::sha256_file;
+use super::index::{Channel, Platform, RESERVED_ID};
 use crate::error::AppError;
 
 /// Ships inside every Weft; never installed or checked by the launcher.
-pub const BUILTIN: &[&str] = &["base"];
+pub const BUILTIN: &[&str] = &[RESERVED_ID];
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct LockEntry {
     pub id: String,
@@ -46,7 +40,7 @@ pub struct LockEntry {
 }
 
 impl LockEntry {
-    pub fn from_catalog(m: &CatalogMod, v: &CatalogVersion) -> Self {
+    pub fn from_catalog(m: &CatalogMod, v: &CatalogVersion, enabled: bool) -> Self {
         LockEntry {
             id: m.id.clone(),
             name: m.name.clone(),
@@ -55,7 +49,7 @@ impl LockEntry {
             channel: Some(v.channel),
             sha256: v.sha256.clone(),
             size: v.size,
-            enabled: true,
+            enabled,
             trust: v.trust,
             origin: m.origin.clone(),
             abi: Some(v.abi.clone()),
@@ -70,11 +64,7 @@ impl LockEntry {
     }
 
     pub fn catalog_key(&self) -> Option<String> {
-        match &self.origin {
-            Origin::Index => Some(format!("index:{}", self.id)),
-            Origin::Source { repo } => Some(format!("source:{repo}:{}", self.id)),
-            Origin::File { .. } => None,
-        }
+        self.origin.key(&self.id)
     }
 }
 
@@ -91,6 +81,13 @@ pub struct Lock {
 }
 
 impl Lock {
+    pub fn empty() -> Self {
+        Lock {
+            schema: 1,
+            mods: Vec::new(),
+        }
+    }
+
     pub fn get(&self, id: &str) -> Option<&LockEntry> {
         self.mods.iter().find(|m| m.id == id)
     }
@@ -142,113 +139,16 @@ impl Lock {
         }
         out
     }
-}
 
-fn lock_path(app: &AppHandle, tag: &str) -> Result<PathBuf, ModsError> {
-    Ok(profile_dir(app, tag)?.join("mods.lock.json"))
-}
-
-pub fn mods_dir(app: &AppHandle, tag: &str) -> Result<PathBuf, ModsError> {
-    Ok(profile_dir(app, tag)?.join("mods"))
-}
-
-pub fn read_lock(app: &AppHandle, tag: &str) -> Result<Lock, ModsError> {
-    let path = lock_path(app, tag)?;
-    match std::fs::read(&path) {
-        Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Lock {
-            schema: 1,
-            mods: Vec::new(),
-        }),
-        Err(e) => Err(e.into()),
+    /// The display name of an installed mod, or its id.
+    pub fn name_of(&self, id: &str) -> String {
+        self.get(id)
+            .map(|e| e.name.clone())
+            .unwrap_or_else(|| id.to_string())
     }
 }
 
-pub fn write_lock(app: &AppHandle, tag: &str, lock: &Lock) -> Result<(), ModsError> {
-    write_atomic(&lock_path(app, tag)?, &serde_json::to_vec_pretty(lock)?)
-}
-
-pub fn store_path(app: &AppHandle, sha256: &str) -> Result<PathBuf, ModsError> {
-    Ok(store_dir(app)?.join(format!("{sha256}.zip")))
-}
-
-fn link_or_copy(from: &Path, to: &Path) -> std::io::Result<()> {
-    if std::fs::hard_link(from, to).is_ok() {
-        return Ok(());
-    }
-    std::fs::copy(from, to).map(|_| ())
-}
-
-/// Makes the profile's `mods/` hold exactly the turned-on mods, each with the bytes that were
-/// verified at install. A file changed since then is replaced from the store; a changed store
-/// file is an error, never handed to the game.
-pub fn reconcile(app: &AppHandle, tag: &str, lock: &Lock) -> Result<(), ModsError> {
-    let dir = mods_dir(app, tag)?;
-    std::fs::create_dir_all(&dir)?;
-    let wanted: Vec<&LockEntry> = lock.mods.iter().filter(|m| m.enabled).collect();
-
-    for entry in std::fs::read_dir(&dir)?.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if !wanted.iter().any(|m| format!("{}.zip", m.id) == name) {
-            let path = entry.path();
-            if path.is_dir() {
-                std::fs::remove_dir_all(&path)?;
-            } else {
-                std::fs::remove_file(&path)?;
-            }
-        }
-    }
-
-    for m in wanted {
-        let target = dir.join(format!("{}.zip", m.id));
-        if target.exists() && sha256_file(&target)? == m.sha256 {
-            continue;
-        }
-        let _ = std::fs::remove_file(&target);
-        let stored = store_path(app, &m.sha256)?;
-        let actual = sha256_file(&stored).map_err(|_| ModsError::NotInstalled(m.id.clone()))?;
-        if actual != m.sha256 {
-            return Err(ModsError::Sha256Mismatch {
-                expected: m.sha256.clone(),
-                actual,
-            });
-        }
-        link_or_copy(&stored, &target)?;
-    }
-    Ok(())
-}
-
-/// Deletes stored files no profile uses any more.
-pub fn collect_garbage(app: &AppHandle) -> Result<(), ModsError> {
-    let mut used = HashSet::new();
-    if let Ok(entries) = std::fs::read_dir(profiles_dir(app)?) {
-        for entry in entries.flatten() {
-            let tag = entry.file_name().to_string_lossy().to_string();
-            if let Ok(lock) = read_lock(app, &tag) {
-                used.extend(lock.mods.into_iter().map(|m| format!("{}.zip", m.sha256)));
-            }
-        }
-    }
-    if let Ok(entries) = std::fs::read_dir(store_dir(app)?) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if !used.contains(&name) {
-                let _ = std::fs::remove_file(entry.path());
-            }
-        }
-    }
-    Ok(())
-}
-
-/// A deleted game version takes its mod set along.
-pub fn forget_version(app: &AppHandle, tag: &str) {
-    if let Ok(dir) = profile_dir(app, tag) {
-        let _ = std::fs::remove_dir_all(dir);
-    }
-    let _ = collect_garbage(app);
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ModStatus {
     /// On, and fits this version as far as the launcher can tell.
@@ -264,7 +164,7 @@ pub enum ModStatus {
     Unchecked,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateView {
     pub version: String,
@@ -273,7 +173,7 @@ pub struct UpdateView {
     pub trust: Trust,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledMod {
     #[serde(flatten)]
@@ -284,60 +184,88 @@ pub struct InstalledMod {
     pub update: Option<UpdateView>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileReport {
     pub tag: String,
     pub version_abi: Option<String>,
     pub abi_error: Option<AppError>,
     pub mods: Vec<InstalledMod>,
-    /// Turned-on mods that would stop the game from starting.
+    /// Ids of turned-on mods that would stop the game from starting.
     pub blocking: Vec<String>,
     /// What sits in the player's own Weft mods folder. Loads into every version, unchecked.
     pub unmanaged: Vec<String>,
 }
 
-fn channel_rank(c: Channel) -> u8 {
-    match c {
-        Channel::Release => 0,
-        Channel::Prerelease => 1,
-        Channel::Experimental => 2,
+/// What a build must match to be used here: the version's mod interface and this system.
+#[derive(Debug, Clone, Copy)]
+pub struct Fit<'a> {
+    pub abi: &'a str,
+    pub platform: Option<Platform>,
+}
+
+impl<'a> Fit<'a> {
+    pub fn here(abi: &'a str) -> Self {
+        Fit {
+            abi,
+            platform: Platform::current(),
+        }
+    }
+
+    pub fn platform_ok(&self, v: &CatalogVersion) -> bool {
+        self.platform.is_some_and(|p| v.platforms.contains(&p))
+    }
+
+    pub fn accepts(&self, v: &CatalogVersion) -> bool {
+        v.abi == self.abi && self.platform_ok(v)
     }
 }
 
-/// The newest version of `key` that fits `abi` here, no less stable than `at_most`.
+/// The builds of `key` that fit here, no less stable than `at_most`, revoked ones included.
+pub fn fitting<'a>(
+    catalog: &'a Catalog,
+    key: &str,
+    fit: Fit<'_>,
+    at_most: Channel,
+) -> Option<(&'a CatalogMod, Vec<&'a CatalogVersion>)> {
+    let m = catalog.by_key(key)?;
+    let versions = m
+        .versions
+        .iter()
+        .filter(|v| fit.accepts(v) && v.channel.rank() <= at_most.rank())
+        .collect();
+    Some((m, versions))
+}
+
+/// The newest build of `key` that fits here, no less stable than `at_most`, and not revoked.
 pub fn best_version<'a>(
     catalog: &'a Catalog,
     key: &str,
-    abi: &str,
+    fit: Fit<'_>,
     at_most: Channel,
 ) -> Option<(&'a CatalogMod, &'a CatalogVersion)> {
-    let m = catalog.mods.iter().find(|m| m.key == key)?;
-    m.versions
-        .iter()
-        .filter(|v| v.abi == abi)
-        .filter(|v| v.platforms.iter().any(|p| p == current_platform()))
-        .filter(|v| channel_rank(v.channel) <= channel_rank(at_most))
+    let (m, versions) = fitting(catalog, key, fit, at_most)?;
+    versions
+        .into_iter()
         .filter(|v| catalog.revocation(&v.sha256).is_none())
         .max_by(|a, b| {
             super::version::compare(&a.version, &b.version)
-                .then(channel_rank(b.channel).cmp(&channel_rank(a.channel)))
+                .then(b.channel.rank().cmp(&a.channel.rank()))
         })
         .map(|v| (m, v))
 }
 
 /// A newer build for this version, or any fitting build for a mod that doesn't fit.
-fn update_for(
+pub fn update_for(
     entry: &LockEntry,
-    abi: Option<&str>,
-    catalog: Option<&Catalog>,
+    fit: Option<Fit<'_>>,
+    catalog: &Catalog,
 ) -> Option<UpdateView> {
-    let catalog = catalog?;
-    let abi = abi?;
+    let fit = fit?;
     let key = entry.catalog_key()?;
     let at_most = entry.channel.unwrap_or(Channel::Release);
-    let (_, v) = best_version(catalog, &key, abi, at_most)?;
-    let fits_now = entry.abi.as_deref() == Some(abi);
+    let (_, v) = best_version(catalog, &key, fit, at_most)?;
+    let fits_now = entry.abi.as_deref() == Some(fit.abi);
     let newer = entry
         .version
         .as_deref()
@@ -359,7 +287,8 @@ pub fn report(
     lock: &Lock,
     version_abi: Option<String>,
     abi_error: Option<AppError>,
-    catalog: Option<&Catalog>,
+    catalog: &Catalog,
+    platform: Option<Platform>,
     unmanaged: Vec<String>,
 ) -> ProfileReport {
     let enabled: BTreeSet<&str> = lock
@@ -368,10 +297,11 @@ pub fn report(
         .filter(|m| m.enabled)
         .map(|m| m.id.as_str())
         .collect();
+    let fit = version_abi.as_deref().map(|abi| Fit { abi, platform });
     let mut mods = Vec::new();
     let mut blocking = Vec::new();
     for entry in &lock.mods {
-        let revoked = catalog.and_then(|c| c.revocation(&entry.sha256));
+        let revoked = catalog.revocation(&entry.sha256);
         let missing: Vec<String> = entry
             .deps
             .iter()
@@ -397,7 +327,7 @@ pub fn report(
             blocking.push(entry.id.clone());
         }
         mods.push(InstalledMod {
-            update: update_for(entry, version_abi.as_deref(), catalog),
+            update: update_for(entry, fit, catalog),
             entry: entry.clone(),
             status,
             missing_deps: missing,
@@ -427,17 +357,26 @@ pub fn apply_revocations(lock: &mut Lock, catalog: &Catalog) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use super::super::catalog::{IndexStatus, RevokedView};
+    use super::super::index::Freshness;
     use super::*;
 
-    fn entry(id: &str, deps: &[&str], abi: Option<&str>) -> LockEntry {
+    pub const ABI: &str = "f470b1cbb1f9ad91";
+    pub const OLD_ABI: &str = "5f0569a6bea71b81";
+
+    pub fn sha(id: &str, version: &str) -> String {
+        crate::download::sha256_hex(format!("{id}@{version}").as_bytes())
+    }
+
+    pub fn entry(id: &str, deps: &[&str], abi: Option<&str>) -> LockEntry {
         LockEntry {
             id: id.into(),
-            name: id.into(),
+            name: format!("{id} name"),
             summary: String::new(),
             version: Some("0.1.0".into()),
             channel: Some(Channel::Release),
-            sha256: format!("{id:a>64}"),
+            sha256: sha(id, "0.1.0"),
             size: 1,
             enabled: true,
             trust: Trust::Reviewed,
@@ -453,46 +392,244 @@ mod tests {
         }
     }
 
-    const ABI: &str = "f470b1cbb1f9ad91";
+    pub fn lock(entries: Vec<LockEntry>) -> Lock {
+        Lock {
+            schema: 1,
+            mods: entries,
+        }
+    }
+
+    /// A catalogue build of `id` at `version` for `abi`, on Linux.
+    pub fn build(
+        id: &str,
+        version: &str,
+        abi: &str,
+        channel: Channel,
+        deps: &[&str],
+    ) -> CatalogVersion {
+        CatalogVersion {
+            version: version.into(),
+            channel,
+            tag: format!("{id}-v{version}"),
+            published: String::new(),
+            source_repo: "Zorro909/weft-mods".into(),
+            source_commit: "c".repeat(40),
+            weft_tag: None,
+            abi: abi.into(),
+            deps: deps.iter().map(|d| d.to_string()).collect(),
+            platforms: vec![Platform::LinuxX64],
+            sha256: sha(id, version),
+            size: 10,
+            url: String::new(),
+            provenance: None,
+            provenance_verified: false,
+            reviewed: None,
+            trust: Trust::Reviewed,
+        }
+    }
+
+    pub fn catalog_mod(id: &str, origin: Origin, versions: Vec<CatalogVersion>) -> CatalogMod {
+        CatalogMod {
+            key: origin.key(id).unwrap(),
+            id: id.into(),
+            name: format!("{id} name"),
+            summary: String::new(),
+            authors: vec![],
+            license: None,
+            homepage: None,
+            icon: None,
+            origin,
+            versions,
+        }
+    }
+
+    pub fn catalog(mods: Vec<CatalogMod>, revoked: &[&str]) -> Catalog {
+        Catalog {
+            mods,
+            revoked: revoked
+                .iter()
+                .map(|s| RevokedView {
+                    sha256: s.to_string(),
+                    reason: "broken".into(),
+                })
+                .collect(),
+            index: IndexStatus {
+                freshness: Freshness::Fresh,
+                generated: None,
+                error: None,
+            },
+            sources: vec![],
+            weft: vec![],
+            platform: String::new(),
+        }
+    }
+
+    pub fn fit() -> Fit<'static> {
+        Fit {
+            abi: ABI,
+            platform: Some(Platform::LinuxX64),
+        }
+    }
 
     #[test]
     fn statuses_and_blocking() {
-        let mut lock = Lock {
-            schema: 1,
-            mods: vec![
-                entry("cogwork", &["base", "showcase"], Some(ABI)),
-                entry("showcase", &[], Some(ABI)),
-                entry("old", &[], Some("5f0569a6bea71b81")),
-                entry("file", &[], None),
-            ],
-        };
-        lock.get_mut("showcase").unwrap().enabled = false;
-        let r = report("v1", &lock, Some(ABI.into()), None, None, vec![]);
-        let status = |id: &str| r.mods.iter().find(|m| m.entry.id == id).unwrap().status;
-        assert_eq!(status("cogwork"), ModStatus::MissingDeps);
-        assert_eq!(status("showcase"), ModStatus::Off);
-        assert_eq!(status("old"), ModStatus::WrongVersion);
-        assert_eq!(status("file"), ModStatus::Unchecked);
+        let mut revoked = entry("pulled", &[], Some(ABI));
+        revoked.enabled = false;
+        let mut off = entry("showcase", &[], Some(ABI));
+        off.enabled = false;
+        let l = lock(vec![
+            entry("cogwork", &["base", "showcase"], Some(ABI)),
+            off,
+            entry("old", &[], Some(OLD_ABI)),
+            entry("file", &[], None),
+            entry("fine", &["base"], Some(ABI)),
+            revoked.clone(),
+        ]);
+        let c = catalog(vec![], &[&revoked.sha256]);
+        let cases = [
+            (Some(ABI), "cogwork", ModStatus::MissingDeps),
+            (Some(ABI), "showcase", ModStatus::Off),
+            (Some(ABI), "old", ModStatus::WrongVersion),
+            (Some(ABI), "file", ModStatus::Unchecked),
+            (Some(ABI), "fine", ModStatus::Ready),
+            (Some(ABI), "pulled", ModStatus::Revoked),
+            // Without the version's interface nothing can be called wrong, only unchecked.
+            (None, "old", ModStatus::Unchecked),
+            (None, "fine", ModStatus::Unchecked),
+            (None, "cogwork", ModStatus::MissingDeps),
+        ];
+        for (abi, id, want) in cases {
+            let r = report(
+                "v1",
+                &l,
+                abi.map(str::to_string),
+                None,
+                &c,
+                fit().platform,
+                vec![],
+            );
+            let got = r.mods.iter().find(|m| m.entry.id == id).unwrap().status;
+            assert_eq!(got, want, "{id} with abi {abi:?}");
+        }
+        let r = report("v1", &l, Some(ABI.into()), None, &c, fit().platform, vec![]);
         assert_eq!(r.blocking, ["cogwork", "old"]);
+        assert_eq!(
+            r.mods
+                .iter()
+                .find(|m| m.entry.id == "pulled")
+                .unwrap()
+                .revoked_reason
+                .as_deref(),
+            Some("broken")
+        );
     }
 
     #[test]
     fn dependency_walks() {
-        let lock = Lock {
-            schema: 1,
-            mods: vec![
-                entry("a", &["b"], Some(ABI)),
-                entry("b", &["c", "base"], Some(ABI)),
-                entry("c", &[], Some(ABI)),
-                entry("d", &[], Some(ABI)),
-            ],
-        };
-        let mut deps = lock.deps_of("a");
+        let l = lock(vec![
+            entry("a", &["b"], Some(ABI)),
+            entry("b", &["c", "base"], Some(ABI)),
+            entry("c", &[], Some(ABI)),
+            entry("d", &[], Some(ABI)),
+        ]);
+        let mut deps = l.deps_of("a");
         deps.sort();
         assert_eq!(deps, ["b", "c"]);
-        let mut dependents = lock.dependents_of("c");
+        let mut dependents = l.dependents_of("c");
         dependents.sort();
         assert_eq!(dependents, ["a", "b"]);
-        assert!(lock.dependents_of("d").is_empty());
+        assert!(l.dependents_of("d").is_empty());
+    }
+
+    #[test]
+    fn update_offers() {
+        let rel = Channel::Release;
+        let c = catalog(
+            vec![
+                catalog_mod(
+                    "cogwork",
+                    Origin::Index,
+                    vec![
+                        build("cogwork", "0.3.0-rc.1", ABI, Channel::Prerelease, &[]),
+                        build("cogwork", "0.2.0", ABI, rel, &[]),
+                        build("cogwork", "0.1.0", ABI, rel, &[]),
+                        build("cogwork", "0.0.9", OLD_ABI, rel, &[]),
+                    ],
+                ),
+                catalog_mod(
+                    "lanterns",
+                    Origin::Source {
+                        repo: "Someone/Lanterns".into(),
+                    },
+                    vec![build("lanterns", "1.1.0", ABI, rel, &[])],
+                ),
+                catalog_mod(
+                    "pulled",
+                    Origin::Index,
+                    vec![build("pulled", "0.2.0", ABI, rel, &[])],
+                ),
+            ],
+            &[&sha("pulled", "0.2.0")],
+        );
+        let installed = |id: &str, version: &str, abi: &str, channel: Channel| {
+            let mut e = entry(id, &[], Some(abi));
+            e.version = Some(version.into());
+            e.sha256 = sha(id, version);
+            e.channel = Some(channel);
+            e
+        };
+        let mut from_source = installed("lanterns", "1.0.0", ABI, rel);
+        // Installed when the source was added with other casing.
+        from_source.origin = Origin::Source {
+            repo: "someone/lanterns".into(),
+        };
+        let mut local = installed("cogwork", "0.1.0", ABI, rel);
+        local.origin = Origin::File {
+            name: "c.zip".into(),
+        };
+        let cases: Vec<(&str, LockEntry, Option<&str>)> = vec![
+            (
+                "older release",
+                installed("cogwork", "0.1.0", ABI, rel),
+                Some("0.2.0"),
+            ),
+            (
+                "newest already",
+                installed("cogwork", "0.2.0", ABI, rel),
+                None,
+            ),
+            (
+                "prerelease player gets the rc",
+                installed("cogwork", "0.2.0", ABI, Channel::Prerelease),
+                Some("0.3.0-rc.1"),
+            ),
+            (
+                "built for another version: any fitting build",
+                installed("cogwork", "0.0.9", OLD_ABI, rel),
+                Some("0.2.0"),
+            ),
+            ("source, repo case differs", from_source, Some("1.1.0")),
+            (
+                "revoked build is never offered",
+                installed("pulled", "0.1.0", ABI, rel),
+                None,
+            ),
+            ("local file has no updates", local, None),
+        ];
+        for (what, e, want) in cases {
+            let got = update_for(&e, Some(fit()), &c).map(|u| u.version);
+            assert_eq!(got.as_deref(), want, "{what}");
+        }
+        assert!(update_for(&installed("cogwork", "0.1.0", ABI, rel), None, &c).is_none());
+    }
+
+    #[test]
+    fn revocations_turn_mods_off() {
+        let mut l = lock(vec![entry("a", &[], Some(ABI)), entry("b", &[], Some(ABI))]);
+        let c = catalog(vec![], &[&sha("a", "0.1.0")]);
+        assert!(apply_revocations(&mut l, &c));
+        assert!(!l.get("a").unwrap().enabled);
+        assert!(l.get("b").unwrap().enabled);
+        assert!(!apply_revocations(&mut l, &c));
     }
 }

@@ -3,40 +3,55 @@
 //! catalogue says; what is checked is that the description and the zip agree with GitHub's own
 //! record of the release.
 
-use reqwest::header::{ETAG, IF_NONE_MATCH, USER_AGENT};
+use reqwest::header::{ETAG, IF_NONE_MATCH, LINK, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tauri::AppHandle;
 
 use super::error::ModsError;
 use super::index::{
-    Asset, Channel, Dep, IndexMod, IndexVersion, Provenance, SourceRef, WeftRef, is_repo,
-    version_problem,
+    Asset, Channel, Dep, Freshness, IndexMod, IndexVersion, Provenance, SourceRef, WeftRef,
+    is_repo, same_repo, version_problem,
 };
-use super::paths::{cache_dir, sources_file, write_atomic};
+use super::paths::{Paths, write_atomic};
+use super::profile::now;
 
 const USER_AGENT_VALUE: &str = concat!("weft-launcher/", env!("CARGO_PKG_VERSION"));
-const MAX_MOD_JSON_BYTES: usize = 64 * 1024;
+pub const MAX_MOD_JSON_BYTES: usize = 64 * 1024;
+/// Releases are read 100 at a time, newest first, up to this many pages.
+pub const MAX_RELEASE_PAGES: usize = 5;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct SourcesFile {
     repos: Vec<String>,
 }
 
-pub fn list(app: &AppHandle) -> Vec<String> {
-    sources_file(app)
+pub fn list(paths: &Paths) -> Vec<String> {
+    std::fs::read(paths.sources_file())
         .ok()
-        .and_then(|p| std::fs::read(p).ok())
         .and_then(|b| serde_json::from_slice::<SourcesFile>(&b).ok())
         .map(|f| f.repos.into_iter().filter(|r| is_repo(r)).collect())
         .unwrap_or_default()
 }
 
-pub fn save(app: &AppHandle, repos: &[String]) -> Result<(), ModsError> {
+pub fn save(paths: &Paths, repos: &[String]) -> Result<(), ModsError> {
     let file = SourcesFile {
         repos: repos.to_vec(),
     };
-    write_atomic(&sources_file(app)?, &serde_json::to_vec_pretty(&file)?)
+    write_atomic(&paths.sources_file(), &serde_json::to_vec_pretty(&file)?)
+}
+
+/// The list with `canonical` added, or replacing the same repo spelled another way.
+pub fn with_repo(mut repos: Vec<String>, canonical: &str) -> Vec<String> {
+    match repos.iter_mut().find(|r| same_repo(r, canonical)) {
+        Some(r) => *r = canonical.to_string(),
+        None => repos.push(canonical.to_string()),
+    }
+    repos
+}
+
+pub fn without_repo(mut repos: Vec<String>, repo: &str) -> Vec<String> {
+    repos.retain(|r| !same_repo(r, repo));
+    repos
 }
 
 /// Accepts `owner/repo` or a github.com URL of the repo.
@@ -87,45 +102,57 @@ pub struct ModJson {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct GhAsset {
-    name: String,
-    browser_download_url: String,
-    size: u64,
+pub(crate) struct GhAsset {
+    pub name: String,
+    pub browser_download_url: String,
+    pub size: u64,
     #[serde(default)]
-    digest: Option<String>,
+    pub digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct GhRelease {
-    tag_name: String,
+pub(crate) struct GhRelease {
+    pub tag_name: String,
     #[serde(default)]
-    draft: bool,
-    prerelease: bool,
+    pub draft: bool,
+    pub prerelease: bool,
     #[serde(default)]
-    published_at: Option<String>,
-    assets: Vec<GhAsset>,
+    pub published_at: Option<String>,
+    pub assets: Vec<GhAsset>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct SourceCache {
     etag: Option<String>,
     mods: Vec<IndexMod>,
+    /// When GitHub last answered; missing in caches older launchers wrote.
+    #[serde(default)]
+    checked: Option<String>,
 }
 
-fn cache_path(app: &AppHandle, repo: &str) -> Result<std::path::PathBuf, ModsError> {
-    Ok(cache_dir(app)?
-        .join("mod-sources")
-        .join(format!("{}.json", repo.replace('/', "__"))))
+fn cache_path(paths: &Paths, repo: &str) -> std::path::PathBuf {
+    paths.cache_dir().join("mod-sources").join(format!(
+        "{}.json",
+        repo.to_ascii_lowercase().replace('/', "__")
+    ))
 }
 
-/// Checks one release's description against GitHub's record of the same release.
-fn accept(repo: &str, release: &GhRelease, zip: &GhAsset, json: ModJson) -> Option<IndexMod> {
+/// Checks one release's description against GitHub's record of the same release:
+/// schema 1; the id is the zip's stem; the tag, repo, asset name, URL and size equal GitHub's;
+/// the SHA-256 equals GitHub's digest (a release without a digest is skipped); and then every
+/// rule an index entry must follow. A GitHub prerelease is never a plain release.
+pub(crate) fn accept(
+    repo: &str,
+    release: &GhRelease,
+    zip: &GhAsset,
+    json: ModJson,
+) -> Option<IndexMod> {
     let stem = zip.name.strip_suffix(".zip")?;
     let digest = zip.digest.as_deref()?.strip_prefix("sha256:")?;
     let agrees = json.schema == 1
         && json.id == stem
         && json.tag == release.tag_name
-        && json.source.repo.eq_ignore_ascii_case(repo)
+        && same_repo(&json.source.repo, repo)
         && json.asset.name == zip.name
         && json.asset.url == zip.browser_download_url
         && json.asset.size == zip.size
@@ -134,7 +161,6 @@ fn accept(repo: &str, release: &GhRelease, zip: &GhAsset, json: ModJson) -> Opti
         return None;
     }
     let mut channel = json.channel;
-    // A release GitHub calls a prerelease never shows up as a plain release.
     if release.prerelease && channel == Channel::Release {
         channel = Channel::Prerelease;
     }
@@ -155,9 +181,10 @@ fn accept(repo: &str, release: &GhRelease, zip: &GhAsset, json: ModJson) -> Opti
             ..json.asset
         },
         provenance: json.provenance,
+        // A source can't review itself.
         reviewed: None,
     };
-    if version_problem(&json.id, &version).is_some() {
+    if version_problem(&json.id, &version).is_some() || json.id == super::index::RESERVED_ID {
         return None;
     }
     Some(IndexMod {
@@ -188,6 +215,21 @@ fn merge(entries: Vec<IndexMod>) -> Vec<IndexMod> {
     mods
 }
 
+/// Reads at most `max` bytes of a response; `None` if it is longer.
+async fn read_capped(mut response: reqwest::Response, max: usize) -> Option<Vec<u8>> {
+    if response.content_length().is_some_and(|n| n as usize > max) {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.ok()? {
+        if bytes.len() + chunk.len() > max {
+            return None;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Some(bytes)
+}
+
 async fn get_mod_json(client: &reqwest::Client, url: &str) -> Option<ModJson> {
     let response = client
         .get(url)
@@ -199,57 +241,137 @@ async fn get_mod_json(client: &reqwest::Client, url: &str) -> Option<ModJson> {
     if !response.status().is_success() {
         return None;
     }
-    let bytes = response.bytes().await.ok()?;
-    if bytes.len() > MAX_MOD_JSON_BYTES {
-        return None;
-    }
+    let bytes = read_capped(response, MAX_MOD_JSON_BYTES).await?;
     serde_json::from_slice(&bytes).ok()
 }
 
-/// The mods of one source. Falls back to the last good answer when GitHub can't be reached.
+/// The `rel="next"` URL of a GitHub `Link` header, if it stays on the API.
+pub(crate) fn next_page(link: &str) -> Option<String> {
+    link.split(',').find_map(|part| {
+        let (url, params) = part.split_once(';')?;
+        if !params.split(';').any(|p| p.trim() == r#"rel="next""#) {
+            return None;
+        }
+        let url = url.trim().strip_prefix('<')?.strip_suffix('>')?;
+        url.starts_with("https://api.github.com/")
+            .then(|| url.to_string())
+    })
+}
+
+/// One source as read now.
+pub struct SourceFetch {
+    pub mods: Vec<IndexMod>,
+    pub freshness: Freshness,
+    pub checked: Option<String>,
+    pub error: Option<ModsError>,
+}
+
+/// The last good answer with the reason the refresh failed, or nothing and the reason.
+fn fall_back(cached: Option<SourceCache>, error: ModsError) -> SourceFetch {
+    match cached {
+        Some(c) => SourceFetch {
+            mods: c.mods,
+            freshness: Freshness::Cached,
+            checked: c.checked,
+            error: Some(error),
+        },
+        None => SourceFetch {
+            mods: Vec::new(),
+            freshness: Freshness::Unavailable,
+            checked: None,
+            error: Some(error),
+        },
+    }
+}
+
+enum Listing {
+    NotModified,
+    Releases(Vec<GhRelease>, Option<String>),
+}
+
+async fn list_releases(
+    client: &reqwest::Client,
+    repo: &str,
+    etag: Option<&str>,
+) -> Result<Listing, ModsError> {
+    let mut url = format!("https://api.github.com/repos/{repo}/releases?per_page=100");
+    let mut releases = Vec::new();
+    let mut first_etag = None;
+    for page in 0..MAX_RELEASE_PAGES {
+        let mut request = client
+            .get(&url)
+            .header(USER_AGENT, USER_AGENT_VALUE)
+            .timeout(Duration::from_secs(15));
+        if page == 0
+            && let Some(etag) = etag
+        {
+            request = request.header(IF_NONE_MATCH, etag);
+        }
+        let response = request.send().await?;
+        let header = |name| {
+            response
+                .headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string)
+        };
+        let next = header(LINK).as_deref().and_then(next_page);
+        if page == 0 {
+            first_etag = header(ETAG);
+        }
+        match response.status().as_u16() {
+            200 => {}
+            304 if page == 0 => return Ok(Listing::NotModified),
+            404 => return Err(ModsError::SourceNotFound(repo.to_string())),
+            403 | 429 => return Err(ModsError::SourceRateLimited),
+            status => return Err(ModsError::Http { status, url }),
+        }
+        releases.extend(response.json::<Vec<GhRelease>>().await?);
+        match next {
+            Some(n) => url = n,
+            None => break,
+        }
+    }
+    Ok(Listing::Releases(releases, first_etag))
+}
+
+/// The mods of one source. When GitHub can't be asked or refuses, the last good answer is used
+/// and the error comes along with it.
 pub async fn fetch(
-    app: &AppHandle,
+    paths: &Paths,
     client: &reqwest::Client,
     repo: &str,
     refresh: bool,
-) -> Result<Vec<IndexMod>, ModsError> {
-    let path = cache_path(app, repo)?;
+) -> SourceFetch {
+    let path = cache_path(paths, repo);
     let cached: Option<SourceCache> = std::fs::read(&path)
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok());
     if !refresh && let Some(c) = cached {
-        return Ok(c.mods);
+        return SourceFetch {
+            mods: c.mods,
+            freshness: Freshness::Cached,
+            checked: c.checked,
+            error: None,
+        };
     }
 
-    let url = format!("https://api.github.com/repos/{repo}/releases?per_page=50");
-    let mut request = client
-        .get(&url)
-        .header(USER_AGENT, USER_AGENT_VALUE)
-        .timeout(Duration::from_secs(15));
-    if let Some(etag) = cached.as_ref().and_then(|c| c.etag.as_deref()) {
-        request = request.header(IF_NONE_MATCH, etag);
-    }
-    let response = match request.send().await {
-        Ok(r) => r,
-        Err(e) => return cached.map(|c| c.mods).ok_or(e.into()),
-    };
-    let etag = response
-        .headers()
-        .get(ETAG)
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_string);
-    match response.status().as_u16() {
-        200 => {}
-        304 => return Ok(cached.map(|c| c.mods).unwrap_or_default()),
-        404 => return Err(ModsError::SourceNotFound(repo.to_string())),
-        403 | 429 => return cached.map(|c| c.mods).ok_or(ModsError::RateLimited),
-        status => {
-            return cached
-                .map(|c| c.mods)
-                .ok_or(ModsError::Http { status, url });
+    let etag = cached.as_ref().and_then(|c| c.etag.clone());
+    let (releases, etag) = match list_releases(client, repo, etag.as_deref()).await {
+        Ok(Listing::Releases(r, e)) => (r, e),
+        Ok(Listing::NotModified) => {
+            let mut cache = cached.unwrap_or_default();
+            cache.checked = Some(now());
+            let _ = serde_json::to_vec(&cache).map(|b| write_atomic(&path, &b));
+            return SourceFetch {
+                mods: cache.mods,
+                freshness: Freshness::Fresh,
+                checked: cache.checked,
+                error: None,
+            };
         }
-    }
-    let releases: Vec<GhRelease> = response.json().await?;
+        Err(e) => return fall_back(cached, e),
+    };
 
     let mut entries = Vec::new();
     for release in releases.iter().filter(|r| !r.draft) {
@@ -274,17 +396,26 @@ pub async fn fetch(
             }
         }
     }
-    let mods = merge(entries);
     let cache = SourceCache {
         etag,
-        mods: mods.clone(),
+        mods: merge(entries),
+        checked: Some(now()),
     };
     let _ = serde_json::to_vec(&cache).map(|b| write_atomic(&path, &b));
-    Ok(mods)
+    SourceFetch {
+        mods: cache.mods,
+        freshness: Freshness::Fresh,
+        checked: cache.checked,
+        error: None,
+    }
 }
 
-/// Whether the repo exists, before it is added.
-pub async fn exists(client: &reqwest::Client, repo: &str) -> Result<(), ModsError> {
+/// The repo as GitHub spells it, if it exists. A renamed repo gives its new name.
+pub async fn canonical_name(client: &reqwest::Client, repo: &str) -> Result<String, ModsError> {
+    #[derive(Deserialize)]
+    struct GhRepo {
+        full_name: String,
+    }
     let url = format!("https://api.github.com/repos/{repo}");
     let response = client
         .get(&url)
@@ -293,15 +424,21 @@ pub async fn exists(client: &reqwest::Client, repo: &str) -> Result<(), ModsErro
         .send()
         .await?;
     match response.status().as_u16() {
-        200 => Ok(()),
-        404 => Err(ModsError::SourceNotFound(repo.to_string())),
-        403 | 429 => Err(ModsError::RateLimited),
-        status => Err(ModsError::Http { status, url }),
+        200 => {}
+        404 => return Err(ModsError::SourceNotFound(repo.to_string())),
+        403 | 429 => return Err(ModsError::SourceRateLimited),
+        status => return Err(ModsError::Http { status, url }),
+    }
+    let found: GhRepo = response.json().await?;
+    if is_repo(&found.full_name) {
+        Ok(found.full_name)
+    } else {
+        Err(ModsError::SourceInvalid(found.full_name))
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn release(prerelease: bool) -> (GhRelease, GhAsset) {
@@ -351,26 +488,37 @@ mod tests {
     #[test]
     fn description_must_agree_with_github() {
         let (r, zip) = release(false);
-        assert!(accept("Zorro909/weft-mods", &r, &zip, json()).is_some());
-
-        let mut j = json();
-        j.asset.sha256 = "b".repeat(64);
+        let repo = "Zorro909/weft-mods";
+        assert!(accept(repo, &r, &zip, json()).is_some());
         assert!(
-            accept("Zorro909/weft-mods", &r, &zip, j).is_none(),
-            "digest differs"
+            accept("zorro909/WEFT-MODS", &r, &zip, json()).is_some(),
+            "repos compare without case"
         );
 
-        let mut j = json();
-        j.tag = "cogwork-v9".into();
-        assert!(
-            accept("Zorro909/weft-mods", &r, &zip, j).is_none(),
-            "tag differs"
-        );
-
+        type Change = fn(&mut ModJson);
+        let cases: &[(&str, Change)] = &[
+            ("digest", |j| j.asset.sha256 = "b".repeat(64)),
+            ("tag", |j| j.tag = "cogwork-v9".into()),
+            ("schema", |j| j.schema = 2),
+            ("id", |j| j.id = "other".into()),
+            ("asset name", |j| j.asset.name = "other.zip".into()),
+            ("size", |j| j.asset.size = 11),
+            ("url", |j| j.asset.url.push_str("?x")),
+            ("source repo", |j| j.source.repo = "Other/repo".into()),
+        ];
+        for (what, change) in cases {
+            let mut j = json();
+            change(&mut j);
+            assert!(accept(repo, &r, &zip, j).is_none(), "{what} differs");
+        }
         assert!(
             accept("Other/repo", &r, &zip, json()).is_none(),
             "repo differs"
         );
+
+        let mut no_digest = zip.clone();
+        no_digest.digest = None;
+        assert!(accept(repo, &r, &no_digest, json()).is_none(), "no digest");
     }
 
     #[test]
@@ -378,6 +526,7 @@ mod tests {
         let (r, zip) = release(true);
         let m = accept("Zorro909/weft-mods", &r, &zip, json()).unwrap();
         assert_eq!(m.versions[0].channel, Channel::Prerelease);
+        assert!(m.versions[0].reviewed.is_none());
     }
 
     #[test]
@@ -392,5 +541,71 @@ mod tests {
         );
         assert!(normalize("https://gitlab.com/a/b").is_err());
         assert!(normalize("nope").is_err());
+    }
+
+    #[test]
+    fn repo_lists_ignore_case() {
+        let list = vec!["zorro909/weft-mods".to_string(), "a/b".to_string()];
+        assert_eq!(
+            with_repo(list.clone(), "Zorro909/weft-mods"),
+            ["Zorro909/weft-mods", "a/b"]
+        );
+        assert_eq!(with_repo(list.clone(), "c/d").len(), 3);
+        assert_eq!(without_repo(list, "ZORRO909/Weft-Mods"), ["a/b"]);
+    }
+
+    #[test]
+    fn pages_follow_link_headers() {
+        let link = r#"<https://api.github.com/repositories/1/releases?per_page=100&page=2>; rel="next", <https://api.github.com/repositories/1/releases?per_page=100&page=5>; rel="last""#;
+        assert_eq!(
+            next_page(link).as_deref(),
+            Some("https://api.github.com/repositories/1/releases?per_page=100&page=2")
+        );
+        assert_eq!(next_page(r#"<https://evil.example/x>; rel="next""#), None);
+        assert_eq!(next_page(r#"<https://api.github.com/x>; rel="prev""#), None);
+    }
+
+    #[test]
+    fn a_failed_refresh_keeps_the_cache_and_says_why() {
+        let cache = SourceCache {
+            etag: None,
+            mods: vec![super::super::catalog::tests::index_mod(
+                "cogwork",
+                "Zorro909/weft-mods",
+                &"a".repeat(64),
+            )],
+            checked: Some("2026-11-01T00:00:00Z".into()),
+        };
+        let got = fall_back(Some(cache), ModsError::SourceRateLimited);
+        assert_eq!(got.freshness, Freshness::Cached);
+        assert_eq!(got.mods.len(), 1);
+        assert_eq!(got.checked.as_deref(), Some("2026-11-01T00:00:00Z"));
+        assert!(matches!(got.error, Some(ModsError::SourceRateLimited)));
+
+        let got = fall_back(None, ModsError::SourceNotFound("a/b".into()));
+        assert_eq!(got.freshness, Freshness::Unavailable);
+        assert!(got.mods.is_empty() && got.error.is_some());
+    }
+
+    #[test]
+    fn mod_json_reads_are_capped() {
+        let run = |fut| {
+            tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap()
+                .block_on(fut)
+        };
+        let response = |body: Vec<u8>| reqwest::Response::from(http_response(body));
+        assert_eq!(
+            run(read_capped(response(vec![b'x'; 10]), 10))
+                .unwrap()
+                .len(),
+            10
+        );
+        assert!(run(read_capped(response(vec![b'x'; 11]), 10)).is_none());
+    }
+
+    fn http_response(body: Vec<u8>) -> ::http::Response<Vec<u8>> {
+        ::http::Response::builder().status(200).body(body).unwrap()
     }
 }

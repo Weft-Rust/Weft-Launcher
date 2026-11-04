@@ -103,7 +103,7 @@ fn extract_game_folder_path(line: &str) -> Option<String> {
     Some(cleaned[start..start + end].trim().to_string())
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct GameStateEvent {
     pub tag: String,
@@ -190,8 +190,9 @@ pub async fn launch_version(app_handle: AppHandle, tag: String) -> Result<(), Ap
         .into());
     }
 
-    // Refuses a mod set the game would refuse, before anything starts.
-    let mods_dir = crate::mods::prepare_launch(&app_handle, &tag).await?;
+    // Refuses a mod set the game would refuse, before anything starts. Holds the mod lock until
+    // the game is registered, so no mod change lands in between.
+    let mods = crate::mods::prepare_launch(&app_handle, &tag).await?;
 
     let games = running_games(&app_handle);
 
@@ -206,6 +207,7 @@ pub async fn launch_version(app_handle: AppHandle, tag: String) -> Result<(), Ap
         }
         running.insert(tag.clone());
     }
+    let mods_dir = mods.release();
 
     let launch = Launch {
         tag: &tag,
@@ -288,7 +290,7 @@ async fn start_game(
     let stderr_log = tokio::spawn(copy_to_log(stderr, log_stderr, "stderr"));
 
     let _ = app_handle.emit(
-        "game-state",
+        crate::ipc::GAME_STATE,
         GameStateEvent {
             tag: tag.to_string(),
             state: "running".to_string(),
@@ -317,7 +319,7 @@ async fn start_game(
             None
         };
         let _ = app_handle.emit(
-            "game-state",
+            crate::ipc::GAME_STATE,
             GameStateEvent {
                 tag,
                 state: "stopped".to_string(),
