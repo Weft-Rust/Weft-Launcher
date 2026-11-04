@@ -1,5 +1,7 @@
 //! Names the mod that stopped the game from starting. Weft exits with code 1 and leaves the
-//! reason in its log; these are the engine's own messages (`crates/engine/src/modloader.rs`).
+//! reason in its log; these are the engine's own messages (`crates/engine/src/modloader.rs`),
+//! which `crates/app/src/main.rs` logs with `log::error!`, so as `<time> ERROR [weft] <message>`.
+//! Only ERROR lines count: the engine logs ordinary mod loading at INFO.
 
 use serde::Serialize;
 use ts_rs::TS;
@@ -17,7 +19,7 @@ pub enum FailureKind {
     WrongName,
     /// `mod X requires missing mod Y`
     MissingDep,
-    /// `init panicked`, after the mod's own `[mod:X] panicked at …`
+    /// `X: init panicked`, after the mod's own `[mod:X] panicked at …`
     InitPanicked,
 }
 
@@ -64,8 +66,21 @@ fn message(line: &str) -> &str {
     line.rfind("] ").map_or(line, |i| &line[i + 2..])
 }
 
+/// Whether the line was logged at ERROR: the level stands on its own before the message.
+fn is_error(line: &str) -> bool {
+    let before = line.rfind("] ").map_or(line, |i| &line[..i]);
+    before.split_whitespace().any(|w| w == "ERROR")
+}
+
+fn is_id(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
 fn classify(line: &str) -> Option<ModFailure> {
     use FailureKind as K;
+    if !is_error(line) {
+        return None;
+    }
     let failure = |kind, mod_id: Option<&str>, other: Option<&str>| ModFailure {
         kind,
         mod_id: mod_id.map(str::to_string),
@@ -101,8 +116,14 @@ fn classify(line: &str) -> Option<ModFailure> {
             ..failure(K::NotAMod, None, None)
         });
     }
-    if line.contains("init panicked") {
-        return Some(failure(K::InitPanicked, None, None));
+    if let Some(before) = message(line).trim_end().strip_suffix("init panicked") {
+        // The engine prefixes each registration error with the mod's id: `showcase: init panicked`.
+        let id = before
+            .trim_end()
+            .strip_suffix(':')
+            .map(str::trim)
+            .filter(|id| is_id(id));
+        return Some(failure(K::InitPanicked, id, None));
     }
     None
 }
@@ -129,7 +150,7 @@ pub fn find(log: &str) -> Option<ModFailure> {
     let lines: Vec<String> = log.lines().map(crate::launch::strip_ansi_codes).collect();
     lines.iter().enumerate().find_map(|(i, l)| {
         let mut failure = classify(l)?;
-        if failure.kind == FailureKind::InitPanicked {
+        if failure.kind == FailureKind::InitPanicked && failure.mod_id.is_none() {
             failure.mod_id = panicked_mod(&lines[..i]);
         }
         Some(failure)
@@ -142,7 +163,9 @@ mod tests {
     use FailureKind as K;
 
     /// One fixture per kind, in the shape the launcher's log has: `[stderr]` from the launcher,
-    /// then the engine's own `<time> <LEVEL> [<target>] <message>`, with colour codes.
+    /// then the engine's own `{t:9.3} {LEVEL} [{target}] {message}` with its colour codes
+    /// (`crates/engine/src/log.rs`). The messages are the engine's `format!` strings in
+    /// `crates/engine/src/modloader.rs` and `content.rs`, logged by `crates/app` (target `weft`).
     #[test]
     fn every_failure_kind() {
         // What, log, kind, mod, other.
@@ -150,51 +173,51 @@ mod tests {
         let cases: &[Case] = &[
             (
                 "wrong version",
-                "[stderr] \x1b[90m    0.512\x1b[0m \x1b[1;31mERROR\x1b[0m \x1b[90m[app]\x1b[0m mod structures was built against another mod ABI (5f0569a6bea71b81, this engine has f470b1cbb1f9ad91); rebuild it against the current weft_sdk",
+                "[stderr] \x1b[90m    0.512\x1b[0m \x1b[1;31mERROR\x1b[0m \x1b[90m[weft]\x1b[0m mod structures was built against another mod ABI (5f0569a6bea71b81, this engine has f470b1cbb1f9ad91); rebuild it against the current weft_sdk",
                 K::WrongVersion,
                 Some("structures"),
                 None,
             ),
             (
                 "load failed",
-                "[stderr]     0.40 ERROR [app] loading mod cogwork from /x/mods/libcogwork.so: undefined symbol: foo",
+                "[stderr]     0.402 ERROR [weft] loading mod cogwork from /home/u/.cache/weft/unpacked/cogwork-2642469-1793815500/libcogwork.so: undefined symbol: foo",
                 K::LoadFailed,
                 Some("cogwork"),
                 None,
             ),
             (
                 "not a mod",
-                "[stderr]     0.40 ERROR [app] /home/u/.cache/weft/mods/4242-libmytweak.so is not a Weft mod",
+                "[stderr]     0.402 ERROR [weft] /home/u/.cache/weft/unpacked/mytweak-1048-1793815500/libmytweak.so is not a Weft mod",
                 K::NotAMod,
                 Some("mytweak"),
                 None,
             ),
             (
                 "not a mod, path with spaces",
-                r"[stderr]     0.40 ERROR [app] C:\Users\Jo Doe\AppData\Weft Cache\mods\77-my_tweak.dll is not a Weft mod",
+                r"[stderr]     0.402 ERROR [weft] C:\Users\Jo Doe\AppData\Local\weft\cache\unpacked\my_tweak-1048-1793815500\my_tweak.dll is not a Weft mod",
                 K::NotAMod,
                 Some("my_tweak"),
                 None,
             ),
             (
                 "wrong name",
-                "[stderr]     0.40 ERROR [app] mod cogworks is the crate cogwork: name its folder or zip cogwork",
+                "[stderr]     0.402 ERROR [weft] mod cogworks is the crate cogwork: name its folder or zip cogwork",
                 K::WrongName,
                 Some("cogworks"),
                 Some("cogwork"),
             ),
             (
                 "missing dependency",
-                "[stderr]     0.40 ERROR [app] mod cogwork requires missing mod showcase",
+                "[stderr]     0.402 ERROR [weft] mod cogwork requires missing mod showcase",
                 K::MissingDep,
                 Some("cogwork"),
                 Some("showcase"),
             ),
             (
-                "init panic without context",
-                "[stderr]     0.90 ERROR [app] init panicked",
+                "init panic, named by the engine",
+                "[stderr]     0.903 ERROR [weft] showcase: init panicked",
                 K::InitPanicked,
-                None,
+                Some("showcase"),
                 None,
             ),
         ];
@@ -208,26 +231,30 @@ mod tests {
     }
 
     #[test]
-    fn an_init_panic_names_the_mod_from_the_lines_before() {
+    fn an_init_panic_names_the_mod() {
+        // Several registration errors are joined with newlines into one ERROR record: only the
+        // first line carries the prefix, and the first failure counts.
         let log = "\
-[stderr]     0.10 INFO  [modloader] unpacked mod cogwork
-[stderr]     0.10 INFO  [modloader] unpacked mod showcase
-[stderr]     0.31 ERROR [mod:showcase] panicked at src/lib.rs:12:5: no tubes
-[stderr]     0.32 ERROR [app] init panicked
+[stderr]     0.101 INFO  [modloader] unpacked mod cogwork
+[stderr]     0.101 INFO  [modloader] unpacked mod showcase
+[stderr]     0.310 ERROR [mod:showcase] panicked at src/lib.rs:12: no tubes
+[stderr]     0.320 ERROR [weft] showcase: init panicked
+[stderr] cogwork: init panicked
 ";
         let f = find(log).unwrap();
         assert_eq!(f.kind, K::InitPanicked);
         assert_eq!(f.mod_id.as_deref(), Some("showcase"));
 
+        // Without the prefix (older engines), the mod's own panic line names it.
         let log = "\
-[stderr] ERROR [mod:cogwork::pipes] panicked at src/pipes.rs:3:1: x
-[stderr] ERROR [app] init panicked
+[stderr]     0.310 ERROR [mod:cogwork::pipes] panicked at src/pipes.rs:3: x
+[stderr]     0.320 ERROR [weft] init panicked
 ";
         assert_eq!(find(log).unwrap().mod_id.as_deref(), Some("cogwork"));
 
         let log = "\
-[stderr] DEBUG loading mod lanterns
-[stderr] ERROR [app] init panicked
+[stderr]     0.200 DEBUG [weft] loading mod lanterns
+[stderr]     0.320 ERROR [weft] init panicked
 ";
         assert_eq!(find(log).unwrap().mod_id.as_deref(), Some("lanterns"));
     }
@@ -235,11 +262,15 @@ mod tests {
     #[test]
     fn ordinary_lines_are_not_failures() {
         for line in [
-            "INFO loaded mod cogwork 0.2.0 (load position 1)",
-            "INFO [modloader] unpacked mod cogwork",
-            "INFO [modloader] mod cogwork is turned off",
-            "WARN [modloader] mod lanterns is off, as it needs one that is",
-            "ERROR [mod:cogwork] panicked at src/lib.rs:1:1: later, in game",
+            "[stderr]     1.200 INFO  [modloader] loaded mod cogwork 0.2.0 (load position 1)",
+            "[stderr]     0.101 INFO  [modloader] unpacked mod cogwork",
+            "[stderr]     0.101 INFO  [modloader] mod cogwork is turned off",
+            "[stderr]     0.101 WARN  [modloader] mod lanterns is off, as it needs one that is",
+            "[stderr]    90.000 ERROR [mod:cogwork] panicked at src/lib.rs:1: later, in game",
+            // The same words at another level, or in a mod's own chat, are not the engine's.
+            "[stderr]     0.402 INFO  [mod:hints] loading mod cogwork from the cache",
+            "[stderr]     0.402 WARN  [weft] mod cogwork requires missing mod showcase",
+            "[stdout] <player> my build is not a Weft mod",
             "",
         ] {
             assert!(find(line).is_none(), "{line:?}");

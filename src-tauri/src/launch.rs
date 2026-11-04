@@ -437,3 +437,18 @@ pub(crate) fn open_path(app_handle: &AppHandle, path: &Path) -> Result<(), Launc
         .open_path(path.to_string_lossy().as_ref(), None::<&str>)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_mods_argument() {
+        assert!(game_args(None).is_empty(), "no folder, no --mods");
+        let dir = Path::new("/data/profiles/v26.11.1/mods");
+        assert_eq!(
+            game_args(Some(dir)),
+            ["--mods", "/data/profiles/v26.11.1/mods"]
+        );
+    }
+}
