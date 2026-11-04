@@ -70,34 +70,49 @@ The engine checks these folders in order; for each id, the first copy found wins
 
 ### On-disk layout (`%APPDATA%\dev.weft.launcher\…`)
 
+As built (`src-tauri/src/mods/paths.rs`):
+
 ```
 mods/
-  store/<sha256>.zip          content-addressed, each one verified once
-  sources.json                index URL(s) + GitHub repos the user added
+  store/<sha256>.zip              content-addressed, each one verified once
+  sources.json                    the GitHub repos the player added, as GitHub spells them
 profiles/<weft-tag>/
-  mods/<id>.zip               only the turned-on mods (hardlink, or a copy if that fails)
-  mods.lock.json              every installed mod: id, version, sha256, source, trust, enabled
+  mods/<id>.zip                   only the turned-on mods (hardlink, or a copy if that fails)
+  mods.lock.json                  every installed mod: id, version, sha256, origin, trust, enabled, ABI, deps
 cache/
-  mod-index.json (+ .minisig)
-  abi/<weft-tag>.txt          ABI hash per Weft tag, kept forever since tags don't change
+  mod-index/<n>/index.json        verified index generations, each with its index.json.minisig;
+  mod-index/current               `current` names the newest; the newest two are kept
+  mod-sources/<owner__repo>.json  the last good answer of each source, with when it was fetched
+  mod-icons/<hash>.png            catalogue icons
+  abi.json                        ABI hash per Weft tag, kept forever since tags don't change
+downloads/mod-<sha256>-<unique>.part   a download in progress; never shared by two downloads
 ```
 
-Launch becomes `weft --mods <profiles/<tag>/mods>`. Turning a mod on or off just adds or removes the link. When a version is deleted, its profile goes with it, and unused store entries are garbage-collected.
+The index URL is built in (`index.rs`); `sources.json` holds only repos.
+
+Launch becomes `weft --mods <profiles/<tag>/mods>`. Turning a mod on or off just adds or removes the link. When a version is deleted, its profile goes with it, and unused store entries are garbage-collected. Garbage collection skips any store object an install is still working on, and deletes nothing if any lock file can't be read.
 
 ### Backend modules (`src-tauri/src/mods/`)
 
 | Module | Job |
 |---|---|
 | `abi.rs` | ABI hash of a Weft tag: the index's `weft[]` table, else a cache, else FNV-1a-64 of `raw.githubusercontent.com/Weft-Rust/Weft/<tag>/crates/abi/src/lib.rs` (verified against v26.10.2 and v26.10.4). **Later:** read a `weft-abi.txt` release asset. |
-| `index.rs` | Fetch the signed index, verify it (minisign), refuse an older one than the last verified copy, keep that copy for offline use, and drop entries that break [INDEX_FORMAT.md](INDEX_FORMAT.md). |
-| `sources.rs` | GitHub repos the player added: read their releases (ETag-cached) and accept a `<id>.mod.json` only where it agrees with GitHub on tag, asset name, URL, size and digest. |
+| `index.rs` | The index contract: parse it entry by entry (a bad entry is skipped, not fatal), verify it (minisign), refuse an older one than the last verified copy, and keep verified copies as cache generations for offline use. |
+| `sources.rs` | GitHub repos the player added: read their releases (ETag-cached, up to 5 pages of 100) and accept a `<id>.mod.json` only where it agrees with GitHub (see [INDEX_FORMAT.md](INDEX_FORMAT.md)). Falls back to the last good answer and reports why. |
 | `catalog.rs` | Merge the index and the sources into one list with a trust tier per version; a source build with a reviewed hash counts as Reviewed. |
 | `archive.rs` | Check the zip structure (below) before anything is stored. |
-| `profile.rs` | Lock file, the store and the per-version folders, the status of each mod, updates, revocations. |
+| `profile.rs` | Rules on a mod set: the status of each mod, what blocks the game, which update fits, revocations. |
+| `plan.rs` | Rules for changing a mod set: what an install brings along (`plan_mod_install`), what a copy brings over, turning on and off, removal. |
+| `store.rs` | The store, lock files, the per-version folders (`reconcile`), reservations for in-flight installs, garbage collection. |
+| `install.rs` | Download a build through the shared `download.rs`, check its SHA-256 and zip, move it into the store. |
+| `inspect.rs` | Describe a zip from the player's computer before it is installed. |
 | `diagnose.rs` | Read the game log after a crash and name the mod that stopped it. |
-| `commands.rs` | The Tauri commands; installs go through `fetch_to_store`, which streams via the shared `download.rs`, checks the SHA-256 and the zip, then moves it into `store/`. |
+| `service.rs` | The steps that need the running app: catalogue loading, the ABI, reports, the install flow, progress events. |
+| `commands.rs` | The Tauri commands: argument checks and locking. |
 
-Tauri commands: `list_mod_catalog`, `get_mod_sources`, `add_mod_source`, `remove_mod_source`, `get_mod_profile`, `install_mod`, `inspect_mod_file`, `install_mod_file`, `set_mod_enabled`, `remove_mod`, `copy_mod_profile`, `get_mod_icon`, `open_player_mods_folder`. The pre-Play check runs inside `launch_version`.
+Pure rules (`plan.rs`, `profile.rs`, `catalog.rs`, `index.rs`, `diagnose.rs`) take plain data, and everything on disk takes a `Paths` root, so all of it is tested without the app. The TypeScript types for IPC are generated from the Rust types into `src/mods/bindings/`.
+
+Tauri commands: `list_mod_catalog`, `get_mod_sources`, `add_mod_source`, `remove_mod_source`, `get_mod_profile`, `plan_mod_install`, `install_mod`, `inspect_mod_file`, `install_mod_file`, `set_mod_enabled`, `remove_mod`, `preview_copy_mod_profile`, `copy_mod_profile`, `get_mod_icon`, `open_player_mods_folder`. The pre-Play check runs inside `launch_version`, which holds the mod lock from that check until the game counts as running, so no mod change can land in between.
 
 ### Checking the zip structure (before it is stored)
 - Only `<id>.dll`, `lib<id>.so`, `lib<id>.dylib` and `assets/**` are allowed.
@@ -122,6 +137,8 @@ On `exit(1)`, scan the version's log for the engine's fixed messages:
 
 Show "X stopped Weft from starting" with Turn off / Find update / Open log (mockup 4). This builds on the existing `lastCrash` UI in `Home.tsx`.
 
+As built, `diagnose.rs` also recognises `mod X is the crate Y` (wrong name) and `init panicked`. For the latter, the mod comes from the lines before it: the mod's own `[mod:X] panicked at …` line.
+
 ### Moving to a new Weft version
 When a new version is installed, offer "Copy mod set from v26.10.4". Each mod is resolved to the build for the new ABI, and the launcher lists the ones that have no build yet. Because the ABI breaks with nearly every release, this is the feature players will use most.
 
@@ -135,12 +152,15 @@ What we can and can't promise:
 
 ### The trust tiers the UI shows
 
-| Badge | Meaning | Checks that must pass |
+Each build has exactly one tier. As built:
+
+| Badge | Meaning | What was checked |
 |---|---|---|
-| **Reviewed** (green) | In the curated Weft mod index | Index signature ✔, SHA-256 equals the index pin ✔, provenance ✔ (Phase 2) |
-| **Unreviewed** (grey) | From a GitHub repo the user added as a source; not reviewed by anyone | SHA-256 equals GitHub `digest` ✔. Phase 2 adds a provenance attestation: built by `release.yml` of repo R at commit C ✔ |
-| **Unverified** (red) | Local file, or a source without provenance | Zip structure only. Typed confirmation needed (mockup 3) |
-| **Revoked** | The index lists the sha256 as revoked | The launcher turns the mod off on the next refresh and says why |
+| **Reviewed** (green) | In the signed Weft mod index, with a recorded review (`reviewed.by`) | Index signature ✔, SHA-256 equals the index pin ✔, zip structure ✔. Provenance is shown as verified only when the index records it (`provenanceVerified`). |
+| **Unreviewed** (grey) | From a GitHub repo the player added as a source; nobody reviewed it | The `<id>.mod.json` agrees with GitHub's record of the release ✔, SHA-256 equals GitHub's `digest` (from the same server as the file) ✔, zip structure ✔. A provenance claim in the `.mod.json` is shown as the publisher's claim, not verified. |
+| **Unverified** (red) | A file from the player's computer that isn't in the catalogue | Zip structure only. Typed confirmation needed (mockup 3). A local file whose hash is in the catalogue installs with that build's tier instead. |
+
+**Revoked** is a status, not a tier. A build of any tier whose `sha256` the index lists in `revoked` is turned off on the next refresh, never installed, and can't be turned back on, not even by turning on something that needs it. The UI says why.
 
 ### The checks, from cheapest to strongest
 
@@ -218,7 +238,11 @@ Implemented on `feat/mod-manager`; names below are the ones in the code.
 
 - **Phase 1 and 2 together.** The signed index lives at `Zorro909/weft-mods-index` and is served from GitHub Pages; the launcher embeds its public key (`INDEX_PUBLIC_KEY` in `index.rs`). Sources, local files, revocation and "Bring mods from vX" (`copy_mod_profile`) all work.
 - **Renamed tier.** "CI-built" became **Unreviewed**: a source's release proves nothing about CI until it carries an attestation, so the name only claims what is known.
-- **Provenance** is shown when the index records it (`provenance` in INDEX_FORMAT) and is otherwise stated as "No build record". The launcher doesn't verify attestations itself; the index does that when a version is added.
+- **Provenance** counts as verified (`provenanceVerified`) only when the signed index records it; the index CI runs `gh attestation verify` when a version is added. A source's own `provenance` claim is passed on but never verified, and without either the UI says "No build record". The launcher doesn't verify attestations itself.
+- **Reviewed means reviewed.** An index version without a `reviewed` record is dropped.
+- **ABI matching compares published metadata.** The launcher compares the `abi` an entry declares with the version's ABI; it doesn't read the compiled library (that would mean loading it).
+- **Copying a mod set** ("Bring mods from vX") has a preview (`preview_copy_mod_profile`) and merges into a set that already has mods, skipping the ones it has.
+- **Updates keep the on/off state.** A mod that is off stays off after an update.
 - **Matching is by ABI, not tag.** Builds made from untagged Weft commits fit every release with the same ABI.
 - **Deferred:** everything in Phase 3, and the open questions above. The player's own `mods` folder is listed read-only for the warning (question 3) and never written to.
 - **Working on the UI without Tauri:** `npm run dev:mock` (see the README).
