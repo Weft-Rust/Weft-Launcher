@@ -25,6 +25,9 @@ pub mod sources;
 pub mod store;
 pub mod version;
 
+#[cfg(test)]
+mod doc_tests;
+
 pub use commands::{LaunchMods, prepare_launch};
 pub use paths::Paths;
 
