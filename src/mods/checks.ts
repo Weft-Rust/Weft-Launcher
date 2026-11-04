@@ -153,11 +153,6 @@ export function replaceNotes(plan: InstallPlan): RichMsg[] {
   return notes;
 }
 
-/** Whether a check list is safe to act on: nothing failed except what the dialog warns about. */
-export function hasFailure(rows: CheckRow[]): boolean {
-  return rows.some((r) => r.id === "problem");
-}
-
 /** A zip from the player's computer. */
 export function fileChecks(inspection: FileInspection, tag: string): CheckRow[] {
   const rows: CheckRow[] = [];
