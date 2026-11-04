@@ -1,111 +1,82 @@
-//! The steps the commands are made of that need the running app: its state, its events and the
-//! network. Each one is small; the rules they apply live in `plan.rs` and `profile.rs`.
+//! The mod manager's operations, one per command, on a [`Ctx`]. The rules they apply live in
+//! `plan.rs` and `profile.rs`; this is where the disk, the network and the locks come in.
+//!
+//! - Every change to a profile or the store happens under `ModsLock`, so two clicks never write
+//!   `mods.lock.json` at once. Downloads happen before taking it.
+//! - An install resolves what it needs, downloads it, then takes the lock and checks again
+//!   against the latest profile and catalogue before writing anything (see [`commit`]).
+//! - Hashing and copying files run off the async runtime ([`blocking`]).
 
-use std::sync::Arc;
+use std::path::PathBuf;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::{Mutex, OwnedMutexGuard};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
+use tokio::sync::OwnedMutexGuard;
 
 use super::abi::{abi_for_tag, cached_abi};
 use super::archive::current_platform;
-use super::catalog::{
-    self, Catalog, CatalogMod, CatalogState, CatalogVersion, IndexStatus, SourceResult,
-};
+use super::catalog::{self, Catalog, CatalogMod, CatalogVersion, IndexStatus, SourceResult};
+use super::context::{Ctx, blocking, check_sha, ensure_installed};
 use super::error::ModsError;
-use super::index::{self, IndexCache, is_sha256};
-use super::install::{self, ModProgress, ProgressStage};
+use super::index::{self, IndexCache, IndexState, RESERVED_ID};
+use super::inspect::{self, FileInspection};
+use super::install::{self, ProgressStage};
 use super::paths::{Paths, write_atomic};
-use super::plan::{self, ChangeResult};
+use super::plan::{
+    self, ChangeResult, CopyOutcome, CopyPreview, CopyResult, InstallPlan, Resolution,
+};
 use super::profile::{self, Fit, Lock, ProfileReport};
-use super::sources;
-use super::store::{self, Reservation, Reservations};
+use super::sources::{self, SourceFetch};
+use super::store::{self, Removed, Reservation};
+use crate::download::{read_capped, sha256_file};
 use crate::error::AppError;
 
-/// Held while a profile changes, and by a launch from its last check until the game counts as
-/// running.
-#[derive(Default)]
-pub struct ModsLock(Arc<Mutex<()>>);
-
-impl ModsLock {
-    pub async fn acquire(&self) -> OwnedMutexGuard<()> {
-        self.0.clone().lock_owned().await
-    }
-}
-
-pub async fn lock_mods(app: &AppHandle) -> OwnedMutexGuard<()> {
-    app.state::<ModsLock>().acquire().await
-}
-
+/// For the index, sources, icons and the ABI: redirects stay on GitHub, over https.
 pub fn http() -> Result<reqwest::Client, ModsError> {
     Ok(reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
+        .redirect(crate::download::redirect_policy())
         .build()?)
-}
-
-fn executable_name() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "weft.exe"
-    } else {
-        "weft"
-    }
-}
-
-pub fn ensure_installed(paths: &Paths, tag: &str) -> Result<(), ModsError> {
-    crate::install::validate_name(tag).map_err(|_| ModsError::InvalidName(tag.to_string()))?;
-    if paths
-        .versions_dir()
-        .join(tag)
-        .join(executable_name())
-        .exists()
-    {
-        Ok(())
-    } else {
-        Err(ModsError::VersionNotInstalled(tag.to_string()))
-    }
-}
-
-/// The page names builds by hash; anything else is refused before it reaches a path or a lookup.
-pub fn check_sha(sha256: &str) -> Result<String, ModsError> {
-    let sha = sha256.to_ascii_lowercase();
-    if is_sha256(&sha) {
-        Ok(sha)
-    } else {
-        Err(ModsError::InvalidName(sha256.to_string()))
-    }
-}
-
-/// The running game read its mods at start; changing them under it would only confuse.
-pub fn ensure_not_running(app: &AppHandle, tag: &str) -> Result<(), ModsError> {
-    match crate::launch::running_game(app) {
-        Some(running) if running == tag => Err(ModsError::GameRunning(running)),
-        _ => Ok(()),
-    }
-}
-
-pub fn is_running(app: &AppHandle, tag: &str) -> bool {
-    crate::launch::running_game(app).is_some_and(|r| r == tag)
-}
-
-pub fn reservations(app: &AppHandle) -> Reservations {
-    app.state::<Reservations>().inner().clone()
-}
-
-pub fn collect_garbage(app: &AppHandle, paths: &Paths) {
-    if let Err(e) = store::collect_garbage(paths, &reservations(app)) {
-        eprintln!("mods: garbage collection skipped: {e}");
-    }
 }
 
 // ---------------------------------------------------------------------------------------------
 // Catalogue
 
-pub async fn load_catalog(app: &AppHandle, refresh: bool) -> Result<Catalog, ModsError> {
-    let paths = Paths::of(app)?;
-    let client = http().unwrap_or_else(|_| reqwest::Client::new());
-    let cache = IndexCache::new(&paths.cache_dir(), index::public_key());
+fn rfc3339(t: OffsetDateTime) -> String {
+    t.format(&Rfc3339).unwrap_or_default()
+}
+
+fn source_result(repo: String, f: SourceFetch) -> SourceResult {
+    SourceResult {
+        repo,
+        mods: f.mods,
+        freshness: f.freshness,
+        checked: f.checked,
+        error: f.error.map(AppError::from),
+    }
+}
+
+fn build_catalog(state: IndexState, sources: Vec<SourceResult>) -> Catalog {
+    let status = IndexStatus {
+        freshness: state.freshness,
+        generated: state.index.as_ref().map(|i| i.generated.clone()),
+        signed_at: state.signed_at.map(rfc3339),
+        error: state.error.map(AppError::from),
+    };
+    catalog::build(state.index.as_ref(), status, sources)
+}
+
+fn index_cache(paths: &Paths) -> IndexCache {
+    IndexCache::new(&paths.cache_dir(), index::public_key())
+}
+
+/// The index and every source; refreshed from the network when `refresh` is set. The page sees
+/// this list, and installs only what is in it.
+pub async fn load_catalog(ctx: &Ctx, refresh: bool) -> Result<Catalog, ModsError> {
+    let client = http()?;
+    let cache = index_cache(&ctx.paths);
     let url = index::index_url();
-    let now = time::OffsetDateTime::now_utc();
-    let state = index::load(&cache, refresh, now, async {
+    let state = index::load(&cache, refresh, OffsetDateTime::now_utc(), async {
         let bytes = index::fetch_bytes(&client, &url).await?;
         let sig = index::fetch_bytes(&client, &format!("{url}.minisig")).await?;
         let sig = String::from_utf8(sig)
@@ -113,60 +84,44 @@ pub async fn load_catalog(app: &AppHandle, refresh: bool) -> Result<Catalog, Mod
         Ok((bytes, sig))
     })
     .await;
-    let status = IndexStatus {
-        freshness: state.freshness,
-        generated: state.index.as_ref().map(|i| i.generated.clone()),
-        signed_at: state.signed_at.map(|t| {
-            t.format(&time::format_description::well_known::Rfc3339)
-                .unwrap_or_default()
-        }),
-        error: state.error.map(AppError::from),
-    };
     let mut fetched = Vec::new();
-    for repo in sources::list(&paths) {
-        let f = sources::fetch(&paths, &client, &repo, refresh).await;
-        fetched.push(SourceResult {
-            repo,
-            mods: f.mods,
-            freshness: f.freshness,
-            checked: f.checked,
-            error: f.error.map(AppError::from),
-        });
+    for repo in sources::list(&ctx.paths) {
+        let f = sources::fetch(&ctx.paths, &client, &repo, refresh).await;
+        fetched.push(source_result(repo, f));
     }
-    let catalog = catalog::build(state.index.as_ref(), status, fetched);
-    *app.state::<CatalogState>().0.lock().unwrap() = Some(catalog.clone());
+    let catalog = build_catalog(state, fetched);
+    ctx.hold_catalog(catalog.clone());
     Ok(catalog)
 }
 
-/// The list the page last saw, or the cached one: never waits on the network.
-pub async fn current_catalog(app: &AppHandle) -> Result<Catalog, ModsError> {
-    let held = app.state::<CatalogState>().0.lock().unwrap().clone();
-    match held {
-        Some(c) => Ok(c),
-        None => load_catalog(app, false).await,
-    }
+/// The catalogue from what is on disk: the cached index and each source's last answer.
+pub fn offline_catalog(paths: &Paths) -> Catalog {
+    let state = index::cached(&index_cache(paths), OffsetDateTime::now_utc());
+    let sources = sources::list(paths)
+        .into_iter()
+        .map(|repo| {
+            let f = sources::cached(paths, &repo);
+            source_result(repo, f)
+        })
+        .collect();
+    build_catalog(state, sources)
 }
 
-/// A catalogue icon as PNG bytes, from the cache or the network.
-pub async fn icon_png(app: &AppHandle, url: &str) -> Result<Vec<u8>, ModsError> {
-    let known = app
-        .state::<CatalogState>()
-        .0
-        .lock()
-        .unwrap()
-        .as_ref()
-        .is_some_and(|c| c.mods.iter().any(|m| m.icon.as_deref() == Some(url)));
-    if !known || !url.starts_with("https://") {
-        return Err(ModsError::NotInCatalog(url.to_string()));
+/// The list the page last saw, else the one on disk: never touches the network.
+pub async fn current_catalog(ctx: &Ctx) -> Result<Catalog, ModsError> {
+    if let Some(c) = ctx.held_catalog() {
+        return Ok(c);
     }
-    let cache = Paths::of(app)?.cache_dir().join("mod-icons").join(format!(
-        "{}.png",
-        &crate::download::sha256_hex(url.as_bytes())[..32]
-    ));
-    if let Ok(bytes) = std::fs::read(&cache) {
-        return Ok(bytes);
-    }
-    let response = http()?
+    let paths = ctx.paths.clone();
+    blocking(move || Ok(offline_catalog(&paths))).await
+}
+
+pub const MAX_ICON_BYTES: usize = 512 * 1024;
+const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
+
+/// An icon's bytes, read up to [`MAX_ICON_BYTES`] and only if they are a PNG.
+pub async fn fetch_icon(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, ModsError> {
+    let response = client
         .get(url)
         .timeout(Duration::from_secs(15))
         .send()
@@ -177,12 +132,62 @@ pub async fn icon_png(app: &AppHandle, url: &str) -> Result<Vec<u8>, ModsError> 
             url: url.to_string(),
         });
     }
-    let bytes = response.bytes().await?.to_vec();
-    if bytes.len() > 512 * 1024 || !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return Err(ModsError::TooLarge("icon is not a PNG under 512 KB".into()));
+    let bytes = read_capped(response, MAX_ICON_BYTES)
+        .await?
+        .ok_or_else(|| ModsError::TooLarge("icon over 512 KB".into()))?;
+    if !bytes.starts_with(PNG_MAGIC) {
+        return Err(ModsError::TooLarge("icon is not a PNG".into()));
     }
+    Ok(bytes)
+}
+
+/// A catalogue icon as PNG bytes, from the cache or the network. Only icons the catalogue
+/// names, and only over https.
+pub async fn icon_png(ctx: &Ctx, url: &str) -> Result<Vec<u8>, ModsError> {
+    let known = ctx
+        .held_catalog()
+        .is_some_and(|c| c.mods.iter().any(|m| m.icon.as_deref() == Some(url)));
+    if !known || !url.starts_with("https://") {
+        return Err(ModsError::NotInCatalog(url.to_string()));
+    }
+    let cache = ctx.paths.cache_dir().join("mod-icons").join(format!(
+        "{}.png",
+        &crate::download::sha256_hex(url.as_bytes())[..32]
+    ));
+    if let Ok(bytes) = std::fs::read(&cache)
+        && bytes.len() <= MAX_ICON_BYTES
+        && bytes.starts_with(PNG_MAGIC)
+    {
+        return Ok(bytes);
+    }
+    let bytes = fetch_icon(&http()?, url).await?;
     let _ = write_atomic(&cache, &bytes);
     Ok(bytes)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sources
+
+pub fn source_list(ctx: &Ctx) -> Vec<String> {
+    sources::list(&ctx.paths)
+}
+
+/// Adds a repo as GitHub spells it. Adding one already there, in any case, keeps one entry.
+pub async fn add_source(ctx: &Ctx, repo: &str) -> Result<Vec<String>, ModsError> {
+    let repo = sources::normalize(repo)?;
+    let canonical = sources::canonical_name(&http()?, &repo).await?;
+    let _held = ctx.lock_mods().await;
+    let repos = sources::with_repo(sources::list(&ctx.paths), &canonical);
+    sources::save(&ctx.paths, &repos)?;
+    Ok(repos)
+}
+
+/// Mods installed from the repo stay installed; they just stop getting updates.
+pub async fn remove_source(ctx: &Ctx, repo: &str) -> Result<Vec<String>, ModsError> {
+    let _held = ctx.lock_mods().await;
+    let repos = sources::without_repo(sources::list(&ctx.paths), repo);
+    sources::save(&ctx.paths, &repos)?;
+    Ok(repos)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -226,8 +231,8 @@ pub async fn require_abi(paths: &Paths, catalog: &Catalog, tag: &str) -> Result<
 }
 
 /// Mods the player put into their own Weft folder, which every version loads.
-async fn unmanaged(app: &AppHandle) -> Vec<String> {
-    let Some(folder) = crate::launch::find_game_folder(app).await else {
+async fn unmanaged(paths: &Paths) -> Vec<String> {
+    let Some(folder) = crate::launch::find_game_folder_in(&paths.logs_dir()).await else {
         return Vec::new();
     };
     let Ok(entries) = std::fs::read_dir(folder.join("mods")) else {
@@ -243,14 +248,13 @@ async fn unmanaged(app: &AppHandle) -> Vec<String> {
 }
 
 pub async fn build_report(
-    app: &AppHandle,
-    paths: &Paths,
+    ctx: &Ctx,
     tag: &str,
     lock: &Lock,
     catalog: &Catalog,
     network: bool,
 ) -> ProfileReport {
-    let (abi, abi_error) = version_abi(paths, catalog, tag, network).await;
+    let (abi, abi_error) = version_abi(&ctx.paths, catalog, tag, network).await;
     profile::report(
         tag,
         lock,
@@ -258,118 +262,498 @@ pub async fn build_report(
         abi_error,
         catalog,
         current_platform(),
-        unmanaged(app).await,
+        unmanaged(&ctx.paths).await,
     )
 }
 
-/// The profile after a change that installed nothing.
-pub async fn change_result(
-    app: &AppHandle,
-    paths: &Paths,
+/// The profile after a change, with nothing else to report yet.
+async fn change_result(ctx: &Ctx, tag: &str, lock: &Lock, catalog: &Catalog) -> ChangeResult {
+    ChangeResult::of(build_report(ctx, tag, lock, catalog, false).await)
+}
+
+/// Makes the version's `mods/` folder hold exactly its turned-on mods.
+async fn reconcile(ctx: &Ctx, tag: &str, lock: &Lock) -> Result<(), ModsError> {
+    let (paths, tag, lock) = (ctx.paths.clone(), tag.to_string(), lock.clone());
+    blocking(move || store::reconcile(&paths, &tag, &lock)).await
+}
+
+/// Writes a changed mod set under `ModsLock`: the lock file, then the undo record (kept for a
+/// removal, else cleared, since this is the version's next change), then the folder. `held`
+/// reservations are let go once the lock file names their builds, and unused store files go.
+async fn save(
+    ctx: &Ctx,
     tag: &str,
     lock: &Lock,
-    catalog: &Catalog,
-) -> ChangeResult {
-    ChangeResult {
-        report: build_report(app, paths, tag, lock, catalog, false).await,
-        installed: Vec::new(),
-        also_enabled: Vec::new(),
-        also_disabled: Vec::new(),
-        missing: Vec::new(),
+    undo: Option<&Removed>,
+    held: Vec<Reservation>,
+) -> Result<(), ModsError> {
+    store::write_lock(&ctx.paths, tag, lock)?;
+    match undo {
+        Some(removed) => store::write_removed(&ctx.paths, tag, removed)?,
+        None => store::clear_removed(&ctx.paths, tag)?,
     }
+    drop(held);
+    reconcile(ctx, tag, lock).await?;
+    ctx.collect_garbage().await;
+    Ok(())
 }
 
-fn emit_progress(app: &AppHandle, sha256: &str, mod_id: &str, stage: ProgressStage, percent: u32) {
-    let _ = app.emit(
-        crate::ipc::MOD_PROGRESS,
-        ModProgress {
-            sha256: sha256.to_string(),
-            mod_id: mod_id.to_string(),
-            stage,
-            percent,
-        },
-    );
+/// The version's mod set, with revocations applied.
+pub async fn profile(ctx: &Ctx, tag: &str) -> Result<ProfileReport, ModsError> {
+    ensure_installed(&ctx.paths, tag)?;
+    let catalog = current_catalog(ctx).await?;
+    let lock = {
+        let _held = ctx.lock_mods().await;
+        let mut lock = store::read_lock(&ctx.paths, tag)?;
+        if profile::apply_revocations(&mut lock, &catalog) {
+            store::write_lock(&ctx.paths, tag, &lock)?;
+            reconcile(ctx, tag, &lock).await?;
+        }
+        lock
+    };
+    Ok(build_report(ctx, tag, &lock, &catalog, true).await)
 }
 
-/// Downloads what `wanted` needs, then writes it into the profile. `held` are reservations the
-/// caller already took (a local file admitted into the store).
-pub async fn run_install(
-    app: &AppHandle,
-    paths: &Paths,
+/// What `install` would do with this build, without doing it.
+pub async fn plan(ctx: &Ctx, tag: &str, sha256: &str) -> Result<InstallPlan, ModsError> {
+    ensure_installed(&ctx.paths, tag)?;
+    let sha = check_sha(sha256)?;
+    let catalog = current_catalog(ctx).await?;
+    let lock = store::read_lock(&ctx.paths, tag)?;
+    let (abi, _) = version_abi(&ctx.paths, &catalog, tag, true).await;
+    let fit = abi.as_deref().map(Fit::here);
+    plan::plan_install(&catalog, &lock, tag, &sha, fit, ctx.is_running(tag))
+}
+
+// ---------------------------------------------------------------------------------------------
+// Installing: stage, fetch, commit
+
+/// An install resolved against the profile as it was, with its builds reserved.
+pub struct Staged {
+    tag: String,
+    catalog: Catalog,
+    abi: String,
+    wanted: Vec<(CatalogMod, CatalogVersion)>,
+    snapshot: Lock,
+    res: Resolution,
+    held: Vec<Reservation>,
+}
+
+/// Resolves what `wanted` needs. `held` are reservations the caller already took.
+pub fn stage(
+    ctx: &Ctx,
     tag: &str,
-    catalog: &Catalog,
-    abi: &str,
+    catalog: Catalog,
+    abi: String,
     wanted: Vec<(CatalogMod, CatalogVersion)>,
     mut held: Vec<Reservation>,
-) -> Result<ChangeResult, ModsError> {
-    let fit = Fit::here(abi);
-    let snapshot = store::read_lock(paths, tag)?;
-    let res = plan::resolve(catalog, &snapshot, wanted, fit);
-    let reservations = reservations(app);
+) -> Result<Staged, ModsError> {
+    let snapshot = store::read_lock(&ctx.paths, tag)?;
+    let res = plan::resolve(&catalog, &snapshot, wanted.clone(), Fit::here(&abi));
     held.extend(
         res.picks
             .iter()
-            .map(|(_, v)| reservations.reserve(&v.sha256)),
+            .map(|(_, v)| ctx.reservations.reserve(&v.sha256)),
     );
-    for (m, v) in &res.picks {
-        install::fetch_to_store(paths, m, v, fit.platform, |stage, percent| {
-            emit_progress(app, &v.sha256, &m.id, stage, percent)
-        })
-        .await?;
-    }
-    for (m, v) in &res.picks {
-        emit_progress(app, &v.sha256, &m.id, ProgressStage::Installing, 100);
-    }
-
-    let _guard = lock_mods(app).await;
-    ensure_not_running(app, tag)?;
-    let mut lock = store::read_lock(paths, tag)?;
-    let done = plan::commit(&mut lock, &res);
-    store::write_lock(paths, tag, &lock)?;
-    drop(held);
-    store::reconcile(paths, tag, &lock)?;
-    collect_garbage(app, paths);
-    Ok(ChangeResult {
-        installed: done.installed,
-        also_enabled: done.also_enabled,
-        missing: res.missing,
-        ..change_result(app, paths, tag, &lock, catalog).await
+    Ok(Staged {
+        tag: tag.to_string(),
+        catalog,
+        abi,
+        wanted,
+        snapshot,
+        res,
+        held,
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Downloads every build the install needs into the store, unless it is there and intact.
+pub async fn fetch(ctx: &Ctx, staged: &Staged) -> Result<(), ModsError> {
+    let platform = Fit::here(&staged.abi).platform;
+    for (m, v) in &staged.res.picks {
+        install::fetch_to_store(&ctx.paths, m, v, platform, |stage, percent| {
+            ctx.emit(&v.sha256, &m.id, stage, percent)
+        })
+        .await?;
+    }
+    Ok(())
+}
 
-    #[test]
-    fn sha256_arguments_are_checked() {
-        let sha = "AB".repeat(32);
-        assert_eq!(check_sha(&sha).unwrap(), "ab".repeat(32));
-        for bad in [
-            "",
-            "abc",
-            "../../etc/passwd",
-            &"g".repeat(64),
-            &"a".repeat(65),
-        ] {
-            assert!(
-                matches!(check_sha(bad), Err(ModsError::InvalidName(_))),
-                "{bad:?}"
-            );
+/// Writes a downloaded install into the profile. Under `ModsLock`, it first checks that what
+/// the player agreed to still holds: the game version is still installed and not running, no
+/// build is revoked in the latest catalogue, and resolving again against the latest profile
+/// needs nothing more and changes nothing else. Otherwise `ModChangedMeanwhile`, and nothing is
+/// written.
+pub async fn commit(ctx: &Ctx, staged: Staged) -> Result<ChangeResult, ModsError> {
+    let Staged {
+        tag,
+        catalog,
+        abi,
+        wanted,
+        snapshot,
+        res,
+        held,
+    } = staged;
+    let _guard = ctx.lock_mods().await;
+    let changed = ModsError::ChangedMeanwhile;
+    if ensure_installed(&ctx.paths, &tag).is_err() {
+        return Err(changed(format!("{tag} was removed")));
+    }
+    if ctx.is_running(&tag) {
+        return Err(changed(format!("{tag} was started")));
+    }
+    let catalog = ctx.held_catalog().unwrap_or(catalog);
+    for (m, v) in &res.picks {
+        if let Some(r) = catalog.revocation(&v.sha256) {
+            return Err(changed(format!(
+                "{} {} was revoked: {}",
+                m.name, v.version, r.reason
+            )));
         }
     }
+    let mut lock = store::read_lock(&ctx.paths, &tag)?;
+    let now = plan::resolve(&catalog, &lock, wanted, Fit::here(&abi));
+    plan::still_holds((&snapshot, &res), (&lock, &now)).map_err(changed)?;
 
-    #[test]
-    fn the_mods_lock_is_held_until_released() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap();
-        rt.block_on(async {
-            let lock = ModsLock::default();
-            let held = lock.acquire().await;
-            assert!(lock.0.clone().try_lock_owned().is_err());
-            drop(held);
-            assert!(lock.0.clone().try_lock_owned().is_ok());
-        });
+    for (m, v) in &now.picks {
+        ctx.emit(&v.sha256, &m.id, ProgressStage::Installing, 100);
     }
+    let done = plan::commit(&mut lock, &now);
+    save(ctx, &tag, &lock, None, held).await?;
+    Ok(ChangeResult {
+        installed: done.installed,
+        also_enabled: done.also_enabled,
+        installed_off: done.installed_off,
+        missing: now.missing,
+        ..change_result(ctx, &tag, &lock, &catalog).await
+    })
+}
+
+async fn run_install(
+    ctx: &Ctx,
+    tag: &str,
+    catalog: Catalog,
+    abi: String,
+    wanted: Vec<(CatalogMod, CatalogVersion)>,
+    held: Vec<Reservation>,
+) -> Result<ChangeResult, ModsError> {
+    let staged = stage(ctx, tag, catalog, abi, wanted, held)?;
+    fetch(ctx, &staged).await?;
+    commit(ctx, staged).await
+}
+
+/// Installs the catalogue build with this hash, and what it needs. Installing another build of
+/// an installed mod replaces it and keeps it on or off as it was; a mod that needs something
+/// missing is installed turned off.
+pub async fn install(ctx: &Ctx, tag: &str, sha256: &str) -> Result<ChangeResult, ModsError> {
+    ensure_installed(&ctx.paths, tag)?;
+    let sha = check_sha(sha256)?;
+    ctx.ensure_not_running(tag)?;
+    let catalog = current_catalog(ctx).await?;
+    let (m, v) = catalog
+        .find(&sha)
+        .map(|(m, v)| (m.clone(), v.clone()))
+        .ok_or_else(|| ModsError::NotInCatalog(sha.clone()))?;
+    let abi = require_abi(&ctx.paths, &catalog, tag).await?;
+    plan::check_installable(&catalog, &m, &v, Fit::here(&abi))?;
+    run_install(ctx, tag, catalog, abi, vec![(m, v)], Vec::new()).await
+}
+
+/// What the launcher can tell about a zip from the player's computer, before installing it.
+pub async fn inspect_file(ctx: &Ctx, tag: &str, path: &str) -> Result<FileInspection, ModsError> {
+    ensure_installed(&ctx.paths, tag)?;
+    let catalog = current_catalog(ctx).await?;
+    let (abi, _) = version_abi(&ctx.paths, &catalog, tag, true).await;
+    let lock = store::read_lock(&ctx.paths, tag)?;
+    let path = PathBuf::from(path);
+    blocking(move || inspect::inspect(&path, &catalog, abi.as_deref(), current_platform(), &lock))
+        .await
+}
+
+/// Installs a zip from the player's computer. `sha256` is what `inspect_file` showed, so a file
+/// swapped in between is refused. A file that is in the catalogue installs from these same
+/// bytes, with the catalogue's metadata, trust and dependencies; anything else is Unverified.
+pub async fn install_file(
+    ctx: &Ctx,
+    tag: &str,
+    path: &str,
+    sha256: &str,
+) -> Result<ChangeResult, ModsError> {
+    ensure_installed(&ctx.paths, tag)?;
+    let sha = check_sha(sha256)?;
+    ctx.ensure_not_running(tag)?;
+    let catalog = current_catalog(ctx).await?;
+    if let Some(r) = catalog.revocation(&sha) {
+        return Err(ModsError::Revoked(r.reason.clone()));
+    }
+    let source = PathBuf::from(path);
+    inspect::checked_size(&source)?;
+    let hold = ctx.reservations.reserve(&sha);
+    let admit = |id: Option<String>, platform| {
+        let (paths, source, sha) = (ctx.paths.clone(), source.clone(), sha.clone());
+        blocking(move || store::admit_local(&paths, &source, &sha, id.as_deref(), platform))
+    };
+
+    if let Some((m, v)) = catalog.find(&sha).map(|(m, v)| (m.clone(), v.clone())) {
+        let abi = require_abi(&ctx.paths, &catalog, tag).await?;
+        let fit = Fit::here(&abi);
+        plan::check_installable(&catalog, &m, &v, fit)?;
+        admit(Some(m.id.clone()), fit.platform).await?;
+        return run_install(ctx, tag, catalog, abi, vec![(m, v)], vec![hold]).await;
+    }
+
+    let info = admit(None, current_platform()).await?;
+    if info.id == RESERVED_ID {
+        return Err(ModsError::IdReserved(info.id));
+    }
+    let mut entry = inspect::local_entry(&info, &ctx.paths.store_object(&sha), &source, &sha)?;
+
+    let _guard = ctx.lock_mods().await;
+    if ensure_installed(&ctx.paths, tag).is_err() {
+        return Err(ModsError::ChangedMeanwhile(format!("{tag} was removed")));
+    }
+    if ctx.is_running(tag) {
+        return Err(ModsError::ChangedMeanwhile(format!("{tag} was started")));
+    }
+    let mut lock = store::read_lock(&ctx.paths, tag)?;
+    entry.enabled = lock.get(&entry.id).is_none_or(|e| e.enabled);
+    lock.put(entry);
+    save(ctx, tag, &lock, None, vec![hold]).await?;
+    Ok(ChangeResult {
+        installed: vec![info.id],
+        ..change_result(ctx, tag, &lock, &catalog).await
+    })
+}
+
+// ---------------------------------------------------------------------------------------------
+// On, off, remove, undo
+
+/// Turning a mod on turns on the installed mods it needs, and is refused when one of them is
+/// revoked; turning it off turns off what needs it.
+pub async fn set_enabled(
+    ctx: &Ctx,
+    tag: &str,
+    id: &str,
+    enabled: bool,
+) -> Result<ChangeResult, ModsError> {
+    ensure_installed(&ctx.paths, tag)?;
+    ctx.ensure_not_running(tag)?;
+    let catalog = current_catalog(ctx).await?;
+    let _guard = ctx.lock_mods().await;
+    ctx.ensure_not_running(tag)?;
+    let mut lock = store::read_lock(&ctx.paths, tag)?;
+    let (also_enabled, also_disabled) = plan::set_enabled(&mut lock, &catalog, id, enabled)?;
+    save(ctx, tag, &lock, None, Vec::new()).await?;
+    Ok(ChangeResult {
+        also_enabled,
+        also_disabled,
+        ..change_result(ctx, tag, &lock, &catalog).await
+    })
+}
+
+/// Removes a mod and turns off what needed it. Until the version's next change, the removal
+/// can be undone with [`restore`]: the entry is kept, and so is its store file.
+pub async fn remove(ctx: &Ctx, tag: &str, id: &str) -> Result<ChangeResult, ModsError> {
+    ensure_installed(&ctx.paths, tag)?;
+    ctx.ensure_not_running(tag)?;
+    let catalog = current_catalog(ctx).await?;
+    let _guard = ctx.lock_mods().await;
+    ctx.ensure_not_running(tag)?;
+    let mut lock = store::read_lock(&ctx.paths, tag)?;
+    let entry = lock
+        .get(id)
+        .cloned()
+        .ok_or_else(|| ModsError::NotInstalled(id.to_string()))?;
+    let also_disabled = plan::remove(&mut lock, id)?;
+    let removed = Removed {
+        entry,
+        also_disabled: also_disabled.clone(),
+    };
+    save(ctx, tag, &lock, Some(&removed), Vec::new()).await?;
+    Ok(ChangeResult {
+        also_disabled,
+        undo: Some(id.to_string()),
+        ..change_result(ctx, tag, &lock, &catalog).await
+    })
+}
+
+/// Puts the most recently removed mod back exactly as it was: the same build, on or off as it
+/// was, and the mods its removal turned off on again. `ModNotInstalled` when that isn't
+/// possible any more: the version changed since, or the store file is gone or changed.
+pub async fn restore(ctx: &Ctx, tag: &str, id: &str) -> Result<ChangeResult, ModsError> {
+    ensure_installed(&ctx.paths, tag)?;
+    ctx.ensure_not_running(tag)?;
+    let catalog = current_catalog(ctx).await?;
+    let _guard = ctx.lock_mods().await;
+    ctx.ensure_not_running(tag)?;
+    let gone = || ModsError::NotInstalled(id.to_string());
+    let removed = store::read_removed(&ctx.paths, tag)?
+        .filter(|r| r.entry.id == id)
+        .ok_or_else(gone)?;
+    let mut lock = store::read_lock(&ctx.paths, tag)?;
+    if lock.get(id).is_some() {
+        return Err(gone());
+    }
+    let (stored, sha) = (
+        ctx.paths.store_object(&removed.entry.sha256),
+        removed.entry.sha256.clone(),
+    );
+    let intact =
+        blocking(move || Ok(sha256_file(&stored).is_ok_and(|actual| actual == sha))).await?;
+    if !intact {
+        return Err(gone());
+    }
+    lock.put(removed.entry);
+    let mut also_enabled = Vec::new();
+    for dep in &removed.also_disabled {
+        if let Some(e) = lock.get_mut(dep)
+            && !e.enabled
+        {
+            e.enabled = true;
+            also_enabled.push(dep.clone());
+        }
+    }
+    profile::apply_revocations(&mut lock, &catalog);
+    also_enabled.retain(|id| lock.get(id).is_some_and(|e| e.enabled));
+    save(ctx, tag, &lock, None, Vec::new()).await?;
+    Ok(ChangeResult {
+        also_enabled,
+        ..change_result(ctx, tag, &lock, &catalog).await
+    })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Copying a mod set
+
+struct CopyInputs {
+    catalog: Catalog,
+    abi: String,
+    preview: CopyPreview,
+    picks: Vec<(CatalogMod, CatalogVersion)>,
+}
+
+async fn copy_inputs(ctx: &Ctx, from: &str, to: &str) -> Result<CopyInputs, ModsError> {
+    ensure_installed(&ctx.paths, to)?;
+    let source = store::read_lock(&ctx.paths, from)?;
+    let target = store::read_lock(&ctx.paths, to)?;
+    let catalog = current_catalog(ctx).await?;
+    let abi = require_abi(&ctx.paths, &catalog, to).await?;
+    let (preview, picks) =
+        plan::copy_preview(&catalog, (from, &source), (to, &target), Fit::here(&abi));
+    Ok(CopyInputs {
+        catalog,
+        abi,
+        preview,
+        picks,
+    })
+}
+
+/// What `copy` would bring over.
+pub async fn copy_preview(ctx: &Ctx, from: &str, to: &str) -> Result<CopyPreview, ModsError> {
+    Ok(copy_inputs(ctx, from, to).await?.preview)
+}
+
+/// Brings the turned-on mods of one version to another, each as the build made for the new one.
+/// Mods the new version already has are left as they are.
+pub async fn copy(ctx: &Ctx, from: &str, to: &str) -> Result<CopyResult, ModsError> {
+    ctx.ensure_not_running(to)?;
+    let inputs = copy_inputs(ctx, from, to).await?;
+    let left_behind = inputs
+        .preview
+        .items
+        .into_iter()
+        .filter(|i| {
+            matches!(
+                i.outcome,
+                CopyOutcome::NoBuild | CopyOutcome::LocalFile | CopyOutcome::Revoked
+            )
+        })
+        .collect();
+    let change = if inputs.picks.is_empty() {
+        let lock = store::read_lock(&ctx.paths, to)?;
+        change_result(ctx, to, &lock, &inputs.catalog).await
+    } else {
+        run_install(
+            ctx,
+            to,
+            inputs.catalog,
+            inputs.abi,
+            inputs.picks,
+            Vec::new(),
+        )
+        .await?
+    };
+    Ok(CopyResult {
+        change,
+        left_behind,
+    })
+}
+
+/// A deleted game version takes its mod set along.
+pub async fn forget_version(ctx: &Ctx, tag: &str) {
+    let _guard = ctx.lock_mods().await;
+    let (paths, reservations, tag) = (ctx.paths.clone(), ctx.reservations.clone(), tag.to_string());
+    let _ = blocking(move || {
+        store::forget_version(&paths, &reservations, &tag);
+        Ok(())
+    })
+    .await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Before Play
+
+/// What Play does with a version's mod set.
+#[derive(Debug, PartialEq, Eq)]
+pub enum LaunchPlan {
+    /// Nothing is on: the game starts without `--mods`.
+    NoMods,
+    /// `--mods <the version's mods folder>`.
+    Mods,
+    /// The game would refuse to start: the names of the mods that stop it.
+    Blocked(Vec<String>),
+}
+
+pub fn launch_plan(lock: &Lock, report: &ProfileReport) -> LaunchPlan {
+    if !lock.mods.iter().any(|m| m.enabled) {
+        return LaunchPlan::NoMods;
+    }
+    if report.blocking.is_empty() {
+        LaunchPlan::Mods
+    } else {
+        LaunchPlan::Blocked(report.blocking.iter().map(|id| lock.name_of(id)).collect())
+    }
+}
+
+/// The outcome of the pre-Play check. Holds `ModsLock` until [`LaunchMods::release`], so no mod
+/// change can land between this check and the game counting as running.
+pub struct LaunchMods {
+    dir: Option<PathBuf>,
+    _held: OwnedMutexGuard<()>,
+}
+
+impl LaunchMods {
+    /// The folder to hand to `--mods`, letting mod changes go ahead again.
+    pub fn release(self) -> Option<PathBuf> {
+        self.dir
+    }
+}
+
+/// Before Play: the folder to hand to `--mods`, or why the game would not start. Never touches
+/// the network: it uses the catalogue the page last saw or the cached one, and the cached ABI.
+/// Without a known ABI the mods are only unchecked, and the game itself has the last word.
+pub async fn prepare_launch(ctx: &Ctx, tag: &str) -> Result<LaunchMods, ModsError> {
+    let catalog = current_catalog(ctx).await?;
+    let held = ctx.lock_mods().await;
+    let mut lock = store::read_lock(&ctx.paths, tag)?;
+    if profile::apply_revocations(&mut lock, &catalog) {
+        store::write_lock(&ctx.paths, tag, &lock)?;
+    }
+    reconcile(ctx, tag, &lock).await?;
+    let report = build_report(ctx, tag, &lock, &catalog, false).await;
+    let dir = match launch_plan(&lock, &report) {
+        LaunchPlan::NoMods => None,
+        LaunchPlan::Mods => Some(ctx.paths.mods_dir(tag)?),
+        LaunchPlan::Blocked(names) => return Err(ModsError::Blocked(names.join(", "))),
+    };
+    Ok(LaunchMods { dir, _held: held })
 }

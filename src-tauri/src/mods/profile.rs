@@ -37,6 +37,19 @@ pub struct LockEntry {
     pub source_commit: Option<String>,
     pub icon: Option<String>,
     pub installed_at: String,
+    /// Set when the index revoked this build, and kept even if the index can't be loaded later:
+    /// the mod stays revoked, and off, until it is replaced or removed.
+    #[serde(default)]
+    pub revoked: Option<Revocation>,
+}
+
+/// Why and when a revocation was applied to an installed build.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct Revocation {
+    pub reason: String,
+    /// RFC 3339 time the launcher applied it.
+    pub at: String,
 }
 
 impl LockEntry {
@@ -60,7 +73,17 @@ impl LockEntry {
             source_commit: Some(v.source_commit.clone()),
             icon: m.icon.clone(),
             installed_at: now(),
+            revoked: None,
         }
+    }
+
+    /// Why this build may not be used: the revocation recorded in the lock file, else the
+    /// catalogue's.
+    pub fn revoked_reason(&self, catalog: &Catalog) -> Option<String> {
+        self.revoked
+            .as_ref()
+            .map(|r| r.reason.clone())
+            .or_else(|| catalog.revocation(&self.sha256).map(|r| r.reason.clone()))
     }
 
     pub fn catalog_key(&self) -> Option<String> {
@@ -179,7 +202,10 @@ pub struct InstalledMod {
     #[serde(flatten)]
     pub entry: LockEntry,
     pub status: ModStatus,
+    /// Dependencies that aren't on: not installed, or installed and off.
     pub missing_deps: Vec<String>,
+    /// The part of `missing_deps` with no build installed at all.
+    pub deps_not_installed: Vec<String>,
     pub revoked_reason: Option<String>,
     pub update: Option<UpdateView>,
 }
@@ -301,11 +327,16 @@ pub fn report(
     let mut mods = Vec::new();
     let mut blocking = Vec::new();
     for entry in &lock.mods {
-        let revoked = catalog.revocation(&entry.sha256);
+        let revoked = entry.revoked_reason(catalog);
         let missing: Vec<String> = entry
             .deps
             .iter()
             .filter(|d| !BUILTIN.contains(&d.as_str()) && !enabled.contains(d.as_str()))
+            .cloned()
+            .collect();
+        let not_installed = missing
+            .iter()
+            .filter(|d| lock.get(d).is_none())
             .cloned()
             .collect();
         let status = if revoked.is_some() {
@@ -331,7 +362,8 @@ pub fn report(
             entry: entry.clone(),
             status,
             missing_deps: missing,
-            revoked_reason: revoked.map(|r| r.reason.clone()),
+            deps_not_installed: not_installed,
+            revoked_reason: revoked,
         });
     }
     ProfileReport {
@@ -344,11 +376,21 @@ pub fn report(
     }
 }
 
-/// Turns off every revoked mod. Returns whether anything changed.
+/// Records every revocation the catalogue lists for an installed build, and turns off every
+/// revoked mod. Returns whether anything changed.
 pub fn apply_revocations(lock: &mut Lock, catalog: &Catalog) -> bool {
     let mut changed = false;
     for m in &mut lock.mods {
-        if m.enabled && catalog.revocation(&m.sha256).is_some() {
+        if m.revoked.is_none()
+            && let Some(r) = catalog.revocation(&m.sha256)
+        {
+            m.revoked = Some(Revocation {
+                reason: r.reason.clone(),
+                at: now(),
+            });
+            changed = true;
+        }
+        if m.enabled && m.revoked.is_some() {
             m.enabled = false;
             changed = true;
         }
@@ -389,6 +431,7 @@ pub(crate) mod tests {
             source_commit: None,
             icon: None,
             installed_at: String::new(),
+            revoked: None,
         }
     }
 
@@ -630,7 +673,67 @@ pub(crate) mod tests {
         let c = catalog(vec![], &[&sha("a", "0.1.0")]);
         assert!(apply_revocations(&mut l, &c));
         assert!(!l.get("a").unwrap().enabled);
+        assert_eq!(
+            l.get("a").unwrap().revoked.as_ref().unwrap().reason,
+            "broken"
+        );
         assert!(l.get("b").unwrap().enabled);
+        assert!(l.get("b").unwrap().revoked.is_none());
         assert!(!apply_revocations(&mut l, &c));
+    }
+
+    /// The index can't be loaded any more: the lock file still knows, so the mod stays revoked
+    /// and says why.
+    #[test]
+    fn a_recorded_revocation_survives_without_the_index() {
+        let mut l = lock(vec![entry("a", &[], Some(ABI))]);
+        apply_revocations(&mut l, &catalog(vec![], &[&sha("a", "0.1.0")]));
+        let saved = serde_json::to_vec(&l).unwrap();
+        let mut l: Lock = serde_json::from_slice(&saved).unwrap();
+
+        let unavailable = catalog(vec![], &[]);
+        let r = report(
+            "v1",
+            &l,
+            Some(ABI.into()),
+            None,
+            &unavailable,
+            fit().platform,
+            vec![],
+        );
+        assert_eq!(r.mods[0].status, ModStatus::Revoked);
+        assert_eq!(r.mods[0].revoked_reason.as_deref(), Some("broken"));
+
+        // Even if something turned it back on, the next check turns it off again.
+        l.mods[0].enabled = true;
+        assert!(apply_revocations(&mut l, &unavailable));
+        assert!(!l.mods[0].enabled);
+
+        // A lock file written before revocations were recorded still reads.
+        let old = r#"{"schema":1,"mods":[]}"#;
+        assert!(serde_json::from_str::<Lock>(old).is_ok());
+    }
+
+    #[test]
+    fn missing_dependencies_say_whether_they_are_installed() {
+        let mut off = entry("showcase", &[], Some(ABI));
+        off.enabled = false;
+        let l = lock(vec![
+            entry("cogwork", &["base", "showcase", "signals"], Some(ABI)),
+            off,
+        ]);
+        let r = report(
+            "v1",
+            &l,
+            Some(ABI.into()),
+            None,
+            &catalog(vec![], &[]),
+            fit().platform,
+            vec![],
+        );
+        let cogwork = r.mods.iter().find(|m| m.entry.id == "cogwork").unwrap();
+        assert_eq!(cogwork.status, ModStatus::MissingDeps);
+        assert_eq!(cogwork.missing_deps, ["showcase", "signals"]);
+        assert_eq!(cogwork.deps_not_installed, ["signals"]);
     }
 }

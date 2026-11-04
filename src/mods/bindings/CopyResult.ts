@@ -22,4 +22,12 @@ alsoDisabled: Array<string>,
 /**
  * Dependencies nothing in the catalogue provides for this version.
  */
-missing: Array<string>, };
+missing: Array<string>, 
+/**
+ * Mods this change installed turned off, because something they need is missing.
+ */
+installedOff: Array<string>, 
+/**
+ * The id of the mod this change removed, while `restore_mod` can still bring it back.
+ */
+undo: string | null, };

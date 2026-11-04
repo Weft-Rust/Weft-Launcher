@@ -5,7 +5,9 @@
 //! mods/sources.json                    GitHub repos the player added as sources
 //! profiles/<tag>/mods/<id>.zip         the turned-on mods of one game version, handed to `--mods`
 //! profiles/<tag>/mods.lock.json        everything installed for that version
+//! profiles/<tag>/removed.json          the last removal, until the next change (for Undo)
 //! cache/mod-index/<n>/index.json(.minisig)   verified index generations; `current` names one
+//! cache/mod-index.state.json           the newest index age ever accepted (rollback protection)
 //! cache/mod-sources/<owner__repo>.json  the last good answer of each source
 //! cache/abi.json                       the mod interface hash of each Weft tag
 //! downloads/mod-<sha256>-<unique>.part a download in progress
@@ -63,6 +65,11 @@ impl Paths {
         Ok(self.profile_dir(tag)?.join(LOCK_FILE))
     }
 
+    /// The most recent removal from that version, while it can be undone.
+    pub fn removed_file(&self, tag: &str) -> Result<PathBuf, ModsError> {
+        Ok(self.profile_dir(tag)?.join(REMOVED_FILE))
+    }
+
     pub fn mods_dir(&self, tag: &str) -> Result<PathBuf, ModsError> {
         Ok(self.profile_dir(tag)?.join("mods"))
     }
@@ -78,9 +85,15 @@ impl Paths {
     pub fn versions_dir(&self) -> PathBuf {
         self.root.join("versions")
     }
+
+    /// The game logs the launcher writes, one per version.
+    pub fn logs_dir(&self) -> PathBuf {
+        self.root.join("logs")
+    }
 }
 
 pub const LOCK_FILE: &str = "mods.lock.json";
+pub const REMOVED_FILE: &str = "removed.json";
 
 /// A name no other download or write in this process uses, so two of them never share a file.
 pub fn unique_suffix() -> String {

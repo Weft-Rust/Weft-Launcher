@@ -34,6 +34,7 @@ export type * from "./ProgressStage";
 export type * from "./ProvenanceView";
 export type * from "./Release";
 export type * from "./ReviewedView";
+export type * from "./Revocation";
 export type * from "./RevokedView";
 export type * from "./SourceStatus";
 export type * from "./Trust";

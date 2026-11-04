@@ -20,6 +20,11 @@ enable: Array<string>,
  */
 missing: Array<string>, 
 /**
+ * Whether the target is on after this install: it is new or on now, and nothing is
+ * missing. With something missing it is installed turned off.
+ */
+turnsOn: boolean, 
+/**
  * Why the install would fail, if it would.
  */
 problem: AppErrorPayload | null, };

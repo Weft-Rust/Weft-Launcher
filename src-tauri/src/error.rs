@@ -77,6 +77,7 @@ error_codes! {
     ModDownloadNotFound,
     ModTooLarge,
     ModIdReserved,
+    ModChangedMeanwhile,
 }
 
 impl std::fmt::Display for ErrorCode {

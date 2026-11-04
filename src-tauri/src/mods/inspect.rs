@@ -143,6 +143,7 @@ pub fn local_entry(
         source_commit: None,
         icon: None,
         installed_at: now(),
+        revoked: None,
     })
 }
 

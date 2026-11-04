@@ -3,7 +3,7 @@
 //! hash, and the URL and hash always come from here, never from the page.
 
 use serde::Serialize;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use ts_rs::TS;
 
 use super::archive::current_platform;
@@ -161,8 +161,9 @@ impl Catalog {
     }
 }
 
-#[derive(Default)]
-pub struct CatalogState(pub Mutex<Option<Catalog>>);
+/// The catalogue the page last loaded.
+#[derive(Default, Clone)]
+pub struct CatalogState(pub Arc<Mutex<Option<Catalog>>>);
 
 fn version_view(v: &IndexVersion, trust: Trust, from_index: bool) -> CatalogVersion {
     CatalogVersion {

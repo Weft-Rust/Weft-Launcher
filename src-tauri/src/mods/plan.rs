@@ -1,8 +1,12 @@
 //! The rules for changing a mod set, on plain data: what an install brings along, what a copy
 //! brings over, and what turning a mod on or off or removing it does to the others. Nothing here
-//! touches the disk or the network; `commands.rs` does that around these.
+//! touches the disk or the network; `service.rs` does that around these.
+//!
+//! An installed mod that needs something no build provides is installed turned off, so an
+//! install never stops Play from working.
 
 use serde::Serialize;
+use std::collections::BTreeSet;
 use ts_rs::TS;
 
 use super::catalog::{Catalog, CatalogMod, CatalogVersion, Origin, Trust};
@@ -59,6 +63,9 @@ pub struct InstallPlan {
     pub enable: Vec<String>,
     /// Dependency ids with no fitting, non-revoked build.
     pub missing: Vec<String>,
+    /// Whether the target is on after this install: it is new or on now, and nothing is
+    /// missing. With something missing it is installed turned off.
+    pub turns_on: bool,
     /// Why the install would fail, if it would.
     pub problem: Option<AppError>,
 }
@@ -76,6 +83,25 @@ pub struct ChangeResult {
     pub also_disabled: Vec<String>,
     /// Dependencies nothing in the catalogue provides for this version.
     pub missing: Vec<String>,
+    /// Mods this change installed turned off, because something they need is missing.
+    pub installed_off: Vec<String>,
+    /// The id of the mod this change removed, while `restore_mod` can still bring it back.
+    pub undo: Option<String>,
+}
+
+impl ChangeResult {
+    /// A change that did nothing beyond what the report shows.
+    pub fn of(report: ProfileReport) -> Self {
+        ChangeResult {
+            report,
+            installed: Vec::new(),
+            also_enabled: Vec::new(),
+            also_disabled: Vec::new(),
+            missing: Vec::new(),
+            installed_off: Vec::new(),
+            undo: None,
+        }
+    }
 }
 
 /// What a copy did; `left_behind` are the turned-on mods of the old version that weren't
@@ -153,7 +179,7 @@ pub fn resolve(
             }
             if let Some(have) = lock.get(dep)
                 && have.abi.as_deref().is_none_or(|a| a == fit.abi)
-                && catalog.revocation(&have.sha256).is_none()
+                && have.revoked_reason(catalog).is_none()
             {
                 if !have.enabled && !res.enable.contains(dep) {
                     res.enable.push(dep.clone());
@@ -177,49 +203,140 @@ pub fn resolve(
     res
 }
 
-/// Whether the dependencies a change brings in end up on: they do when a wanted mod ends up on.
-/// A wanted mod keeps its on/off state when it replaces an installed one; new ones are on.
-fn deps_on(lock: &Lock, wanted: &[String]) -> bool {
-    wanted
+impl Resolution {
+    fn deps_of(&self, id: &str) -> &[String] {
+        self.picks
+            .iter()
+            .find(|(m, _)| m.id == id)
+            .map_or(&[], |(_, v)| v.deps.as_slice())
+    }
+
+    /// Whether `id`, through the builds this resolution picks, needs something missing.
+    fn needs_missing(&self, id: &str) -> bool {
+        let mut seen = BTreeSet::new();
+        let mut todo = vec![id.to_string()];
+        while let Some(next) = todo.pop() {
+            if !seen.insert(next.clone()) {
+                continue;
+            }
+            for dep in self.deps_of(&next) {
+                if self.missing.contains(dep) {
+                    return true;
+                }
+                todo.push(dep.clone());
+            }
+        }
+        false
+    }
+}
+
+/// What committing a resolution to a lock does to on and off.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Outcome {
+    /// Picked and installed mods that end up on because a wanted mod that ends up on needs them,
+    /// and those wanted mods.
+    pub on: BTreeSet<String>,
+    /// Installed mods that are off and are turned on.
+    pub enable: Vec<String>,
+    /// Wanted mods that are installed turned off, because something they need is missing.
+    pub installed_off: Vec<String>,
+}
+
+/// A wanted mod ends up on when it is new or on now, and needs nothing missing; what it needs
+/// ends up on with it. A wanted mod that is off stays off after an update, and so does what it
+/// brings along.
+pub fn outcome(lock: &Lock, res: &Resolution) -> Outcome {
+    let mut installed_off = Vec::new();
+    let mut todo = Vec::new();
+    for id in &res.wanted {
+        if res.needs_missing(id) {
+            installed_off.push(id.clone());
+        } else if lock.get(id).is_none_or(|e| e.enabled) {
+            todo.push(id.clone());
+        }
+    }
+    let mut on = BTreeSet::new();
+    while let Some(id) = todo.pop() {
+        if !on.insert(id.clone()) {
+            continue;
+        }
+        for dep in res.deps_of(&id) {
+            if res.picks.iter().any(|(m, _)| &m.id == dep) {
+                todo.push(dep.clone());
+            } else if res.enable.contains(dep) {
+                on.insert(dep.clone());
+            }
+        }
+    }
+    let enable = res
+        .enable
         .iter()
-        .any(|id| lock.get(id).is_none_or(|e| e.enabled))
+        .filter(|id| on.contains(*id))
+        .cloned()
+        .collect();
+    Outcome {
+        on,
+        enable,
+        installed_off,
+    }
 }
 
 pub struct Committed {
     pub installed: Vec<String>,
     pub also_enabled: Vec<String>,
+    pub installed_off: Vec<String>,
 }
 
-/// Writes a resolution into the lock. Replacing an installed mod keeps its on/off state; a mod
-/// that is off stays off after an update, and so do the dependencies it brings.
+/// Writes a resolution into the lock, following [`outcome`].
 pub fn commit(lock: &mut Lock, res: &Resolution) -> Committed {
-    let on = deps_on(lock, &res.wanted);
+    let out = outcome(lock, res);
     let mut installed = Vec::new();
     for (m, v) in &res.picks {
-        let existing = lock.get(&m.id).map(|e| e.enabled);
-        let enabled = if res.wanted.contains(&m.id) {
-            existing.unwrap_or(true)
-        } else {
-            existing.unwrap_or(false) || on
-        };
+        let was_on = lock.get(&m.id).is_some_and(|e| e.enabled);
+        let wanted = res.wanted.contains(&m.id);
+        let enabled = out.on.contains(&m.id) || (!wanted && was_on);
         lock.put(LockEntry::from_catalog(m, v, enabled));
         installed.push(m.id.clone());
     }
     let mut also_enabled = Vec::new();
-    if on {
-        for id in &res.enable {
-            if let Some(e) = lock.get_mut(id)
-                && !e.enabled
-            {
-                e.enabled = true;
-                also_enabled.push(id.clone());
-            }
+    for id in &out.enable {
+        if let Some(e) = lock.get_mut(id)
+            && !e.enabled
+        {
+            e.enabled = true;
+            also_enabled.push(id.clone());
         }
     }
     Committed {
         installed,
         also_enabled,
+        installed_off: out.installed_off,
     }
+}
+
+/// Whether a resolution made before a download still describes what committing now would do.
+/// `before` is the lock and resolution the player agreed to; `now` the same against the latest
+/// lock and catalogue. It holds when nothing more needs downloading, nothing more is turned on,
+/// and each wanted mod ends up on or off as agreed. Otherwise, why not.
+pub fn still_holds(before: (&Lock, &Resolution), now: (&Lock, &Resolution)) -> Result<(), String> {
+    let (old_lock, old) = before;
+    let (lock, new) = now;
+    for (m, v) in &new.picks {
+        if !old.picks.iter().any(|(_, o)| o.sha256 == v.sha256) {
+            return Err(format!("{} {} is needed now", m.name, v.version));
+        }
+    }
+    let (was, will) = (outcome(old_lock, old), outcome(lock, new));
+    if let Some(id) = will.enable.iter().find(|id| !was.enable.contains(*id)) {
+        return Err(format!("{} would be turned on too", lock.name_of(id)));
+    }
+    for id in &new.wanted {
+        if was.on.contains(id) != will.on.contains(id) {
+            let state = if will.on.contains(id) { "on" } else { "off" };
+            return Err(format!("{} would end up {state}", lock.name_of(id)));
+        }
+    }
+    Ok(())
 }
 
 /// The plan for installing the catalogue build `sha256` into game version `tag`. `fit` is `None`
@@ -243,6 +360,7 @@ pub fn plan_install(
     });
     let mut plan = InstallPlan {
         target: PlanItem::of(m, v),
+        turns_on: replaces.as_ref().is_none_or(|r| r.enabled),
         replaces,
         install: Vec::new(),
         enable: Vec::new(),
@@ -254,14 +372,15 @@ pub fn plan_install(
         return Ok(plan);
     };
     let res = resolve(catalog, lock, vec![(m.clone(), v.clone())], fit);
-    let on = deps_on(lock, &res.wanted);
+    let out = outcome(lock, &res);
     plan.install = res
         .picks
         .iter()
         .filter(|(p, _)| p.id != m.id)
         .map(|(p, pv)| PlanItem::of(p, pv))
         .collect();
-    plan.enable = if on { res.enable } else { Vec::new() };
+    plan.enable = out.enable;
+    plan.turns_on = out.on.contains(&m.id);
     plan.missing = res.missing;
     plan.problem = check_installable(catalog, m, v, fit)
         .err()
@@ -282,9 +401,8 @@ pub fn set_enabled(
         .get(id)
         .ok_or_else(|| ModsError::NotInstalled(id.to_string()))?;
     let revoked = |e: &LockEntry| {
-        catalog
-            .revocation(&e.sha256)
-            .map(|r| ModsError::Revoked(format!("{}: {}", e.name, r.reason)))
+        e.revoked_reason(catalog)
+            .map(|reason| ModsError::Revoked(format!("{}: {reason}", e.name)))
     };
     let (mut also_enabled, mut also_disabled) = (Vec::new(), Vec::new());
     if enabled {
@@ -364,10 +482,17 @@ pub struct CopyPreview {
     pub from: String,
     pub to: String,
     pub items: Vec<CopyItem>,
+    /// Dependencies of the items that will be downloaded as well.
+    pub deps: Vec<PlanItem>,
+    /// Ids of mods `to` already has, off, that will be turned on.
+    pub enable: Vec<String>,
+    /// Ids of items that will be installed turned off, because something they need is missing.
+    pub installed_off: Vec<String>,
 }
 
 /// What copying the turned-on mods of `from` into `to` would bring over, each as the build made
-/// for `to`, and the builds to install. Mods `to` already has are skipped.
+/// for `to`, with what that pulls in, and the builds to install. Mods `to` already has are
+/// skipped.
 pub fn copy_preview(
     catalog: &Catalog,
     from: (&str, &Lock),
@@ -402,10 +527,20 @@ pub fn copy_preview(
             items.push(item(CopyOutcome::NoBuild, None));
         }
     }
+    let res = resolve(catalog, to.1, picks.clone(), fit);
+    let out = outcome(to.1, &res);
     let preview = CopyPreview {
         from: from.0.to_string(),
         to: to.0.to_string(),
         items,
+        deps: res
+            .picks
+            .iter()
+            .filter(|(m, _)| !res.wanted.contains(&m.id))
+            .map(|(m, v)| PlanItem::of(m, v))
+            .collect(),
+        enable: out.enable,
+        installed_off: out.installed_off,
     };
     (preview, picks)
 }
@@ -771,5 +906,183 @@ mod tests {
         let picked: Vec<&str> = picks.iter().map(|(m, _)| m.id.as_str()).collect();
         assert_eq!(picked, ["cogwork", "lanterns"]);
         assert_eq!(preview.items[0].trust, Some(Trust::Reviewed));
+        // What the items pull in: glow from the lanterns source; showcase is already there.
+        assert_eq!(ids(&preview.deps), ["glow"]);
+        assert!(preview.enable.is_empty() && preview.installed_off.is_empty());
+    }
+
+    #[test]
+    fn a_copy_lists_what_it_turns_on_and_what_stays_off() {
+        let c = world();
+        let from = lock(vec![
+            entry("cogwork", &["showcase"], Some(OLD_ABI)),
+            entry("shiny", &["rcdep"], Some(OLD_ABI)),
+        ]);
+        let mut showcase_off = entry("showcase", &[], Some(ABI));
+        showcase_off.enabled = false;
+        let to = lock(vec![showcase_off]);
+        let (preview, picks) = copy_preview(&c, ("v1", &from), ("v2", &to), fit());
+        assert_eq!(preview.enable, ["showcase"]);
+        assert_eq!(
+            preview.installed_off,
+            ["shiny"],
+            "rcdep has only a prerelease"
+        );
+
+        let mut l = to.clone();
+        let done = commit(&mut l, &resolve(&c, &to, picks, fit()));
+        assert!(l.get("cogwork").unwrap().enabled && l.get("showcase").unwrap().enabled);
+        assert!(!l.get("shiny").unwrap().enabled);
+        assert_eq!(done.installed_off, ["shiny"]);
+        assert_eq!(done.also_enabled, ["showcase"]);
+    }
+
+    /// `turnsOn = (replaces === null || replaces.enabled) && missing.length === 0`, and the
+    /// commit does what the plan said.
+    #[test]
+    fn turns_on_rules() {
+        let c = world();
+        let off = |id: &str, deps: &[&str]| {
+            let mut e = entry(id, deps, Some(OLD_ABI));
+            e.enabled = false;
+            e
+        };
+        let mut showcase_off = entry("showcase", &[], Some(ABI));
+        showcase_off.enabled = false;
+        // What, lock, build, turns on, installed off, also enabled.
+        type Case<'a> = (&'a str, Lock, String, bool, &'a [&'a str], &'a [&'a str]);
+        let cases: Vec<Case> = vec![
+            (
+                "new, nothing missing",
+                lock(vec![]),
+                sha("cogwork", "0.2.0"),
+                true,
+                &[],
+                &[],
+            ),
+            (
+                "new, a dependency is missing",
+                lock(vec![]),
+                sha("shiny", "1.0.0"),
+                false,
+                &["shiny"],
+                &[],
+            ),
+            (
+                "an update of a mod that is on, a dependency missing",
+                lock(vec![entry("shiny", &["rcdep"], Some(OLD_ABI))]),
+                sha("shiny", "1.0.0"),
+                false,
+                &["shiny"],
+                &[],
+            ),
+            (
+                "an update of a mod that is off",
+                lock(vec![off("cogwork", &["showcase"])]),
+                sha("cogwork", "0.2.0"),
+                false,
+                &[],
+                &[],
+            ),
+            (
+                "a dependency that is off is turned on",
+                lock(vec![showcase_off.clone()]),
+                sha("cogwork", "0.2.0"),
+                true,
+                &[],
+                &["showcase"],
+            ),
+            (
+                "but not for a mod installed turned off",
+                lock(vec![showcase_off, entry("rcdep", &[], Some(OLD_ABI))]),
+                sha("bad", "1.0.0"),
+                false,
+                &["bad"],
+                &[],
+            ),
+        ];
+        for (what, l, build, turns_on, off_ids, enabled) in cases {
+            let plan = plan_install(&c, &l, "v1", &build, Some(fit()), false).unwrap();
+            assert_eq!(plan.turns_on, turns_on, "{what}: plan");
+            assert_eq!(plan.enable, enabled, "{what}: plan enables");
+            let rule = plan.replaces.as_ref().is_none_or(|r| r.enabled) && plan.missing.is_empty();
+            assert_eq!(plan.turns_on, rule, "{what}: the contract's rule");
+
+            let (m, v) = c.find(&build).unwrap();
+            let mut after = l.clone();
+            let res = resolve(&c, &l, vec![(m.clone(), v.clone())], fit());
+            let done = commit(&mut after, &res);
+            let target = after.get(&m.id).unwrap();
+            assert_eq!(target.enabled, turns_on, "{what}: committed");
+            assert_eq!(done.installed_off, off_ids, "{what}: installed off");
+            assert_eq!(done.also_enabled, enabled, "{what}: also enabled");
+            for dep in res.picks.iter().filter(|(p, _)| p.id != m.id) {
+                assert_eq!(
+                    after.get(&dep.0.id).unwrap().enabled,
+                    turns_on,
+                    "{what}: {} comes along on or off with it",
+                    dep.0.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_plan_holds_until_the_profile_changes_under_it() {
+        let c = world();
+        let pick = |id: &str, v: &str| {
+            let (m, v) = c.find(&sha(id, v)).unwrap();
+            (m.clone(), v.clone())
+        };
+        let before = lock(vec![]);
+        let res = resolve(&c, &before, vec![pick("cogwork", "0.2.0")], fit());
+        assert!(still_holds((&before, &res), (&before, &res)).is_ok());
+
+        // Showcase got installed meanwhile: less to do, still fine.
+        let with_showcase = lock(vec![entry("showcase", &[], Some(ABI))]);
+        let now = resolve(&c, &with_showcase, vec![pick("cogwork", "0.2.0")], fit());
+        assert!(still_holds((&before, &res), (&with_showcase, &now)).is_ok());
+
+        // Planned with showcase installed, which was removed meanwhile: it needs downloading.
+        let res = resolve(&c, &with_showcase, vec![pick("cogwork", "0.2.0")], fit());
+        let now = resolve(&c, &before, vec![pick("cogwork", "0.2.0")], fit());
+        let why = still_holds((&with_showcase, &res), (&before, &now)).unwrap_err();
+        assert!(why.contains("showcase"), "{why}");
+
+        // Showcase was turned off meanwhile: committing would turn it on unasked.
+        let mut showcase_off = with_showcase.clone();
+        showcase_off.get_mut("showcase").unwrap().enabled = false;
+        let now = resolve(&c, &showcase_off, vec![pick("cogwork", "0.2.0")], fit());
+        assert!(still_holds((&with_showcase, &res), (&showcase_off, &now)).is_err());
+
+        // The mod being updated was turned off meanwhile: it would end up off.
+        let on = lock(vec![
+            entry("cogwork", &["showcase"], Some(OLD_ABI)),
+            entry("showcase", &[], Some(ABI)),
+        ]);
+        let mut off = on.clone();
+        off.get_mut("cogwork").unwrap().enabled = false;
+        let res = resolve(&c, &on, vec![pick("cogwork", "0.2.0")], fit());
+        let now = resolve(&c, &off, vec![pick("cogwork", "0.2.0")], fit());
+        let why = still_holds((&on, &res), (&off, &now)).unwrap_err();
+        assert!(why.contains("off"), "{why}");
+    }
+
+    #[test]
+    fn a_recorded_revocation_is_honoured_without_the_catalogue() {
+        let c = catalog(vec![], &[]);
+        let mut pulled = entry("pulled", &[], Some(ABI));
+        pulled.enabled = false;
+        pulled.revoked = Some(super::super::profile::Revocation {
+            reason: "deletes saves".into(),
+            at: "2026-11-05T00:00:00Z".into(),
+        });
+        let mut needs = entry("needs", &["pulled"], Some(ABI));
+        needs.enabled = false;
+        let mut l = lock(vec![pulled, needs]);
+        let err = set_enabled(&mut l, &c, "pulled", true).unwrap_err();
+        assert!(matches!(err, ModsError::Revoked(ref d) if d.contains("deletes saves")));
+        assert!(set_enabled(&mut l, &c, "needs", true).is_err());
+        assert!(!l.get("pulled").unwrap().enabled && !l.get("needs").unwrap().enabled);
     }
 }

@@ -2,27 +2,91 @@
 //! profile's `mods.lock.json` lists what is installed, and the profile's `mods/` folder holds
 //! exactly the turned-on mods. A mod that is off is not in that folder at all: the engine runs
 //! code even from mods it was told to skip, so leaving the file out is the only real "off".
+//!
+//! [`admit`] is the one way into the store: it hashes the file, checks the zip and the platform.
+//! The callers hold `ModsLock` whenever they write a lock file or delete from the store.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use serde::{Deserialize, Serialize};
+
 use super::archive::{self, ArchiveInfo};
 use super::error::ModsError;
-use super::index::{Platform, is_sha256};
-use super::paths::{LOCK_FILE, Paths, unique_suffix, write_atomic};
-use super::profile::Lock;
+use super::index::{Platform, is_mod_id, is_sha256};
+use super::paths::{LOCK_FILE, Paths, REMOVED_FILE, unique_suffix, write_atomic};
+use super::profile::{Lock, LockEntry};
 use crate::download::sha256_file;
 
 pub fn read_lock(paths: &Paths, tag: &str) -> Result<Lock, ModsError> {
     read_lock_file(&paths.lock_file(tag)?)
 }
 
+/// A lock file names files and folders by its ids and hashes, so they are checked before use:
+/// a damaged or hand-edited file is an error, never a path.
+fn check_lock(lock: &Lock) -> Result<(), ModsError> {
+    if lock.schema > 1 {
+        return Err(ModsError::LockInvalid(format!(
+            "schema {} is from a newer launcher",
+            lock.schema
+        )));
+    }
+    for m in &lock.mods {
+        if !is_mod_id(&m.id) {
+            return Err(ModsError::LockInvalid(format!("mod id {:?}", m.id)));
+        }
+        if !is_sha256(&m.sha256) {
+            return Err(ModsError::LockInvalid(format!("sha256 of {}", m.id)));
+        }
+    }
+    Ok(())
+}
+
 fn read_lock_file(path: &Path) -> Result<Lock, ModsError> {
     match std::fs::read(path) {
-        Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+        Ok(bytes) => {
+            let lock: Lock = serde_json::from_slice(&bytes)?;
+            check_lock(&lock)?;
+            Ok(lock)
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Lock::empty()),
         Err(e) => Err(e.into()),
+    }
+}
+
+/// The mod most recently removed from a version, kept so the removal can be undone. Its store
+/// file is kept until the version's next change.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Removed {
+    pub entry: LockEntry,
+    /// Mods the removal turned off because they needed it.
+    #[serde(default)]
+    pub also_disabled: Vec<String>,
+}
+
+fn read_removed_file(path: &Path) -> Option<Removed> {
+    let removed: Removed = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    (is_mod_id(&removed.entry.id) && is_sha256(&removed.entry.sha256)).then_some(removed)
+}
+
+pub fn read_removed(paths: &Paths, tag: &str) -> Result<Option<Removed>, ModsError> {
+    Ok(read_removed_file(&paths.removed_file(tag)?))
+}
+
+pub fn write_removed(paths: &Paths, tag: &str, removed: &Removed) -> Result<(), ModsError> {
+    write_atomic(
+        &paths.removed_file(tag)?,
+        &serde_json::to_vec_pretty(removed)?,
+    )
+}
+
+/// The version changed again: its last removal can't be undone any more.
+pub fn clear_removed(paths: &Paths, tag: &str) -> Result<(), ModsError> {
+    match std::fs::remove_file(paths.removed_file(tag)?) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+        _ => Ok(()),
     }
 }
 
@@ -132,6 +196,9 @@ pub fn collect_garbage(paths: &Paths, reservations: &Reservations) -> Result<usi
                 }
                 let lock = read_lock_file(&entry.path().join(LOCK_FILE))?;
                 keep.extend(lock.mods.into_iter().map(|m| m.sha256));
+                if let Some(removed) = read_removed_file(&entry.path().join(REMOVED_FILE)) {
+                    keep.insert(removed.entry.sha256);
+                }
             }
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -153,7 +220,7 @@ pub fn collect_garbage(paths: &Paths, reservations: &Reservations) -> Result<usi
     Ok(removed)
 }
 
-/// A deleted game version takes its mod set along.
+/// A deleted game version takes its mod set along. The caller holds `ModsLock`.
 pub fn forget_version(paths: &Paths, reservations: &Reservations, tag: &str) {
     if let Ok(dir) = paths.profile_dir(tag) {
         let _ = std::fs::remove_dir_all(dir);
@@ -170,8 +237,30 @@ pub fn temp_path(paths: &Paths, sha256: &str) -> Result<PathBuf, ModsError> {
     Ok(dir.join(format!("mod-{sha256}-{}.part", unique_suffix())))
 }
 
-/// Checks a downloaded or copied file and moves it into the store under its hash. The temporary
-/// file is gone afterwards, either way.
+/// What every file in the store passed: its bytes hash to `sha256`, it is a mod zip (of mod `id`,
+/// when given), and it has a library for `platform`.
+fn check(
+    path: &Path,
+    sha256: &str,
+    id: Option<&str>,
+    platform: Option<Platform>,
+) -> Result<ArchiveInfo, ModsError> {
+    let actual = sha256_file(path)?;
+    if actual != sha256 {
+        return Err(ModsError::Sha256Mismatch {
+            expected: sha256.to_string(),
+            actual,
+        });
+    }
+    let info = archive::inspect(std::fs::File::open(path)?, id)?;
+    if !platform.is_some_and(|p| info.platforms.contains(&p)) {
+        return Err(ModsError::NotForPlatform(info.id));
+    }
+    Ok(info)
+}
+
+/// Checks a downloaded or copied file (see [`check`]) and moves it into the store under its
+/// hash. The temporary file is gone afterwards, either way.
 pub fn admit(
     paths: &Paths,
     tmp: &Path,
@@ -180,19 +269,39 @@ pub fn admit(
     platform: Option<Platform>,
 ) -> Result<ArchiveInfo, ModsError> {
     let result = (|| {
-        let info = archive::inspect(std::fs::File::open(tmp)?, id)?;
-        if !platform.is_some_and(|p| info.platforms.contains(&p)) {
-            return Err(ModsError::NotForPlatform(info.id));
-        }
-        let stored = paths.store_object(sha256);
+        let info = check(tmp, sha256, id, platform)?;
+        std::fs::File::open(tmp)?.sync_all()?;
         std::fs::create_dir_all(paths.store_dir())?;
-        std::fs::rename(tmp, &stored)?;
+        std::fs::rename(tmp, paths.store_object(sha256))?;
         Ok(info)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(tmp);
     }
     result
+}
+
+/// The same checks for a build the store already has. `None` when it has none, or only a
+/// damaged copy, which is deleted so it can be fetched again; an error when the stored bytes
+/// are right but aren't a mod that fits here.
+pub fn admit_stored(
+    paths: &Paths,
+    sha256: &str,
+    id: Option<&str>,
+    platform: Option<Platform>,
+) -> Result<Option<ArchiveInfo>, ModsError> {
+    let stored = paths.store_object(sha256);
+    if !stored.exists() {
+        return Ok(None);
+    }
+    match check(&stored, sha256, id, platform) {
+        Ok(info) => Ok(Some(info)),
+        Err(ModsError::Sha256Mismatch { .. }) => {
+            std::fs::remove_file(&stored)?;
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Copies a file from the player's computer into the store, refusing it if its bytes are not the
@@ -205,13 +314,14 @@ pub fn admit_local(
     platform: Option<Platform>,
 ) -> Result<ArchiveInfo, ModsError> {
     let tmp = temp_path(paths, sha256)?;
-    std::fs::copy(source, &tmp)?;
-    let copied = sha256_file(&tmp)?;
-    if copied != sha256 {
+    if let Err(e) = std::fs::copy(source, &tmp) {
         let _ = std::fs::remove_file(&tmp);
-        return Err(ModsError::FileChanged);
+        return Err(e.into());
     }
-    admit(paths, &tmp, sha256, id, platform)
+    admit(paths, &tmp, sha256, id, platform).map_err(|e| match e {
+        ModsError::Sha256Mismatch { .. } => ModsError::FileChanged,
+        e => e,
+    })
 }
 
 #[cfg(test)]
@@ -362,6 +472,119 @@ mod tests {
         assert_eq!(std::fs::read(paths.store_object(&sha)).unwrap(), zip);
         let leftovers = std::fs::read_dir(paths.downloads_dir()).unwrap().count();
         assert_eq!(leftovers, 0, "no temporary file is left behind");
+    }
+
+    /// The store checks what it already has too: right bytes for another mod or system are
+    /// refused, and a damaged copy is dropped so it is fetched again.
+    #[test]
+    fn a_stored_file_is_checked_again() {
+        let (_tmp, paths) = setup();
+        let linux = Some(Platform::LinuxX64);
+        let zip = make_zip(&[("libcogwork.so", b"elf")]);
+        let sha = store(&paths, &zip);
+        assert_eq!(
+            admit_stored(&paths, &sha, Some("cogwork"), linux)
+                .unwrap()
+                .unwrap()
+                .id,
+            "cogwork"
+        );
+        assert!(matches!(
+            admit_stored(&paths, &sha, Some("structures"), linux),
+            Err(ModsError::ArchiveInvalid(_))
+        ));
+        assert!(matches!(
+            admit_stored(&paths, &sha, Some("cogwork"), Some(Platform::WindowsX64)),
+            Err(ModsError::NotForPlatform(_))
+        ));
+        assert!(
+            admit_stored(&paths, &"0".repeat(64), Some("cogwork"), linux)
+                .unwrap()
+                .is_none()
+        );
+
+        std::fs::write(paths.store_object(&sha), b"damaged").unwrap();
+        assert!(
+            admit_stored(&paths, &sha, Some("cogwork"), linux)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            !paths.store_object(&sha).exists(),
+            "the damaged copy is gone"
+        );
+    }
+
+    #[test]
+    fn admitting_hashes_the_file_itself() {
+        let (tmp, paths) = setup();
+        let zip = make_zip(&[("libcogwork.so", b"elf")]);
+        let file = tmp.path().join("x.part");
+        std::fs::write(&file, &zip).unwrap();
+        let claimed = sha256_hex(b"something else");
+        assert!(matches!(
+            admit(
+                &paths,
+                &file,
+                &claimed,
+                Some("cogwork"),
+                Some(Platform::LinuxX64)
+            ),
+            Err(ModsError::Sha256Mismatch { .. })
+        ));
+        assert!(!file.exists() && !paths.store_object(&claimed).exists());
+    }
+
+    #[test]
+    fn a_removed_mod_keeps_its_file_until_the_next_change() {
+        let (_tmp, paths) = setup();
+        let a = store(&paths, b"a");
+        write_lock(&paths, "v1", &lock(vec![])).unwrap();
+        let removed = Removed {
+            entry: installed("a", &a, true),
+            also_disabled: vec![],
+        };
+        write_removed(&paths, "v1", &removed).unwrap();
+        assert_eq!(
+            collect_garbage(&paths, &Reservations::default()).unwrap(),
+            0
+        );
+        assert_eq!(read_removed(&paths, "v1").unwrap().unwrap().entry.id, "a");
+
+        clear_removed(&paths, "v1").unwrap();
+        clear_removed(&paths, "v1").unwrap();
+        assert!(read_removed(&paths, "v1").unwrap().is_none());
+        assert_eq!(
+            collect_garbage(&paths, &Reservations::default()).unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_damaged_lock_file_is_refused() {
+        let (_tmp, paths) = setup();
+        let mut bad = lock(vec![installed("a", &"a".repeat(64), true)]);
+        bad.mods[0].id = "../../evil".into();
+        write_lock(&paths, "v1", &bad).unwrap();
+        assert!(matches!(
+            read_lock(&paths, "v1"),
+            Err(ModsError::LockInvalid(_))
+        ));
+
+        let bad = lock(vec![installed("a", "../x", true)]);
+        write_lock(&paths, "v1", &bad).unwrap();
+        assert!(matches!(
+            read_lock(&paths, "v1"),
+            Err(ModsError::LockInvalid(_))
+        ));
+
+        let mut newer = lock(vec![]);
+        newer.schema = 2;
+        write_lock(&paths, "v1", &newer).unwrap();
+        assert!(matches!(
+            read_lock(&paths, "v1"),
+            Err(ModsError::LockInvalid(_))
+        ));
     }
 
     #[test]

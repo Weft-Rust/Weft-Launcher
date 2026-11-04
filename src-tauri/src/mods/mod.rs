@@ -3,15 +3,18 @@
 //! Design: `docs/mod-manager/PROPOSAL.md`; index contract: `docs/mod-manager/INDEX_FORMAT.md`.
 //!
 //! - Rules on plain data: `plan.rs` (installs, copies, on/off, removal), `profile.rs` (statuses,
-//!   updates, revocations), `catalog.rs`, `index.rs` (the contract), `diagnose.rs`.
+//!   updates, revocations), `catalog.rs`, `index/` (the contract), `diagnose.rs`.
 //! - Disk and network: `store.rs`, `install.rs`, `inspect.rs`, `sources.rs`, `abi.rs`, all on a
-//!   [`Paths`]; `service.rs` for the steps that need the running app.
-//! - `commands.rs`: the Tauri commands, which check arguments and take the locks.
+//!   [`Paths`].
+//! - `service.rs`: the operations, on a [`Ctx`] (`context.rs`) that holds what they need from the
+//!   app, so they run without it in tests.
+//! - `commands.rs`: the Tauri commands, one call into `service.rs` each.
 
 pub mod abi;
 pub mod archive;
 pub mod catalog;
 pub mod commands;
+pub mod context;
 pub mod diagnose;
 pub mod error;
 pub mod index;
@@ -27,15 +30,26 @@ pub mod version;
 
 #[cfg(test)]
 mod doc_tests;
+#[cfg(test)]
+mod service_tests;
 
-pub use commands::{LaunchMods, prepare_launch};
+pub use context::{Ctx, ModsLock};
 pub use paths::Paths;
+pub use service::LaunchMods;
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
-/// A deleted game version takes its mod set along.
-pub fn forget_version(app: &AppHandle, tag: &str) {
-    if let Ok(paths) = Paths::of(app) {
-        store::forget_version(&paths, &app.state::<store::Reservations>(), tag);
+/// Before Play: see [`service::prepare_launch`].
+pub async fn prepare_launch(
+    app: &AppHandle,
+    tag: &str,
+) -> Result<LaunchMods, crate::error::AppError> {
+    Ok(service::prepare_launch(&Ctx::of(app)?, tag).await?)
+}
+
+/// A deleted game version takes its mod set along, under the mods lock.
+pub async fn forget_version(app: &AppHandle, tag: &str) {
+    if let Ok(ctx) = Ctx::of(app) {
+        service::forget_version(&ctx, tag).await;
     }
 }

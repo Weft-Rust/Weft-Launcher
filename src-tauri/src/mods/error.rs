@@ -64,6 +64,13 @@ pub enum ModsError {
     VersionNotInstalled(String),
     #[error("The game is running: {0}")]
     GameRunning(String),
+    /// A download finished, but the profile, the catalogue or the version changed meanwhile in
+    /// a way that makes the plan wrong.
+    #[error("Changed meanwhile: {0}")]
+    ChangedMeanwhile(String),
+    /// `mods.lock.json` can't be used as it is.
+    #[error("Mod set unreadable: {0}")]
+    LockInvalid(String),
 }
 
 impl From<ArchiveProblem> for ModsError {
@@ -124,6 +131,8 @@ impl ModsError {
             IdReserved(_) => C::ModIdReserved,
             VersionNotInstalled(_) => C::NotInstalled,
             GameRunning(_) => C::GameRunning,
+            ChangedMeanwhile(_) => C::ModChangedMeanwhile,
+            LockInvalid(_) => C::Io,
         }
     }
 }
@@ -158,7 +167,9 @@ impl From<ModsError> for AppError {
             | InvalidName(d)
             | IdReserved(d)
             | VersionNotInstalled(d)
-            | GameRunning(d) => Some(d),
+            | GameRunning(d)
+            | ChangedMeanwhile(d) => Some(d),
+            LockInvalid(d) => Some(format!("mods.lock.json: {d}")),
         };
         AppError::new(code, detail)
     }

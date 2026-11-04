@@ -321,6 +321,30 @@ async fn list_releases(
     Ok(Listing::Releases(releases, first_etag))
 }
 
+fn read_cache(paths: &Paths, repo: &str) -> Option<SourceCache> {
+    std::fs::read(cache_path(paths, repo))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+}
+
+/// The last good answer of one source, without asking GitHub.
+pub fn cached(paths: &Paths, repo: &str) -> SourceFetch {
+    match read_cache(paths, repo) {
+        Some(c) => SourceFetch {
+            mods: c.mods,
+            freshness: Freshness::Cached,
+            checked: c.checked,
+            error: None,
+        },
+        None => SourceFetch {
+            mods: Vec::new(),
+            freshness: Freshness::Unavailable,
+            checked: None,
+            error: None,
+        },
+    }
+}
+
 /// The mods of one source. When GitHub can't be asked or refuses, the last good answer is used
 /// and the error comes along with it.
 pub async fn fetch(
@@ -330,9 +354,7 @@ pub async fn fetch(
     refresh: bool,
 ) -> SourceFetch {
     let path = cache_path(paths, repo);
-    let cached: Option<SourceCache> = std::fs::read(&path)
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok());
+    let cached = read_cache(paths, repo);
     if !refresh && let Some(c) = cached {
         return SourceFetch {
             mods: c.mods,

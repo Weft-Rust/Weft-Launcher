@@ -45,18 +45,25 @@ fn remember(cache: &IndexCache, age: Option<Age>) {
     }
 }
 
+/// The cached index, without asking for a newer one.
+pub fn cached(cache: &IndexCache, now: OffsetDateTime) -> IndexState {
+    let cached = cache.read().map(|(_, s)| s);
+    // A cache written before the state file existed still counts as accepted.
+    remember(cache, cached.as_ref().and_then(Age::of));
+    from_cache(cached, now)
+}
+
 /// The newest index this launcher can trust. With `refresh` false only the cache is read, and
 /// nothing touches the network. `fetch` returns the index bytes and their signature.
 pub async fn load<F>(cache: &IndexCache, refresh: bool, now: OffsetDateTime, fetch: F) -> IndexState
 where
     F: std::future::Future<Output = Result<(Vec<u8>, String), ModsError>>,
 {
-    let cached = cache.read().map(|(_, s)| s);
-    // A cache written before the state file existed still counts as accepted.
-    remember(cache, cached.as_ref().and_then(Age::of));
     if !refresh {
-        return from_cache(cached, now);
+        return cached(cache, now);
     }
+    let cached = cache.read().map(|(_, s)| s);
+    remember(cache, cached.as_ref().and_then(Age::of));
     let fetched = fetch.await.and_then(|(bytes, sig)| {
         let signed = verify(&bytes, &sig, &cache.key)?;
         Ok((bytes, sig, signed))

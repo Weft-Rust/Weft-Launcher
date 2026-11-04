@@ -579,7 +579,7 @@ pub async fn remove_version(app_handle: tauri::AppHandle, tag: String) -> Result
         Ok(_) => {
             // Rename succeeded, now delete the renamed folder
             fs::remove_dir_all(&removing_dir).await?;
-            crate::mods::forget_version(&app_handle, &tag);
+            crate::mods::forget_version(&app_handle, &tag).await;
             Ok(())
         }
         Err(e) => {

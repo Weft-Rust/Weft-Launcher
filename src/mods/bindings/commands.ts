@@ -21,6 +21,7 @@ export const COMMANDS = {
   installModFile: "install_mod_file",
   setModEnabled: "set_mod_enabled",
   removeMod: "remove_mod",
+  restoreMod: "restore_mod",
   previewCopyModProfile: "preview_copy_mod_profile",
   copyModProfile: "copy_mod_profile",
   getModIcon: "get_mod_icon",

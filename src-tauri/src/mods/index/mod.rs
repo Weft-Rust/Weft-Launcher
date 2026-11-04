@@ -14,7 +14,7 @@ mod format;
 mod signature;
 
 pub use cache::{Age, FUTURE_SLACK, Freshness, IndexCache, IndexState, STALE_AFTER, decide};
-pub use fetch::{INDEX_URL, MAX_INDEX_BYTES, fetch_bytes, index_url, load};
+pub use fetch::{INDEX_URL, MAX_INDEX_BYTES, cached, fetch_bytes, index_url, load};
 pub use format::*;
 pub use signature::{INDEX_PUBLIC_KEY, Signed, public_key, signed_at, verify};
 

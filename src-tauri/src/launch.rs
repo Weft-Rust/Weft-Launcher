@@ -120,15 +120,25 @@ pub struct GameStateEvent {
 #[derive(Default, Clone)]
 pub struct RunningGames(Arc<Mutex<HashSet<String>>>);
 
+impl RunningGames {
+    /// The game that is running now, if any: only one runs at a time.
+    pub fn current(&self) -> Option<String> {
+        self.0.lock().unwrap().iter().next().cloned()
+    }
+
+    #[cfg(test)]
+    pub fn insert(&self, tag: &str) {
+        self.0.lock().unwrap().insert(tag.to_string());
+    }
+}
+
 fn running_games(app_handle: &AppHandle) -> RunningGames {
     app_handle.state::<RunningGames>().inner().clone()
 }
 
 /// The game that is running now, if any: only one runs at a time.
 pub fn running_game(app_handle: &AppHandle) -> Option<String> {
-    let games = running_games(app_handle);
-    let games = games.0.lock().unwrap();
-    games.iter().next().cloned()
+    running_games(app_handle).current()
 }
 
 fn get_versions_dir(app_handle: &AppHandle) -> Result<PathBuf, LaunchError> {
@@ -222,6 +232,15 @@ pub async fn launch_version(app_handle: AppHandle, tag: String) -> Result<(), Ap
     Ok(())
 }
 
+/// The game's arguments. `--mods` is searched before the player's own mods folder, and the
+/// first copy of a mod wins; without a folder nothing is passed.
+fn game_args(mods_dir: Option<&Path>) -> Vec<std::ffi::OsString> {
+    match mods_dir {
+        Some(dir) => vec!["--mods".into(), dir.as_os_str().to_owned()],
+        None => Vec::new(),
+    }
+}
+
 struct Launch<'a> {
     tag: &'a str,
     executable: &'a Path,
@@ -268,12 +287,9 @@ async fn start_game(
 
     let mut cmd = TokioCommand::new(executable);
     cmd.current_dir(version_dir)
+        .args(game_args(mods_dir))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // Searched before the player's own mods folder, and the first copy of a mod wins.
-    if let Some(dir) = mods_dir {
-        cmd.arg("--mods").arg(dir);
-    }
 
     #[cfg(target_os = "windows")]
     {
@@ -351,9 +367,12 @@ pub async fn open_game_folder(app_handle: AppHandle, _tag: String) -> Result<(),
 
 /// The game's data folder, as the newest log that names one says. The game prints it at start.
 pub async fn find_game_folder(app_handle: &AppHandle) -> Option<PathBuf> {
-    let logs_dir = get_logs_dir(app_handle).ok()?;
+    find_game_folder_in(&get_logs_dir(app_handle).ok()?).await
+}
 
-    let mut entries = fs::read_dir(&logs_dir).await.ok()?;
+/// The same, given the launcher's logs folder.
+pub async fn find_game_folder_in(logs_dir: &Path) -> Option<PathBuf> {
+    let mut entries = fs::read_dir(logs_dir).await.ok()?;
     let mut log_files = Vec::new();
     while let Ok(Some(entry)) = entries.next_entry().await {
         let path = entry.path();
