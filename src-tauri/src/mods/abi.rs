@@ -35,6 +35,9 @@ pub fn is_safe_ref(s: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
 }
 
+/// `crates/abi/src/lib.rs` is a few tens of KB.
+const MAX_ABI_FILE_BYTES: usize = 1024 * 1024;
+
 fn cache_file(paths: &Paths) -> std::path::PathBuf {
     paths.cache_dir().join("abi.json")
 }
@@ -77,10 +80,11 @@ pub async fn abi_for_tag(
     if !response.status().is_success() {
         return Err(ModsError::AbiUnavailable(tag.to_string()));
     }
-    let bytes = response
-        .bytes()
+    let bytes = crate::download::read_capped(response, MAX_ABI_FILE_BYTES)
         .await
-        .map_err(|_| ModsError::AbiUnavailable(tag.to_string()))?;
+        .ok()
+        .flatten()
+        .ok_or_else(|| ModsError::AbiUnavailable(tag.to_string()))?;
     let abi = format_abi(fnv1a64(&bytes));
 
     let mut cache = read_cache(paths);

@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use super::error::ModsError;
 use super::index::{
-    Asset, Channel, Dep, Freshness, IndexMod, IndexVersion, Provenance, SourceRef, WeftRef,
-    is_repo, same_repo, version_problem,
+    Asset, Channel, Dep, Freshness, IndexMod, IndexVersion, Provenance, RESERVED_ID, SourceRef,
+    WeftRef, clamp_summary, is_mod_id, is_repo, same_repo, version_problem,
 };
 use super::paths::{Paths, write_atomic};
 use super::profile::now;
@@ -139,7 +139,8 @@ fn cache_path(paths: &Paths, repo: &str) -> std::path::PathBuf {
 }
 
 /// Checks one release's description against GitHub's record of the same release:
-/// schema 1; the id is the zip's stem; the tag, repo, asset name, URL and size equal GitHub's;
+/// schema 1; the id is a mod id (not `base`) and the zip's stem; the tag, repo, asset name, URL
+/// and size equal GitHub's;
 /// the SHA-256 equals GitHub's digest (a release without a digest is skipped); and then every
 /// rule an index entry must follow. A GitHub prerelease is never a plain release.
 pub(crate) fn accept(
@@ -151,6 +152,8 @@ pub(crate) fn accept(
     let stem = zip.name.strip_suffix(".zip")?;
     let digest = zip.digest.as_deref()?.strip_prefix("sha256:")?;
     let agrees = json.schema == 1
+        && is_mod_id(&json.id)
+        && json.id != RESERVED_ID
         && json.id == stem
         && json.tag == release.tag_name
         && same_repo(&json.source.repo, repo)
@@ -185,13 +188,15 @@ pub(crate) fn accept(
         // A source can't review itself.
         reviewed: None,
     };
-    if version_problem(&json.id, &version).is_some() || json.id == super::index::RESERVED_ID {
+    if version_problem(&json.id, &version).is_some() {
         return None;
     }
+    let mut summary = json.summary;
+    clamp_summary(&mut summary);
     Some(IndexMod {
         id: json.id,
         name: json.name,
-        summary: json.summary,
+        summary,
         authors: json.authors,
         license: json.license,
         homepage: json.homepage.filter(|u| u.starts_with("https://")),
@@ -200,12 +205,23 @@ pub(crate) fn accept(
     })
 }
 
-/// Folds one entry per release into one entry per mod, newest version first.
+/// Folds one entry per release into one entry per mod, newest version first. `entries` come
+/// in GitHub's order, newest release first: the mod's name, summary and icon come from its
+/// newest release, and a version (or a zip) a later release publishes again replaces nothing.
 fn merge(entries: Vec<IndexMod>) -> Vec<IndexMod> {
     let mut mods: Vec<IndexMod> = Vec::new();
     for entry in entries {
         match mods.iter_mut().find(|m| m.id == entry.id) {
-            Some(m) => m.versions.extend(entry.versions),
+            Some(m) => {
+                for v in entry.versions {
+                    let seen = m.versions.iter().any(|have| {
+                        have.version == v.version || have.asset.sha256 == v.asset.sha256
+                    });
+                    if !seen {
+                        m.versions.push(v);
+                    }
+                }
+            }
             None => mods.push(entry),
         }
     }
@@ -527,6 +543,54 @@ pub(crate) mod tests {
         let mut no_digest = zip.clone();
         no_digest.digest = None;
         assert!(accept(repo, &r, &no_digest, json()).is_none(), "no digest");
+    }
+
+    #[test]
+    fn the_id_must_be_a_mod_id() {
+        let repo = "Zorro909/weft-mods";
+        for id in ["Cogwork", "cog-work", "cog.work", "base", ""] {
+            let (r, mut zip) = release(false);
+            zip.name = format!("{id}.zip");
+            let mut j = json();
+            j.id = id.to_string();
+            j.asset.name = zip.name.clone();
+            j.asset.url =
+                format!("https://github.com/{repo}/releases/download/cogwork-v0.2.0/{id}.zip");
+            zip.browser_download_url = j.asset.url.clone();
+            assert!(accept(repo, &r, &zip, j).is_none(), "{id:?}");
+        }
+    }
+
+    #[test]
+    fn releases_merge_newest_first() {
+        let entry = |name: &str, version: &str, sha: char| {
+            let mut m = super::super::catalog::tests::index_mod(
+                "cogwork",
+                "Zorro909/weft-mods",
+                &sha.to_string().repeat(64),
+            );
+            m.name = name.into();
+            m.versions[0].version = version.into();
+            m
+        };
+        let mods = merge(vec![
+            entry("Cogwork 2", "0.3.0", 'c'),
+            entry("Cogwork", "0.2.0", 'b'),
+            entry("Old name", "0.2.0", 'a'),
+            entry("Old name", "0.1.0", 'c'),
+        ]);
+        assert_eq!(mods.len(), 1);
+        assert_eq!(
+            mods[0].name, "Cogwork 2",
+            "the newest release names the mod"
+        );
+        let versions: Vec<&str> = mods[0]
+            .versions
+            .iter()
+            .map(|v| v.version.as_str())
+            .collect();
+        assert_eq!(versions, ["0.3.0", "0.2.0"]);
+        assert_eq!(mods[0].versions[1].asset.sha256, "b".repeat(64));
     }
 
     #[test]
