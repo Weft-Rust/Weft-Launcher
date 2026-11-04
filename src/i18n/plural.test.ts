@@ -76,8 +76,28 @@ describe("locale files", () => {
     }
   });
 
-  it("use the Russian glossary for the tiers", () => {
+  it("use the Russian glossary for the tiers, everywhere", () => {
     const mods = (ru as unknown as { mods: Record<string, string> }).mods;
-    expect([mods.badgeReviewed, mods.badgeUnreviewed, mods.badgeUnverified]).toEqual(["Одобрен", "Не проверен", "Не верифицирован"]);
+    expect([mods.badgeReviewed, mods.badgeUnreviewed, mods.badgeUnverified]).toEqual(["Проверен", "Не проверен", "Не верифицирован"]);
+    // "Одобрен" was the old word for Reviewed; one word per tier, so it pairs with "Не проверен".
+    expect(JSON.stringify(ru)).not.toMatch(/[Оо]добр/);
+  });
+
+  it("say on and off in full in Spanish", () => {
+    const mods = (es as unknown as { mods: Record<string, string> }).mods;
+    expect([mods.on, mods.off]).toEqual(["Activado", "Desactivado"]);
+  });
+
+  it("have no doubled punctuation", () => {
+    const flatValues = (tree: object, prefix = ""): Record<string, string> =>
+      Object.entries(tree).reduce<Record<string, string>>(
+        (out, [k, v]) => (typeof v === "string" ? { ...out, [prefix + k]: v } : { ...out, ...flatValues(v, `${prefix}${k}.`) }),
+        {}
+      );
+    for (const [locale, tree] of Object.entries({ en, ru, es, ptBR })) {
+      for (const [key, value] of Object.entries(flatValues(tree))) {
+        expect(value, `${locale} ${key}`).not.toMatch(/(?<!\.)\.\.(?!\.)|[!?:]\.|\s[.,:;]/);
+      }
+    }
   });
 });
