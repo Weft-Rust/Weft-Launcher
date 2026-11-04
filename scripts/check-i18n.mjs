@@ -114,6 +114,13 @@ const unionPath = "src/mods/bindings/ErrorCode.ts";
 const union = readFileSync(join(root, unionPath), "utf8").match(/export type ErrorCode =([\s\S]*?);/);
 if (!union) problems.push(`${unionPath}: no ErrorCode union found`);
 else for (const m of union[1].matchAll(/"([A-Za-z0-9]+)"/g)) codes.add(m[1]);
+// Until the backend generates them: codes of the next contract, from src/mods/types.pending.ts.
+try {
+  const pending = readFileSync(join(root, "src/mods/types.pending.ts"), "utf8").match(/export type PendingErrorCode =([\s\S]*?);/);
+  if (pending) for (const m of pending[1].matchAll(/"([A-Za-z0-9]+)"/g)) codes.add(m[1]);
+} catch {
+  // No pending file: everything is generated.
+}
 
 const errorsTs = readFileSync(join(dir, "errors.ts"), "utf8");
 const mapping = Object.fromEntries([...errorsTs.matchAll(/^\s*([A-Z][A-Za-z0-9]*):\s*'([^']+)'/gm)].map((m) => [m[1], m[2]]));

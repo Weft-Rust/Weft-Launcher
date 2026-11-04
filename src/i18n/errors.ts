@@ -1,5 +1,5 @@
 import { t, type MessageKey } from './index';
-import type { AppErrorPayload, ErrorCode } from '../mods/types';
+import type { ErrorCode } from '../mods/types';
 
 // Every code the backend can send, and the message for it. A Record over the closed union, so a
 // new code fails `tsc` until it has a message; `npm run check:i18n` checks every locale has it.
@@ -52,6 +52,7 @@ export const ERROR_KEY: Record<ErrorCode, MessageKey> = {
   ModDownloadNotFound: 'errors.modDownloadNotFound',
   ModTooLarge: 'errors.modTooLarge',
   ModIdReserved: 'errors.modIdReserved',
+  ModChangedMeanwhile: 'errors.modChangedMeanwhile',
 };
 
 export function isErrorCode(code: unknown): code is ErrorCode {
@@ -62,15 +63,20 @@ export function errorKey(code: ErrorCode): MessageKey {
   return ERROR_KEY[code];
 }
 
+/**
+ * A failure as a sentence. A known code gets its message; anything else (an "Unknown" from
+ * asAppError, a code this build doesn't know, a thrown Error) says so and keeps what detail there
+ * is, rather than passing for a known failure.
+ */
 export function translateError(err: unknown): string {
   if (err === null || err === undefined) return '';
-  if (typeof err === 'string') return err;
-  if (err instanceof Error) return err.message;
-  if (typeof err === 'object') {
-    const { code, detail } = err as Partial<AppErrorPayload> & { code?: unknown };
-    if (isErrorCode(code)) return t(ERROR_KEY[code], typeof detail === 'string' ? detail : '');
-    // A code this build doesn't know yet: say what there is rather than nothing.
-    if (typeof code === 'string') return typeof detail === 'string' && detail ? `${code}: ${detail}` : code;
+  if (typeof err === 'object' && !(err instanceof Error)) {
+    const { code, detail } = err as { code?: unknown; detail?: unknown };
+    const text = typeof detail === 'string' ? detail : '';
+    if (isErrorCode(code)) return t(ERROR_KEY[code], text);
+    if (typeof code === 'string' && code !== 'Unknown') return t('errors.unknown', text ? `${code}: ${text}` : code);
+    return text ? t('errors.unknown', text) : t('errors.unknownBare');
   }
-  return String(err);
+  const text = err instanceof Error ? err.message : String(err);
+  return text ? t('errors.unknown', text) : t('errors.unknownBare');
 }
