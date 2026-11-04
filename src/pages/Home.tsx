@@ -1,5 +1,6 @@
 import { useId, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import type { UiError } from "../mods/types";
 import { useI18n } from "../i18n/useI18n";
 import { translateError } from "../i18n/errors";
 import { useInstall } from "../hooks/useInstall";
@@ -10,7 +11,7 @@ import { enabledNames, heroState } from "../mods/status";
 import { StableLabel } from "../components/StableLabel";
 import { VersionSelect } from "../components/VersionSelect";
 import { Truncate } from "../components/Truncate";
-import { BlockerPanel, ModFailureNotice, useUpdateDialog } from "../components/mods/ModFixes";
+import { BlockerPanel, ModFailureNotice, useReviewDialog } from "../components/mods/ModFixes";
 import { compareTags } from "../utils/version";
 import type { MessageKey } from "../i18n";
 import type { HeroState } from "../mods/status";
@@ -30,11 +31,11 @@ const BADGE: Record<HeroState, MessageKey> = {
 };
 
 export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSelectTag }: HomeProps) {
-  const { t, locale } = useI18n();
+  const { t, locale, formatList } = useI18n();
   const { installedVersions, loaded } = useInstall();
   const { anyRunning, isRunning, launch, lastCrash } = useGameState();
-  const { profile, isCopying } = useMods();
-  const [launchError, setLaunchError] = useState<string | null>(null);
+  const { profile, isCopying, loadProfile } = useMods();
+  const [launchError, setLaunchError] = useState<{ tag: string; error: UiError; message: string } | null>(null);
   const [launching, setLaunching] = useState(false);
   const blockersId = useId();
 
@@ -48,7 +49,7 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
 
   const effectiveTag = selectedVersion?.tag ?? null;
   const report = profile(effectiveTag);
-  const update = useUpdateDialog(effectiveTag);
+  const review = useReviewDialog(effectiveTag);
   const isSelectedRunning = effectiveTag ? isRunning(effectiveTag) : false;
   const state = heroState(report, isSelectedRunning);
   const blocked = state === "blocked";
@@ -61,9 +62,13 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
     setLaunching(true);
     setLaunchError(null);
     const r = await launch(tag);
+    if (r.status === "failed") {
+      // The backend found a blocker the shown set doesn't have (a revocation Play applied, a
+      // change from elsewhere): read the set again, so the panel can say what and offer fixes.
+      if (r.error.code === "ModsBlocked") await loadProfile(tag);
+      setLaunchError({ tag, error: r.error, message: r.message });
+    }
     setLaunching(false);
-    // The blocker panel already says what ModsBlocked would; no second, rawer copy.
-    if (r.status === "failed" && r.error.code !== "ModsBlocked") setLaunchError(r.message);
   };
 
   const handleOpenFolder = async () => {
@@ -72,7 +77,7 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
     try {
       await invoke(COMMANDS.openGameFolder, { tag: effectiveTag });
     } catch (err) {
-      setLaunchError(translateError(err));
+      setLaunchError({ tag: effectiveTag, error: { code: "Unknown", detail: null }, message: translateError(err) });
     }
   };
 
@@ -94,8 +99,11 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
     );
   }
 
+  // A refused launch says why, unless the blocker panel below already says it with its fixes.
+  const shownError =
+    launchError && launchError.tag === effectiveTag && !(launchError.error.code === "ModsBlocked" && blocked) ? launchError.message : null;
   // With something to read under Play, the title steps back so the actions stay in view.
-  const compact = blocked || !!crash || !!launchError;
+  const compact = blocked || !!crash || !!shownError;
   const names = enabledNames(report);
 
   return (
@@ -130,31 +138,21 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
             />
           </button>
         </div>
-        {launchError && (
+        {shownError && (
           <div className="launch-error" role="alert">
-            {launchError}
+            {shownError}
           </div>
         )}
-        {report && (
+        {report && effectiveTag && (
           <p className="mods-line">
-            <Truncate text={names.length ? t("mods.homeMods", names.join(", ")) : t("mods.homeModsNone")} />
+            <Truncate text={names.length ? t("mods.homeMods", effectiveTag, formatList(names)) : t("mods.homeModsNone", effectiveTag)} />
             <button className="link-btn" onClick={onGoToMods}>
               {names.length ? t("mods.homeChange") : t("mods.homeAdd")}
             </button>
           </p>
         )}
-        {effectiveTag && blocked && (
-          <BlockerPanel
-            id={blockersId}
-            tag={effectiveTag}
-            locked={anyRunning}
-            onUpdate={update.open}
-            canUpdate={update.canOpen}
-          />
-        )}
-        {crash && (
-          <ModFailureNotice crash={crash} onUpdate={update.open} canUpdate={update.canOpen} onGoToMods={onGoToMods} />
-        )}
+        {effectiveTag && <BlockerPanel id={blockersId} tag={effectiveTag} locked={anyRunning} review={review} />}
+        {crash && <ModFailureNotice crash={crash} review={review} onGoToMods={onGoToMods} />}
       </section>
 
       <section className="card clear">
@@ -184,7 +182,7 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
           )}
         </div>
       </section>
-      {update.dialog}
+      {review.dialog}
     </main>
   );
 }
