@@ -1,8 +1,8 @@
 // What the install dialogs say was checked, decided from backend data only. No JSX and no
 // translation: rows are message keys with arguments, rendered by components/mods/CheckList.
 
-import type { MessageKey } from "../i18n";
-import type { AppErrorPayload, CatalogVersion, FileInspection, InstallPlan, Trust } from "./types";
+import { formatList, type MessageKey, type Msg } from "../i18n";
+import type { AppErrorPayload, CatalogVersion, FileInspection, InstallPlan, ModProgress, Trust } from "./types";
 import { shortCommit, shortSha } from "./select";
 
 export type CheckState = "yes" | "no" | "unknown";
@@ -51,7 +51,9 @@ export function buildChecks(v: CatalogVersion): CheckRow[] {
       detail: { key: "mods.ckNotIndexDetail", args: [v.sourceRepo] },
     });
   }
-  const workflow = v.provenance?.workflow?.split("/").pop() ?? "—";
+  // The file name shows; the whole path is a hover or a Tab away, so two workflows of the same name differ.
+  const path = v.provenance?.workflow;
+  const workflow: Arg = path ? { code: path, short: path.split("/").pop() ?? path } : "—";
   if (v.provenance && v.provenanceVerified) {
     rows.push({
       id: "provenance",
@@ -94,23 +96,27 @@ export interface InstallCheckContext {
   name: (id: string) => string;
   /** Ids of mods installed and on in this version. */
   enabled: Set<string>;
+  /** The tier of an installed mod, by id. */
+  trustOf: (id: string) => Trust | undefined;
+  /** The version's mod interface, when it is known. */
+  versionAbi: string | null;
 }
 
-/** Everything the install and update dialogs show, from the backend's plan. */
-export function installChecks(plan: InstallPlan, v: CatalogVersion, ctx: InstallCheckContext): CheckRow[] {
-  const rows: CheckRow[] = [];
-  if (plan.problem) {
-    rows.push({ id: "problem", state: "no", title: { key: "mods.ckWontInstall", args: [{ error: plan.problem }] } });
+/** Whether the build fits the version: only "yes" when both interfaces are known and equal. */
+function abiCheck(plan: InstallPlan, v: CatalogVersion, ctx: InstallCheckContext): CheckRow {
+  const detail: RichMsg = { key: "mods.ckFitsDetail", args: [abi(v.abi)] };
+  if (plan.problem?.code === "ModIncompatible" || (ctx.versionAbi !== null && ctx.versionAbi !== v.abi)) {
+    return { id: "abi", state: "no", title: { key: "mods.ckFileFitsNo", args: [ctx.tag] }, detail };
   }
-  rows.push(...buildChecks(v).slice(0, 1), pinCheck(v), ...buildChecks(v).slice(1));
-  const incompatible = plan.problem?.code === "ModIncompatible";
-  rows.push({
-    id: "abi",
-    state: incompatible ? "no" : "yes",
-    title: { key: incompatible ? "mods.ckFileFitsNo" : "mods.ckFits", args: incompatible ? [ctx.tag] : [] },
-    detail: { key: "mods.ckFitsDetail", args: [abi(v.abi)] },
-  });
+  if (ctx.versionAbi === null || plan.problem?.code === "AbiUnavailable") {
+    return { id: "abi", state: "unknown", title: { key: "mods.ckFitUnchecked", args: [ctx.tag] }, detail };
+  }
+  return { id: "abi", state: "yes", title: { key: "mods.ckFits" }, detail };
+}
 
+/** What else an install brings: dependencies it downloads, turns on, or can't find. */
+export function planDepChecks(plan: InstallPlan, deps: string[], ctx: InstallCheckContext): CheckRow[] {
+  const rows: CheckRow[] = [];
   const planned = new Set([...plan.install.map((i) => i.id), ...plan.enable, ...plan.missing]);
   for (const item of plan.install) {
     rows.push({
@@ -121,12 +127,12 @@ export function installChecks(plan: InstallPlan, v: CatalogVersion, ctx: Install
     });
   }
   for (const id of plan.enable) {
-    rows.push({ id: `dep:${id}`, state: "yes", title: { key: "mods.ckDepEnable", args: [ctx.name(id)] } });
+    rows.push({ id: `dep:${id}`, state: "yes", title: { key: "mods.ckDepEnable", args: [ctx.name(id)] }, trust: ctx.trustOf(id) });
   }
   for (const id of plan.missing) {
     rows.push({ id: `dep:${id}`, state: "no", title: { key: "mods.ckDepMissing", args: [ctx.name(id), ctx.tag] } });
   }
-  for (const id of v.deps) {
+  for (const id of deps) {
     if (id === "base" || planned.has(id)) continue;
     rows.push(
       ctx.enabled.has(id)
@@ -136,6 +142,66 @@ export function installChecks(plan: InstallPlan, v: CatalogVersion, ctx: Install
     );
   }
   return rows;
+}
+
+/** Everything the install and update dialogs show, from the backend's plan. */
+export function installChecks(plan: InstallPlan, v: CatalogVersion, ctx: InstallCheckContext): CheckRow[] {
+  const rows: CheckRow[] = [];
+  if (plan.problem) {
+    rows.push({ id: "problem", state: "no", title: { key: "mods.ckWontInstall", args: [{ error: plan.problem }] } });
+  }
+  rows.push(...buildChecks(v).slice(0, 1), pinCheck(v), ...buildChecks(v).slice(1));
+  rows.push(abiCheck(plan, v, ctx));
+  rows.push(...planDepChecks(plan, v.deps, ctx));
+  return rows;
+}
+
+/**
+ * What the primary button does and the line that explains it. A plan with a missing dependency
+ * installs the mod turned off (contract R3 §1), so Play keeps working.
+ */
+export function installOutcome(
+  plan: InstallPlan,
+  replacing: boolean,
+  modName: string,
+  ctx: Pick<InstallCheckContext, "tag" | "name">
+): { button: MessageKey; explain: Msg | null } {
+  const missingOff = !plan.turnsOn && plan.missing.length > 0 && (plan.replaces === null || plan.replaces.enabled);
+  if (missingOff) {
+    return {
+      button: replacing ? "mods.updateTurnedOff" : "mods.installTurnedOff",
+      explain: {
+        key: "mods.installsOff",
+        count: plan.missing.length,
+        args: [formatList(plan.missing.map(ctx.name)), ctx.tag, modName],
+      },
+    };
+  }
+  return { button: replacing ? "mods.updateButton" : "mods.install", explain: null };
+}
+
+/**
+ * Mods this install brings that nobody reviewed: dependencies it downloads or turns on, with
+ * their tier. The warning names them, also when the mod itself is Reviewed.
+ */
+export function weakerDeps(plan: InstallPlan, ctx: Pick<InstallCheckContext, "name" | "trustOf">): { name: string; trust: Trust }[] {
+  const out: { name: string; trust: Trust }[] = [];
+  for (const i of plan.install) if (i.trust !== "reviewed") out.push({ name: i.name, trust: i.trust });
+  for (const id of plan.enable) {
+    const trust = ctx.trustOf(id);
+    if (trust && trust !== "reviewed") out.push({ name: ctx.name(id), trust });
+  }
+  return out;
+}
+
+/**
+ * The step to show while an install runs: the first file that is still downloading or being
+ * checked (a dependency before the mod), else the last one being installed. With its name.
+ */
+export function activeStep(entries: ModProgress[], plan: InstallPlan | null, fallbackName: string): { progress: ModProgress | undefined; name: string } {
+  const progress = entries.find((p) => p.stage !== "installing") ?? entries[entries.length - 1];
+  const item = progress && plan ? [plan.target, ...plan.install].find((i) => i.sha256 === progress.sha256) : undefined;
+  return { progress, name: item?.name ?? fallbackName };
 }
 
 /** The lines under the checks that say what an update replaces, including a change of tier. */
@@ -179,7 +245,7 @@ export function fileChecks(inspection: FileInspection, tag: string): CheckRow[] 
     });
   }
   if (archive) {
-    const contents = `${archive.libraries.join(", ")}${archive.hasAssets ? ", assets/" : ""}`;
+    const contents = formatList([...archive.libraries, ...(archive.hasAssets ? ["assets/"] : [])]);
     rows.push(
       inspection.fitsSystem
         ? { id: "contents", state: "yes", title: { key: "mods.ckLooksLikeMod" }, detail: { key: "mods.ckLooksLikeModDetail", args: [contents] } }
@@ -187,7 +253,7 @@ export function fileChecks(inspection: FileInspection, tag: string): CheckRow[] 
             id: "contents",
             state: "no",
             title: { key: "mods.ckNotForSystem" },
-            detail: { key: "mods.ckNotForSystemDetail", args: [archive.platforms.map(platformLabel).join(", ")] },
+            detail: { key: "mods.ckNotForSystemDetail", args: [formatList(archive.platforms.map(platformLabel))] },
           }
     );
   } else {
