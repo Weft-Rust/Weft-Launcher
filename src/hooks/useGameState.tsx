@@ -1,17 +1,8 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { COMMANDS, EVENTS } from "../mods/ipc";
+import { launcherApi, listenTo } from "../mods/api";
+import { EVENTS } from "../mods/ipc";
 import type { ModFailure } from "../mods/types";
 import { failed, type ActionResult } from "./result";
-
-interface GameStateEvent {
-  tag: string;
-  state: "running" | "stopped";
-  exitCode: number | null;
-  crashed: boolean;
-  modFailure: ModFailure | null;
-}
 
 export interface GameCrash {
   tag: string;
@@ -44,7 +35,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   // Fetch initially running versions on mount
   useEffect(() => {
     let mounted = true;
-    invoke<string[]>(COMMANDS.getRunningVersions)
+    launcherApi.runningVersions()
       .then((tags) => {
         if (mounted) setRunningTags(new Set(tags));
       })
@@ -60,7 +51,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
 
-    listen<GameStateEvent>(EVENTS.gameState, (event) => {
+    listenTo(EVENTS.gameState, (event) => {
       const { tag, state, exitCode, crashed, modFailure } = event.payload;
       setRunningTags((prev) => {
         const next = new Set(prev);
@@ -87,7 +78,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
 
   const launch = useCallback(async (tag: string): Promise<ActionResult> => {
     try {
-      await invoke(COMMANDS.launchVersion, { tag });
+      await launcherApi.launch(tag);
       // Only now: a launch the mods refused leaves the last crash's advice in place.
       setLastCrash(null);
       try {

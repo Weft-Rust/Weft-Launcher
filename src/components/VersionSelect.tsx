@@ -20,8 +20,10 @@ interface VersionSelectProps {
 
 /**
  * Not a native <select>: its popup is drawn by the system and can't take the launcher's look.
- * Focus stays on the button; `aria-activedescendant` tells a screen reader which option the
- * arrow keys are on, as the listbox pattern has it.
+ * The ARIA select-only combobox: focus stays on the trigger, which is a `combobox` that controls
+ * the `listbox`; `aria-activedescendant` (valid on a combobox) names the option the arrow keys are
+ * on, and that option is the one with `aria-selected`, as the pattern has it. The chosen value
+ * is the trigger's text, and is marked in the list by its look only.
  */
 export function VersionSelect({ value, options, onChange, disabled, label, labelledBy, compact = false }: VersionSelectProps) {
   const [open, setOpen] = useState(false);
@@ -96,37 +98,39 @@ export function VersionSelect({ value, options, onChange, disabled, label, label
     <div className={`version-select${compact ? " compact" : ""}`} ref={root}>
       <button
         type="button"
+        role="combobox"
         className="version-select-btn"
         disabled={disabled}
         aria-label={labelledBy ? undefined : label}
-        aria-labelledby={labelledBy ? `${labelledBy} ${listId}-value` : undefined}
+        aria-labelledby={labelledBy}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-controls={open ? listId : undefined}
+        aria-controls={listId}
         aria-activedescendant={open ? optionId(cursor) : undefined}
         onClick={() => (open ? setOpen(false) : show())}
         onKeyDown={onKeyDown}
       >
-        <span id={`${listId}-value`}>{current?.label ?? ""}</span>
+        <span>{current?.label ?? ""}</span>
         <svg width="16" height="8" viewBox="0 0 8 4" fill="currentColor" aria-hidden="true">
           <path d="M0 0h8v1h-1v1h-1v1h-1v1h-2v-1h-1v-1h-1v-1h-1z" />
         </svg>
       </button>
-      {open && (
-        <ul
-          className="version-select-menu"
-          role="listbox"
-          id={listId}
-          aria-label={label}
-          aria-labelledby={labelledBy}
-          tabIndex={-1}
-        >
-          {options.map((o, i) => (
+      <ul
+        className="version-select-menu"
+        role="listbox"
+        id={listId}
+        aria-label={label}
+        aria-labelledby={labelledBy}
+        tabIndex={-1}
+        hidden={!open}
+      >
+        {open &&
+          options.map((o, i) => (
             <li
               key={o.value}
               id={optionId(i)}
               role="option"
-              aria-selected={o.value === value}
+              aria-selected={i === cursor}
               className={`version-select-item${o.value === value ? " active" : ""}${i === cursor ? " cursor" : ""}`}
               onMouseEnter={() => setCursor(i)}
               onMouseDown={(e) => e.preventDefault()}
@@ -135,8 +139,7 @@ export function VersionSelect({ value, options, onChange, disabled, label, label
               {o.label}
             </li>
           ))}
-        </ul>
-      )}
+      </ul>
     </div>
   );
 }

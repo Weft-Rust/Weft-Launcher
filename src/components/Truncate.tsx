@@ -48,7 +48,7 @@ interface TruncateProps {
   text: string;
   className?: string;
   /** Lines before the ellipsis. */
-  lines?: 1 | 2;
+  lines?: 1 | 2 | 3;
   children?: ReactNode;
 }
 

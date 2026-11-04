@@ -6,4 +6,8 @@ export type CopyItem = { id: string, name: string, outcome: CopyOutcome,
 /**
  * The build that will be installed (outcome `install`).
  */
-version: string | null, trust: Trust | null, };
+version: string | null, trust: Trust | null, 
+/**
+ * That build's hash (outcome `install`).
+ */
+sha256: string | null, };

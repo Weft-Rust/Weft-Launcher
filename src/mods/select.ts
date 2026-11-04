@@ -129,9 +129,9 @@ export function keepOrder(previous: string[], mods: InstalledMod[]): string[] {
   return [...kept, ...added];
 }
 
-/** Other versions whose mod set has something to copy, newest first as given. */
+/** Other versions with mods turned on, which is what a copy brings over; newest first as given. */
 export function copyDonors(tags: string[], to: string, profiles: Record<string, ProfileReport | undefined>): string[] {
-  return tags.filter((t) => t !== to && (profiles[t]?.mods.length ?? 0) > 0);
+  return tags.filter((t) => t !== to && (profiles[t]?.mods.some((m) => m.enabled) ?? false));
 }
 
 export function shortSha(sha: string): string {

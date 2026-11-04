@@ -60,7 +60,11 @@ export function Dialog({ title, subtitle, onClose, locked = false, children, foo
 
     const onKey = (e: KeyboardEvent) => {
       const popupOpen = e.target instanceof Element && !!e.target.closest('[aria-expanded="true"]');
-      if (e.key === "Escape" && !isLocked.current && !popupOpen) {
+      // A focused element's tooltip goes first: that element hides it on this same Escape. A tip
+      // left by the mouse elsewhere doesn't hold the dialog open.
+      const tipOwner = e.target instanceof Element && e.target.matches(".truncate[tabindex], .code-short");
+      const tipShown = tipOwner && !!document.querySelector(".tip");
+      if (e.key === "Escape" && !isLocked.current && !popupOpen && !tipShown) {
         e.stopPropagation();
         close.current();
       } else if (e.key === "Tab" && box.current) {

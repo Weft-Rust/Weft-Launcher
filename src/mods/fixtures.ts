@@ -48,7 +48,7 @@ export function catalog(mods: CatalogMod[], extra: Partial<Catalog> = {}): Catal
   return {
     mods,
     revoked: [],
-    index: { freshness: "fresh", generated: "2026-11-04T00:00:00Z", error: null },
+    index: { freshness: "fresh", generated: "2026-11-04T00:00:00Z", signedAt: "2026-11-04T00:00:00Z", error: null },
     sources: [],
     weft: [],
     platform: "linux-x64",
@@ -78,6 +78,8 @@ export function installed(id: string, extra: Partial<InstalledMod> = {}): Instal
     installedAt: "2026-11-04T00:00:00Z",
     status: "ready",
     missingDeps: [],
+    depsNotInstalled: [],
+    revoked: null,
     revokedReason: null,
     update: null,
     ...extra,

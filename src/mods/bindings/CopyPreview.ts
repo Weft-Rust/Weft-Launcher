@@ -14,4 +14,8 @@ enable: Array<string>,
 /**
  * Ids of items that will be installed turned off, because something they need is missing.
  */
-installedOff: Array<string>, };
+installedOff: Array<string>, 
+/**
+ * Ids of dependencies nothing provides for `to`: why `installed_off` are off.
+ */
+missing: Array<string>, };

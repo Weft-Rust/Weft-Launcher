@@ -1,36 +1,32 @@
 // A stand-in for the Rust side, so the UI runs in a plain browser: `npm run dev:mock`.
 //
 // Pick a state with `?scenario=<name>` and adjust it with URL flags, e.g.
-// `?scenario=mods&index=cached&revoked=cogwork&slow=1`. SCENARIOS and FLAGS below are the one
-// list of both; the README and the tests read them from here.
+// `?scenario=mods&index=cached&revoked=cogwork&slow=1`. SCENARIOS and FLAGS in ./scenarios are the
+// one list of both; the README and the tests read them from there.
 //
-// The rules follow src-tauri/src/mods: fitting and version order come from src/mods/select.ts,
-// dependencies are turned on and off in cascades, revoked builds are refused, an update keeps a
-// mod's on/off state, and copying merges into a set that already has mods.
+// The rules are src-tauri/src/mods' own, ported in ./mockRules and tested against the Rust table
+// tests' cases; crashes are read out of engine log lines with ./diagnose, like the backend does.
+// This file holds the state (catalogue, locks, what is running) and answers the commands.
 
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 import { COMMANDS, EVENTS } from "../mods/ipc";
-import { compareVersions, fittingVersions, parseRepo, sameRepo } from "../mods/select";
+import { parseRepo, sameRepo } from "../mods/select";
 import { SCENARIOS } from "./scenarios";
+import { CRASH_LOGS } from "./crashes";
+import { findFailure } from "./diagnose";
+import * as R from "./mockRules";
+import type { Entry, Fit } from "./mockRules";
 import type {
   AppErrorPayload,
   Catalog,
   CatalogMod,
   CatalogVersion,
   ChangeResult,
-  CopyItem,
-  CopyPreview,
   CopyResult,
   ErrorCode,
   FailureKind,
   FileInspection,
-  InstallPlan,
-  InstalledMod,
-  ModFailure,
-  ModStatus,
-  PlanItem,
-  ProfileReport,
   ProgressStage,
 } from "../mods/types";
 
@@ -43,6 +39,7 @@ const flag = (name: string): string | null => params.get(name) ?? scenario.flags
 const failures = new Set((flag("fail") ?? "").split(",").filter(Boolean));
 const SLOW = flag("slow") === "1" ? 4 : 1;
 const LONG = flag("long") === "1";
+const NOW = "2026-11-04T18:00:00Z";
 
 // ---------------------------------------------------------------------------------------------
 // Catalogue
@@ -94,7 +91,7 @@ function version(id: string, v: string, weftTag: string, extra: Partial<CatalogV
 }
 
 /** A build from an added repo: nobody reviewed it, and its provenance, if any, is its own claim. */
-const fromSource = (commit: string, claimsProvenance: boolean): Partial<CatalogVersion> => ({
+const fromSource = (commit: string, claimsProvenance: boolean, extra: Partial<CatalogVersion> = {}): Partial<CatalogVersion> => ({
   trust: "unreviewed",
   reviewed: null,
   provenanceVerified: false,
@@ -103,6 +100,7 @@ const fromSource = (commit: string, claimsProvenance: boolean): Partial<CatalogV
   provenance: claimsProvenance
     ? { repo: LANTERN_REPO, workflow: ".github/workflows/build.yml", gitRef: "refs/tags/glowmoss-v0.3.0", verifiedAt: null }
     : null,
+  ...extra,
 });
 
 const indexMod = (id: string, name: string, summary: string, versions: CatalogVersion[], icon: string | null = null): CatalogMod => ({
@@ -132,6 +130,7 @@ const sourceMod = (id: string, name: string, summary: string, versions: CatalogV
 });
 
 const LONG_ID = "extraordinarily-verbose-decorative-lighting-and-atmosphere-overhaul";
+const revokedId = flag("revoked");
 
 const allMods: CatalogMod[] = [
   {
@@ -139,7 +138,13 @@ const allMods: CatalogMod[] = [
       "cogwork",
       "Cogwork",
       "Gears, item tubes and engines, an excavator, an assembly bench and a leveler.",
-      [version("cogwork", "0.2.1-rc.1", NEW, { channel: "prerelease" }), version("cogwork", "0.2.0", NEW), version("cogwork", "0.1.2", OLD)],
+      [
+        // The fix a revocation's reason points to.
+        ...(revokedId === "cogwork" ? [version("cogwork", "0.2.1", NEW)] : []),
+        version("cogwork", "0.2.1-rc.1", NEW, { channel: "prerelease" }),
+        version("cogwork", "0.2.0", NEW),
+        version("cogwork", "0.1.2", OLD),
+      ],
       "mock://cogwork"
     ),
     homepage: "https://github.com/Zorro909/weft-mods/tree/main/cogwork",
@@ -163,7 +168,8 @@ const allMods: CatalogMod[] = [
   ]),
   indexMod("signals", "Signals", "Block signals and pressure plates for Railways.", [version("signals", "0.1.0", OLD)]),
   sourceMod("lanterns", "Lanterns", "Hanging lanterns in eight colours that sway in the wind and light up caves.", [
-    version("lanterns", "1.1.0", NEW, fromSource("2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e", false)),
+    // Glowmoss lights them; only the same source has it, as the backend's resolver allows.
+    version("lanterns", "1.1.0", NEW, fromSource("2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e", false, { deps: ["base", "glowmoss"] })),
     version("lanterns", "1.0.0", OLD, fromSource("9a1b2c3d4e5f60718293a4b5c6d7e8f901234567", false)),
   ]),
   sourceMod("glowmoss", "Glowmoss", "A soft blue moss that spreads on damp stone and glows at night.", [
@@ -190,15 +196,17 @@ const catalog: Catalog = {
   mods: allMods.filter((m) => !(indexFlag === "unavailable" && m.origin.kind === "index")),
   revoked: [],
   index:
-    indexFlag === "cached"
-      ? { freshness: "cached", generated: INDEX_DATE, error: err("Network", "offline") }
-      : indexFlag === "unavailable"
-        ? { freshness: "unavailable", generated: null, error: err("Network", "offline") }
-        : indexFlag === "invalid"
-          ? { freshness: "cached", generated: INDEX_DATE, error: err("IndexSignatureInvalid", "signature by an unknown key") }
-          : indexFlag === "rollback"
-            ? { freshness: "cached", generated: INDEX_DATE, error: err("IndexRollback") }
-            : { freshness: "fresh", generated: INDEX_DATE, error: null },
+    indexFlag === "stale"
+      ? { freshness: "stale", generated: "2026-09-21T12:00:00Z", signedAt: "2026-09-21T12:00:00Z", error: null }
+      : indexFlag === "cached"
+        ? { freshness: "cached", generated: INDEX_DATE, signedAt: INDEX_DATE, error: err("Network", "offline") }
+        : indexFlag === "unavailable"
+          ? { freshness: "unavailable", generated: null, signedAt: null, error: err("Network", "offline") }
+          : indexFlag === "invalid"
+            ? { freshness: "cached", generated: INDEX_DATE, signedAt: INDEX_DATE, error: err("IndexSignatureInvalid", "signature by an unknown key") }
+            : indexFlag === "rollback"
+              ? { freshness: "cached", generated: INDEX_DATE, signedAt: INDEX_DATE, error: err("IndexRollback") }
+              : { freshness: "fresh", generated: INDEX_DATE, signedAt: INDEX_DATE, error: null },
   sources: [
     {
       repo: LANTERN_REPO,
@@ -229,35 +237,10 @@ if (sourceFlag === "notfound") {
 // ---------------------------------------------------------------------------------------------
 // Mod sets
 
-type Entry = Omit<InstalledMod, "status" | "missingDeps" | "revokedReason" | "update">;
-
-function entryFrom(mod: CatalogMod, v: CatalogVersion, enabled = true): Entry {
-  return {
-    id: mod.id,
-    name: mod.name,
-    summary: mod.summary,
-    version: v.version,
-    channel: v.channel,
-    sha256: v.sha256,
-    size: v.size,
-    enabled,
-    trust: v.trust,
-    origin: mod.origin,
-    abi: v.abi,
-    weftTag: v.weftTag,
-    deps: v.deps,
-    tag: v.tag,
-    sourceRepo: v.sourceRepo,
-    sourceCommit: v.sourceCommit,
-    icon: mod.icon,
-    installedAt: "2026-11-04T12:00:00Z",
-  };
-}
-
 const modById = (id: string) => allMods.find((m) => m.id === id)!;
-const pick = (id: string, v: string, enabled = true) => {
+const pick = (id: string, v: string, enabled = true): Entry => {
   const m = modById(id);
-  return entryFrom(m, m.versions.find((x) => x.version === v)!, enabled);
+  return R.entryFrom(m, m.versions.find((x) => x.version === v)!, enabled, "2026-11-04T12:00:00Z");
 };
 
 const fileEntry: Entry = {
@@ -279,19 +262,23 @@ const fileEntry: Entry = {
   sourceCommit: null,
   icon: null,
   installedAt: "2026-11-04T12:00:00Z",
+  revoked: null,
 };
 
 /** Which mods each scenario starts with. */
-const SETS: Record<string, "full" | "quiet" | "donor" | "none"> = {
+const SETS: Record<string, "full" | "quiet" | "donor" | "needs" | "late" | "none"> = {
   mods: "full",
   revoked: "full",
   ratelimited: "full",
   offline: "full",
   indexdown: "full",
+  stale: "full",
   long: "full",
   crash: "quiet",
   knownfile: "quiet",
   empty: "donor",
+  missingdep: "needs",
+  lateblock: "late",
   fresh: "none",
 };
 
@@ -301,150 +288,65 @@ if (set === "full") {
   locks[NEW] = [pick("cogwork", "0.2.0"), pick("structures", "0.1.2"), pick("showcase", "0.1.1-rc.2", false), pick("lanterns", "1.0.0"), { ...fileEntry }];
   locks[OLD] = [pick("cogwork", "0.1.2"), pick("structures", "0.1.1")];
 } else if (set === "quiet") {
-  locks[NEW] = [pick("cogwork", "0.2.0"), pick("structures", "0.1.2"), { ...fileEntry }];
+  // A missing-dependency crash needs something the launcher couldn't see: Cogwork is off.
+  locks[NEW] = [pick("cogwork", "0.2.0", flag("crash") !== "missingDep"), pick("structures", "0.1.2"), { ...fileEntry }];
 } else if (set === "donor") {
-  locks[OLD] = [pick("cogwork", "0.1.2"), pick("structures", "0.1.1"), pick("lanterns", "1.0.0"), pick("signals", "0.1.0"), { ...fileEntry }];
+  locks[OLD] = [
+    pick("cogwork", "0.1.2"),
+    pick("structures", "0.1.1"),
+    pick("lanterns", "1.0.0"),
+    pick("signals", "0.1.0"),
+    pick("hearth", "0.3.2"),
+    { ...fileEntry },
+  ];
+} else if (set === "needs") {
+  locks[NEW] = [pick("cogwork", "0.2.0", false), pick("hearth", "0.4.0"), pick("lanterns", "1.1.0"), pick("railways", "0.2.0"), pick("structures", "0.1.3")];
+  locks[OLD] = [pick("cogwork", "0.1.2")];
+} else if (set === "late") {
+  locks[NEW] = [pick("cogwork", "0.2.0"), pick("hearth", "0.4.0"), pick("structures", "0.1.3")];
 }
 if (LONG) locks[NEW].push(pick(LONG_ID, "12.34.55"));
+for (const l of Object.values(locks)) l.sort((a, b) => (a.id < b.id ? -1 : 1));
 const unmanaged = set === "full" ? ["oldtweak.zip"] : [];
 
-const revokedId = flag("revoked");
-if (revokedId) {
-  const shas = new Set(Object.values(locks).flatMap((l) => l.filter((e) => e.id === revokedId).map((e) => e.sha256)));
-  catalog.revoked = [...shas].map((s) => ({ sha256: s, reason: "Corrupts worlds that use its tubes. Get 0.2.1 or later." }));
-  // The backend turns a revoked mod off and keeps it off.
-  Object.values(locks).forEach((l) => l.forEach((e) => shas.has(e.sha256) && (e.enabled = false)));
+const REASON = "Corrupts worlds that use its tubes. Get 0.2.1 or later.";
+function revoke(id: string) {
+  const shas = new Set(Object.values(locks).flatMap((l) => l.filter((e) => e.id === id).map((e) => e.sha256)));
+  catalog.revoked.push(...[...shas].map((s) => ({ sha256: s, reason: REASON })));
+  // The backend turns a revoked mod off and remembers why in the lock.
+  Object.values(locks).forEach((l) => R.applyRevocations(l, catalog, NOW));
 }
+if (revokedId) revoke(revokedId);
+// Without an index there is no revocation list; the lock still remembers.
+if (indexFlag === "unavailable") catalog.revoked = [];
 
 const versions = set === "none" ? [] : [NEW, OLD];
 const running = new Set<string>();
+/** The last removal per version, which `restore_mod` can undo until the next change. */
+const removed: Record<string, Entry | undefined> = {};
 
 // ---------------------------------------------------------------------------------------------
-// The rules
+// The commands' work
 
 const ABI_ERROR = flag("abi") === "error";
 const abiOf = (tag: string): string | null => (ABI_ERROR ? null : (ABI[tag] ?? null));
-const revocation = (s: string) => catalog.revoked.find((r) => r.sha256 === s)?.reason ?? null;
+const fitOf = (tag: string): Fit | null => {
+  const abi = abiOf(tag);
+  return abi === null ? null : { abi, platform: PLATFORM };
+};
 
 const fail = (code: ErrorCode, detail: string | null = null): never => {
   throw { code, detail } satisfies AppErrorPayload;
 };
 
-function catalogEntryFor(e: Entry): CatalogMod | undefined {
-  return catalog.mods.find(
-    (m) =>
-      m.id === e.id &&
-      (e.origin.kind === "index"
-        ? m.origin.kind === "index"
-        : e.origin.kind === "source" && m.origin.kind === "source" && sameRepo(m.origin.repo, e.origin.repo))
-  );
-}
-
 function lockOf(tag: string): Entry[] {
   return locks[tag] ?? fail("NotInstalled", tag);
 }
 
-function report(tag: string): ProfileReport {
-  const abi = abiOf(tag);
-  const lock = lockOf(tag);
-  const on = new Set(lock.filter((m) => m.enabled).map((m) => m.id));
-  const mods: InstalledMod[] = lock.map((e) => {
-    const revokedReason = revocation(e.sha256);
-    const missing = e.deps.filter((d) => d !== "base" && !on.has(d));
-    const status: ModStatus = revokedReason
-      ? "revoked"
-      : !e.enabled
-        ? "off"
-        : abi === null || e.abi === null
-          ? "unchecked"
-          : e.abi !== abi
-            ? "wrongVersion"
-            : missing.length
-              ? "missingDeps"
-              : "ready";
-    const m = catalogEntryFor(e);
-    const best = m ? fittingVersions(catalog, m, abi, e.channel !== null && e.channel !== "release")[0] : undefined;
-    const update =
-      best &&
-      best.sha256 !== e.sha256 &&
-      (status === "wrongVersion" || status === "revoked" || compareVersions(best.version, e.version ?? "0") > 0)
-        ? { version: best.version, sha256: best.sha256, channel: best.channel, trust: best.trust }
-        : null;
-    return { ...e, status, missingDeps: status === "missingDeps" ? missing : [], revokedReason, update };
-  });
-  return {
-    tag,
-    versionAbi: abi,
-    abiError: ABI_ERROR ? err("AbiUnavailable", tag) : null,
-    mods,
-    blocking: mods.filter((m) => m.status === "wrongVersion" || m.status === "missingDeps").map((m) => m.id),
-    unmanaged,
-  };
-}
+const report = (tag: string) => R.report(tag, lockOf(tag), abiOf(tag), ABI_ERROR ? err("AbiUnavailable", tag) : null, catalog, unmanaged);
 
-function findBuild(sha256: string): { mod: CatalogMod; v: CatalogVersion } {
-  for (const mod of catalog.mods) {
-    const v = mod.versions.find((x) => x.sha256 === sha256);
-    if (v) return { mod, v };
-  }
-  return fail("ModNotInCatalog", sha256);
-}
-
-const planItem = (mod: CatalogMod, v: CatalogVersion): PlanItem => ({
-  id: mod.id,
-  name: mod.name,
-  version: v.version,
-  sha256: v.sha256,
-  trust: v.trust,
-  channel: v.channel,
-  size: v.size,
-});
-
-function plan(tag: string, sha256: string): InstallPlan {
-  const lock = lockOf(tag);
-  const abi = abiOf(tag);
-  const { mod, v } = findBuild(sha256);
-  const existing = lock.find((e) => e.id === mod.id);
-  const out: InstallPlan = {
-    target: planItem(mod, v),
-    replaces: existing ? { version: existing.version, sha256: existing.sha256, trust: existing.trust, enabled: existing.enabled } : null,
-    install: [],
-    enable: [],
-    missing: [],
-    problem: null,
-  };
-  const reason = revocation(v.sha256);
-  if (running.has(tag)) out.problem = err("GameRunning", tag);
-  else if (abi === null) out.problem = err("AbiUnavailable", tag);
-  else if (reason) out.problem = err("ModRevoked", `${mod.name}: ${reason}`);
-  else if (v.abi !== abi) out.problem = err("ModIncompatible", mod.name);
-  else if (!(v.platforms as string[]).includes(catalog.platform)) out.problem = err("ModNotForPlatform", mod.name);
-
-  const seen = new Set([mod.id]);
-  const walk = (deps: string[], allowPre: boolean) => {
-    for (const dep of deps) {
-      if (dep === "base" || seen.has(dep)) continue;
-      seen.add(dep);
-      const inst = lock.find((e) => e.id === dep);
-      if (inst) {
-        if (inst.enabled) continue;
-        const r = revocation(inst.sha256);
-        if (r) out.problem ??= err("ModRevoked", `${inst.name}: ${r}`);
-        else out.enable.push(dep);
-        walk(inst.deps, allowPre);
-        continue;
-      }
-      // The index first, then sources, as the backend prefers them.
-      const candidates = catalog.mods.filter((m) => m.id === dep).sort((a, b) => Number(a.origin.kind !== "index") - Number(b.origin.kind !== "index"));
-      const best = candidates.map((m) => ({ m, b: fittingVersions(catalog, m, abi, allowPre)[0] })).find((x) => x.b);
-      if (best) {
-        out.install.push(planItem(best.m, best.b));
-        walk(best.b.deps, allowPre);
-      } else out.missing.push(dep);
-    }
-  };
-  walk(v.deps, v.channel !== "release");
-  return out;
+function findBuild(sha256: string) {
+  return R.findBuild(catalog, sha256) ?? fail("ModNotInCatalog", sha256);
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms * SLOW));
@@ -452,11 +354,12 @@ const progress = (sha256: string, modId: string, stage: ProgressStage, percent: 
   emit(EVENTS.modProgress, { sha256, modId, stage, percent });
 
 /** Download and check one file, with the backend's stages and failures. */
-async function fetchBuild(item: { sha256: string; id: string }) {
+async function fetchBuild(item: { sha256: string; id: string }, isDep: boolean) {
   if (failures.has("toolarge")) fail("ModTooLarge", `${item.id}.zip is over 64 MB`);
   for (let p = 0; p <= 100; p += 10) {
     await progress(item.sha256, item.id, "downloading", p);
     if (p === 40 && failures.has("network")) fail("Network", "connection reset by peer");
+    if (p === 60 && isDep && failures.has("dep")) fail("ModDownloadNotFound", `${item.id}.zip`);
     await sleep(140);
   }
   await progress(item.sha256, item.id, "verifying", 100);
@@ -464,96 +367,77 @@ async function fetchBuild(item: { sha256: string; id: string }) {
   if (failures.has("install")) fail("Sha256Mismatch", `expected ${item.sha256.slice(0, 12)}…, got 0b5e1c9d2a77…`);
 }
 
-function cascadeOn(lock: Entry[], id: string, turnedOn: string[]) {
-  const e = lock.find((x) => x.id === id);
-  if (!e) return;
-  for (const dep of e.deps) {
-    const d = lock.find((x) => x.id === dep);
-    if (!d || d.enabled) continue;
-    const r = revocation(d.sha256);
-    if (r) fail("ModRevoked", `${d.name}: ${r}`);
-    d.enabled = true;
-    turnedOn.push(d.id);
-    cascadeOn(lock, d.id, turnedOn);
+/** Every change but a restore forgets the last removal: its file may go at the next clean-up. */
+function changed(tag: string) {
+  removed[tag] = undefined;
+}
+
+function result(tag: string, parts: Partial<Omit<ChangeResult, "report">> = {}): ChangeResult {
+  return { report: report(tag), installed: [], alsoEnabled: [], alsoDisabled: [], missing: [], installedOff: [], undo: null, ...parts };
+}
+
+/** `service::run_install`: download what the wanted builds need, re-check, then write the set. */
+async function runInstall(tag: string, wanted: { mod: CatalogMod; v: CatalogVersion }[], skipFetch: string[] = []): Promise<ChangeResult> {
+  const fit = fitOf(tag) ?? fail("AbiUnavailable", tag);
+  const res = R.resolve(catalog, lockOf(tag), wanted, fit);
+  for (const p of res.picks) {
+    if (!skipFetch.includes(p.v.sha256)) await fetchBuild({ sha256: p.v.sha256, id: p.mod.id }, !res.wanted.includes(p.mod.id));
   }
-}
-
-function cascadeOff(lock: Entry[], id: string, turnedOff: string[]) {
-  for (const e of lock) {
-    if (e.enabled && e.deps.includes(id)) {
-      e.enabled = false;
-      turnedOff.push(e.id);
-      cascadeOff(lock, e.id, turnedOff);
-    }
-  }
-}
-
-function change(tag: string, parts: Partial<Omit<ChangeResult, "report">> = {}): ChangeResult {
-  return { report: report(tag), installed: [], alsoEnabled: [], alsoDisabled: [], missing: [], ...parts };
-}
-
-function put(lock: Entry[], entry: Entry) {
-  const at = lock.findIndex((e) => e.id === entry.id);
-  // An update keeps the mod's on/off state; a new install is on.
-  if (at >= 0) lock[at] = { ...entry, enabled: lock[at].enabled };
-  else lock.push(entry);
+  // `installing` comes before the set is rewritten.
+  for (const p of res.picks) await progress(p.v.sha256, p.mod.id, "installing", 100);
+  await sleep(350);
+  // Contract R3 §5: what changed during the download makes the plan wrong.
+  if (!locks[tag] || failures.has("meanwhile")) fail("ModChangedMeanwhile", tag);
+  if (running.has(tag)) fail("GameRunning", tag);
+  for (const p of res.picks) if (R.revocation(catalog, p.v.sha256)) fail("ModChangedMeanwhile", p.mod.name);
+  const lock = lockOf(tag);
+  const done = R.commit(lock, res, new Date().toISOString());
+  changed(tag);
+  return result(tag, { installed: done.installed, alsoEnabled: done.alsoEnabled, installedOff: done.installedOff, missing: res.missing });
 }
 
 async function installMod(tag: string, sha256: string): Promise<ChangeResult> {
-  const p = plan(tag, sha256);
-  if (p.problem) throw p.problem;
-  const items = [...p.install, p.target];
-  for (const item of items) await fetchBuild(item);
-  // `installing` comes before the set is rewritten.
-  for (const item of items) await progress(item.sha256, item.id, "installing", 100);
-  await sleep(350);
-  const lock = lockOf(tag);
-  for (const item of items) {
-    const { mod, v } = findBuild(item.sha256);
-    put(lock, entryFrom(mod, v));
-  }
-  for (const id of p.enable) lock.find((x) => x.id === id)!.enabled = true;
-  return change(tag, { installed: items.map((i) => i.id), alsoEnabled: p.enable, missing: p.missing });
+  const plan = R.planInstall(catalog, lockOf(tag), tag, sha256, fitOf(tag), running.has(tag));
+  if (plan.problem) throw plan.problem;
+  return runInstall(tag, [findBuild(sha256)]);
 }
 
-function previewCopy(from: string, to: string): CopyPreview {
-  const target = lockOf(to);
-  const abi = abiOf(to);
-  const items: CopyItem[] = lockOf(from).map((e): CopyItem => {
-    const base = { id: e.id, name: e.name, version: null, trust: null };
-    if (target.some((x) => x.id === e.id)) return { ...base, outcome: "alreadyThere" };
-    if (e.origin.kind === "file") return { ...base, outcome: "localFile" };
-    const m = catalogEntryFor(e);
-    const best = m ? fittingVersions(catalog, m, abi, e.channel !== "release")[0] : undefined;
-    if (best) return { ...base, outcome: "install", version: best.version, trust: best.trust };
-    const revoked = m?.versions.some((v) => v.abi === abi && revocation(v.sha256)) || !!revocation(e.sha256);
-    return { ...base, outcome: revoked ? "revoked" : "noBuild" };
-  });
-  return { from, to, items };
+function previewCopy(from: string, to: string) {
+  const fit = fitOf(to) ?? fail("AbiUnavailable", to);
+  return R.copyPreview(catalog, [from, lockOf(from)], [to, lockOf(to)], fit);
 }
 
 async function copyProfile(from: string, to: string): Promise<CopyResult> {
-  const preview = previewCopy(from, to);
-  const source = lockOf(from);
-  const target = lockOf(to);
-  const abi = abiOf(to);
-  const builds = preview.items
-    .filter((i) => i.outcome === "install")
-    .map((i) => {
-      const e = source.find((x) => x.id === i.id)!;
-      const m = catalogEntryFor(e)!;
-      return { e, m, v: fittingVersions(catalog, m, abi, e.channel !== "release")[0] };
-    });
-  for (const b of builds) await fetchBuild({ sha256: b.v.sha256, id: b.m.id });
-  for (const b of builds) await progress(b.v.sha256, b.m.id, "installing", 100);
-  await sleep(350);
-  for (const b of builds) target.push(entryFrom(b.m, b.v, b.e.enabled));
-  const have = new Set(target.map((e) => e.id));
-  const missing = [...new Set(builds.flatMap((b) => b.v.deps.filter((d) => d !== "base" && !have.has(d))))];
-  return {
-    ...change(to, { installed: builds.map((b) => b.m.id), missing }),
-    leftBehind: preview.items.filter((i) => i.outcome === "noBuild" || i.outcome === "localFile" || i.outcome === "revoked"),
-  };
+  if (running.has(to)) fail("GameRunning", to);
+  const { preview, picks } = previewCopy(from, to);
+  const leftBehind = preview.items.filter((i) => i.outcome === "noBuild" || i.outcome === "localFile" || i.outcome === "revoked");
+  const change = picks.length ? await runInstall(to, picks) : result(to);
+  return { ...change, leftBehind };
+}
+
+function setEnabled(tag: string, id: string, enabled: boolean): ChangeResult {
+  if (running.has(tag)) fail("GameRunning", tag);
+  const out = R.setEnabled(lockOf(tag), catalog, id, enabled);
+  changed(tag);
+  return result(tag, out);
+}
+
+function removeMod(tag: string, id: string): ChangeResult {
+  if (running.has(tag)) fail("GameRunning", tag);
+  const out = R.remove(lockOf(tag), id);
+  changed(tag);
+  removed[tag] = out.removed;
+  return result(tag, { alsoDisabled: out.alsoDisabled, undo: id });
+}
+
+/** Contract R3 §6: the entry back exactly as it was, while its file is still in the store. */
+function restoreMod(tag: string, id: string): ChangeResult {
+  if (running.has(tag)) fail("GameRunning", tag);
+  const entry = removed[tag];
+  if (!entry || entry.id !== id) fail("ModNotInstalled", id);
+  R.put(lockOf(tag), { ...entry! });
+  removed[tag] = undefined;
+  return result(tag);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -577,7 +461,7 @@ function inspect(tag: string): FileInspection {
       summary: mod.summary,
       fitsSystem: true,
       catalogMatch: { key: mod.key, name: mod.name, fitsVersion: v.abi === abiOf(tag), build: v },
-      revokedReason: revocation(v.sha256),
+      revokedReason: R.revocation(catalog, v.sha256),
       replaces: lock.find((e) => e.id === "cogwork")?.name ?? null,
     };
   }
@@ -618,50 +502,28 @@ async function installFile(tag: string, sha256: string): Promise<ChangeResult> {
   if (info.sha256 !== sha256) fail("ModFileChanged");
   if (!info.archive) throw info.problem;
   if (info.revokedReason) fail("ModRevoked", info.revokedReason);
-  const lock = lockOf(tag);
-  // A catalogued file installs from these bytes, recorded with the catalogue's metadata and tier.
+  if (running.has(tag)) fail("GameRunning", tag);
   await progress(sha256, info.archive.id, "verifying", 100);
   await sleep(300);
+  // A catalogued file installs from these bytes, recorded with the catalogue's metadata and
+  // tier, and brings what it needs like any install.
+  if (info.catalogMatch) return runInstall(tag, [knownBuild()], [sha256]);
   await progress(sha256, info.archive.id, "installing", 100);
   await sleep(300);
-  if (info.catalogMatch) {
-    const { mod, v } = knownBuild();
-    put(lock, entryFrom(mod, v));
-    return change(tag, { installed: [mod.id] });
-  }
-  put(lock, { ...fileEntry, installedAt: new Date().toISOString() });
-  return change(tag, { installed: [fileEntry.id] });
+  const lock = lockOf(tag);
+  const existing = lock.find((e) => e.id === fileEntry.id);
+  R.put(lock, { ...fileEntry, enabled: existing?.enabled ?? true, installedAt: new Date().toISOString() });
+  changed(tag);
+  return result(tag, { installed: [fileEntry.id] });
 }
 
 // ---------------------------------------------------------------------------------------------
-// Crashes
-
-const CRASHES: Record<FailureKind, ModFailure> = {
-  wrongVersion: {
-    kind: "wrongVersion",
-    modId: "mytweak",
-    other: null,
-    line: `ERROR mod mytweak was built against another mod ABI (5f0569a6bea71b81, this engine has ${ABI[NEW]})`,
-  },
-  missingDep: { kind: "missingDep", modId: "structures", other: "cogwork", line: "ERROR mod structures needs mod cogwork, which is not loaded" },
-  loadFailed: {
-    kind: "loadFailed",
-    modId: "structures",
-    other: null,
-    line: "ERROR failed to load mod structures: libstructures.so: undefined symbol: weft_world_spawn_v3",
-  },
-  notAMod: { kind: "notAMod", modId: "oldtweak", other: null, line: "ERROR mods/oldtweak.zip: not a Weft mod (no weft_mod_init)" },
-  wrongName: { kind: "wrongName", modId: "mytweak", other: null, line: "ERROR mod library mytweak-1.2.so must be named libmytweak.so" },
-  initPanicked: {
-    kind: "initPanicked",
-    modId: "cogwork",
-    other: null,
-    line: "thread 'main' panicked at cogwork/src/tubes.rs:88:14: index out of bounds",
-  },
-};
+// Launch and crashes
 
 async function launch(tag: string) {
   if (running.size) fail("AnotherGameRunning", [...running][0]);
+  // `prepare_launch` applies what the catalogue says before anything starts.
+  if (flag("prelaunch") === "revoke" && !catalog.revoked.length) revoke("cogwork");
   const r = report(tag);
   if (r.blocking.length) {
     fail("ModsBlocked", r.blocking.map((id) => r.mods.find((m) => m.id === id)?.name ?? id).join(", "));
@@ -672,12 +534,13 @@ async function launch(tag: string) {
   setTimeout(
     () => {
       running.delete(tag);
+      const log = kind && kind in CRASH_LOGS ? CRASH_LOGS[kind as FailureKind] : "";
       emit(EVENTS.gameState, {
         tag,
         state: "stopped",
         exitCode: kind ? 1 : 0,
         crashed: !!kind,
-        modFailure: kind && kind in CRASHES ? CRASHES[kind as FailureKind] : null,
+        modFailure: findFailure(log),
       });
     },
     (kind ? 1500 : 4000) * SLOW
@@ -704,7 +567,9 @@ function iconUrl(id: string): string {
 // ---------------------------------------------------------------------------------------------
 // Commands
 
-const KNOWN_REPOS = [LANTERN_REPO, "Zorro909/weft-mods"];
+/** Repos that exist, as GitHub spells them. `add_mod_source` asks GitHub; anything else is a 404. */
+const KNOWN_REPOS = [LANTERN_REPO, "Zorro909/weft-mods", "glow-team/fireflies"];
+const RESTORE = "restore_mod";
 
 export function installMockBackend() {
   mockWindows("main");
@@ -758,7 +623,8 @@ export function installMockBackend() {
         case COMMANDS.addModSource: {
           await sleep(500);
           const repo = parseRepo(String(args.repo)) ?? fail("ModSourceInvalid", String(args.repo));
-          const canonical = KNOWN_REPOS.find((k) => sameRepo(k, repo)) ?? repo;
+          if (sourceFlag === "ratelimited") fail("ModSourceRateLimited", repo);
+          const canonical = KNOWN_REPOS.find((k) => sameRepo(k, repo)) ?? fail("ModSourceNotFound", repo);
           if (!catalog.sources.some((s) => sameRepo(s.repo, canonical))) {
             catalog.sources.push({ repo: canonical, mods: 0, freshness: "fresh", checked: new Date().toISOString(), error: null });
           }
@@ -776,7 +642,7 @@ export function installMockBackend() {
           return iconUrl(String(args.url).replace("mock://", ""));
         case COMMANDS.planModInstall:
           await sleep(120);
-          return plan(args.tag, args.sha256);
+          return R.planInstall(catalog, lockOf(args.tag), args.tag, args.sha256, fitOf(args.tag), running.has(args.tag));
         case COMMANDS.installMod:
           return installMod(args.tag, args.sha256);
         case COMMANDS.inspectModFile:
@@ -784,30 +650,18 @@ export function installMockBackend() {
           return inspect(args.tag);
         case COMMANDS.installModFile:
           return installFile(args.tag, args.sha256);
-        case COMMANDS.setModEnabled: {
-          const lock = lockOf(args.tag);
-          const e = lock.find((x) => x.id === args.id) ?? fail("ModNotInstalled", args.id);
+        case COMMANDS.setModEnabled:
           await sleep(150);
-          const alsoEnabled: string[] = [];
-          const alsoDisabled: string[] = [];
-          if (args.enabled) {
-            const r = revocation(e.sha256);
-            if (r) fail("ModRevoked", `${e.name}: ${r}`);
-            cascadeOn(lock, e.id, alsoEnabled);
-            e.enabled = true;
-          } else {
-            e.enabled = false;
-            cascadeOff(lock, e.id, alsoDisabled);
-          }
-          return change(args.tag, { alsoEnabled, alsoDisabled });
-        }
+          return setEnabled(args.tag, args.id, !!args.enabled);
         case COMMANDS.removeMod:
           await sleep(150);
-          locks[args.tag] = lockOf(args.tag).filter((x) => x.id !== args.id);
-          return change(args.tag);
+          return removeMod(args.tag, args.id);
+        case RESTORE:
+          await sleep(150);
+          return restoreMod(args.tag, args.id);
         case COMMANDS.previewCopyModProfile:
           await sleep(200);
-          return previewCopy(args.from, args.to);
+          return previewCopy(args.from, args.to).preview;
         case COMMANDS.copyModProfile:
           return copyProfile(args.from, args.to);
         default:

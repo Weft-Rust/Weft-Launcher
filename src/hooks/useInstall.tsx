@@ -1,24 +1,10 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { translateError } from "../i18n/errors";
-import { COMMANDS, EVENTS } from "../mods/ipc";
+import { launcherApi, listenTo } from "../mods/api";
+import { EVENTS } from "../mods/ipc";
+import type { InstalledVersion, InstallProgress } from "../mods/types";
 
-export interface InstalledVersion {
-  tag: string;
-  path: string;
-  executable: string;
-  installed_at: string;
-}
-
-export interface InstallProgress {
-  tag: string;
-  stage: "downloading" | "verifying" | "extracting" | "finalizing";
-  percent?: number;
-  downloaded?: number;
-  total?: number;
-  speedMbps?: number;
-}
+export type { InstalledVersion, InstallProgress };
 
 interface InstallContextValue {
   installedVersions: InstalledVersion[];
@@ -48,7 +34,7 @@ export function InstallProvider({ children }: { children: ReactNode }) {
 
   const refreshInstalled = useCallback(async () => {
     try {
-      setInstalledVersions(await invoke<InstalledVersion[]>(COMMANDS.getInstalledVersions));
+      setInstalledVersions(await launcherApi.installedVersions());
     } catch (err) {
       console.error("Failed to load installed versions:", err);
     } finally {
@@ -63,7 +49,7 @@ export function InstallProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    listen<InstallProgress>(EVENTS.installProgress, (event) => {
+    listenTo(EVENTS.installProgress, (event) => {
       setProgress((prev) => ({ ...prev, [event.payload.tag]: event.payload }));
     }).then((fn) => {
       if (cancelled) fn();
@@ -94,13 +80,13 @@ export function InstallProvider({ children }: { children: ReactNode }) {
 
   const install = useCallback(
     (tag: string, assetUrl: string, assetName: string, expectedSha256: string | null) => {
-      setProgress((prev) => ({ ...prev, [tag]: { tag, stage: "downloading", percent: 0 } }));
-      return run(tag, () => invoke(COMMANDS.installVersion, { tag, assetUrl, assetName, expectedSha256 }));
+      setProgress((prev) => ({ ...prev, [tag]: { tag, stage: "downloading", percent: 0, downloaded: 0, total: 0, speedMbps: 0 } }));
+      return run(tag, () => launcherApi.installVersion(tag, assetUrl, assetName, expectedSha256));
     },
     [run]
   );
 
-  const remove = useCallback((tag: string) => run(tag, () => invoke(COMMANDS.removeVersion, { tag })), [run]);
+  const remove = useCallback((tag: string) => run(tag, () => launcherApi.removeVersion(tag)), [run]);
 
   const value: InstallContextValue = { installedVersions, loaded, progress, busy, errors, install, remove };
 

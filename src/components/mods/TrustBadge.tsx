@@ -2,7 +2,7 @@ import { useI18n } from "../../i18n/useI18n";
 import type { MessageKey } from "../../i18n";
 import type { Channel, Trust } from "../../mods/types";
 import { PixelIcon } from "../PixelIcon";
-import { BANG, CHECK, HAMMER } from "./glyphs";
+import { BANG, CHECK, CROSS, HAMMER } from "./glyphs";
 
 const GLYPH: Record<Trust, string[]> = { reviewed: CHECK, unreviewed: HAMMER, unverified: BANG };
 export const TRUST_LABEL: Record<Trust, MessageKey> = {
@@ -23,6 +23,20 @@ export function TrustBadge({ trust }: { trust: Trust }) {
     <span className={`badge trust-${trust}`} title={t(HINT[trust])}>
       <PixelIcon rows={GLYPH[trust]} />
       {t(TRUST_LABEL[trust])}
+    </span>
+  );
+}
+
+/**
+ * In place of the tier on a mod pulled from the index: whatever it was, it isn't usable now. The
+ * reason is a hover; the row's own line says it in full.
+ */
+export function RevokedBadge({ reason }: { reason: string | null }) {
+  const { t } = useI18n();
+  return (
+    <span className="badge revoked" title={t("mods.badgeRevokedHint", (reason ?? "").trim())}>
+      <PixelIcon rows={CROSS} />
+      {t("mods.badgeRevoked")}
     </span>
   );
 }

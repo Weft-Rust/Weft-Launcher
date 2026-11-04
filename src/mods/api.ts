@@ -1,12 +1,13 @@
 // Every backend command goes through `call`, typed by the generated `CommandSignatures`: a renamed
 // command or argument, or a changed result, fails to compile here instead of failing at runtime.
-// A rejected promise carries an AppErrorPayload; `asAppError` turns anything else into one.
+// A rejected promise carries an AppErrorPayload; `asAppError` says "Unknown" for anything else.
 
 import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
 import { listen, type EventCallback, type UnlistenFn } from "@tauri-apps/api/event";
 import type { CommandSignatures, EventPayloads } from "./bindings/commands";
 import { COMMANDS } from "./ipc";
-import type { AppErrorPayload } from "./types";
+import { isErrorCode } from "../i18n/errors";
+import type { UiError } from "./types";
 
 export type CommandArgs<K extends keyof CommandSignatures> = CommandSignatures[K]["args"];
 export type CommandResult<K extends keyof CommandSignatures> = CommandSignatures[K]["result"];
@@ -47,6 +48,7 @@ export const modsApi = {
   removeSource: (repo: string) => call(COMMANDS.removeModSource, { repo }),
   icon: (url: string) => call(COMMANDS.getModIcon, { url }),
   openPlayerModsFolder: () => call(COMMANDS.openPlayerModsFolder, {}),
+  openLog: (tag: string) => call(COMMANDS.openLog, { tag }),
 };
 
 /** The game version and launch commands. */
@@ -62,12 +64,18 @@ export const launcherApi = {
   openLog: (tag: string) => call(COMMANDS.openLog, { tag }),
 };
 
-/** Whatever a command rejected with, as the payload the backend sends. */
-export function asAppError(err: unknown): AppErrorPayload {
-  if (err && typeof err === "object" && typeof (err as { code?: unknown }).code === "string") {
-    const { code, detail } = err as { code: string; detail?: unknown };
-    return { code: code as AppErrorPayload["code"], detail: typeof detail === "string" ? detail : null };
+/**
+ * Whatever a command rejected with. A payload with a code this build knows stays as it is;
+ * anything else (a code from a newer backend, a thrown Error, a plain string) is "Unknown" with
+ * what there is to say, never passed off as a known failure.
+ */
+export function asAppError(err: unknown): UiError {
+  if (err && typeof err === "object" && "code" in err) {
+    const { code, detail } = err as { code: unknown; detail?: unknown };
+    const text = typeof detail === "string" ? detail : null;
+    if (isErrorCode(code)) return { code, detail: text };
+    return { code: "Unknown", detail: typeof code === "string" ? (text ? `${code}: ${text}` : code) : text };
   }
   const detail = err instanceof Error ? err.message : err == null ? null : String(err);
-  return { code: "Io", detail };
+  return { code: "Unknown", detail };
 }

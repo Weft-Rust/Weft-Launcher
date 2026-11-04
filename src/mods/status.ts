@@ -1,8 +1,10 @@
 // What a mod's state means for the player and what fixes it. Pure: messages are keys with
-// arguments, so this is testable without React or a language.
+// arguments, so this is testable without React. Lists of names are joined the way the current
+// language joins them (formatList).
 
-import type { Msg } from "../i18n";
-import type { ChangeResult, CopyResult, FailureKind, InstalledMod, ModFailure, ModStatus, ProfileReport } from "./types";
+import { formatList, type Msg } from "../i18n";
+import { fittingVersions, sameRepo } from "./select";
+import type { Catalog, CatalogMod, ChangeResult, CopyResult, FailureKind, InstalledMod, ModFailure, ModStatus, ProfileReport } from "./types";
 
 function unreachable(x: never): never {
   throw new Error(`unhandled: ${String(x)}`);
@@ -10,8 +12,75 @@ function unreachable(x: never): never {
 
 export type NameOf = (id: string) => string;
 
+const names = (ids: string[], name: NameOf) => formatList(ids.map(name));
+
+/** Where a dependency that isn't on stands, and so what can be done about it. */
+export type DepState =
+  | { kind: "off"; mod: InstalledMod }
+  | { kind: "revoked"; mod: InstalledMod }
+  | { kind: "notInstalled"; build: { mod: CatalogMod; sha256: string; version: string } | null };
+
+/**
+ * The catalogue build that would install `dep` for a mod that needs it, as the backend's resolver
+ * picks it: the index first, then the same source as the mod; no prerelease for a release.
+ */
+export function dependencyBuild(
+  catalog: Catalog | null,
+  dep: string,
+  neededBy: Pick<InstalledMod, "origin" | "channel">,
+  abi: string | null
+): { mod: CatalogMod; sha256: string; version: string } | null {
+  if (!catalog) return null;
+  const candidates = catalog.mods.filter(
+    (m) =>
+      m.id === dep &&
+      (m.origin.kind === "index" || (m.origin.kind === "source" && neededBy.origin.kind === "source" && sameRepo(m.origin.repo, neededBy.origin.repo)))
+  );
+  candidates.sort((a, b) => Number(a.origin.kind !== "index") - Number(b.origin.kind !== "index"));
+  for (const mod of candidates) {
+    const best = fittingVersions(catalog, mod, abi, (neededBy.channel ?? "release") !== "release")[0];
+    if (best) return { mod, sha256: best.sha256, version: best.version };
+  }
+  return null;
+}
+
+/** Each dependency of `mod` that isn't on, and why. */
+export function depStates(mod: InstalledMod, report: ProfileReport, catalog: Catalog | null): Map<string, DepState> {
+  const out = new Map<string, DepState>();
+  const notInstalled = new Set(mod.depsNotInstalled ?? []);
+  for (const dep of mod.missingDeps) {
+    const have = notInstalled.has(dep) ? undefined : report.mods.find((m) => m.id === dep);
+    if (!have) out.set(dep, { kind: "notInstalled", build: dependencyBuild(catalog, dep, mod, report.versionAbi) });
+    else out.set(dep, { kind: have.status === "revoked" ? "revoked" : "off", mod: have });
+  }
+  return out;
+}
+
+/** "Needs X, which is off." and the other cases, one message per case. */
+export function missingDepsReasons(mod: InstalledMod, tag: string, name: NameOf, states?: Map<string, DepState>): Msg[] {
+  if (!states) {
+    // Without the report around it: what the backend's two lists alone say.
+    const off = mod.missingDeps.filter((d) => !(mod.depsNotInstalled ?? []).includes(d));
+    const gone = mod.depsNotInstalled ?? [];
+    const out: Msg[] = [];
+    if (off.length) out.push({ key: "mods.statusDepsOff", count: off.length, args: [names(off, name)] });
+    if (gone.length) out.push({ key: "mods.statusDepsNotInstalled", count: gone.length, args: [names(gone, name)] });
+    return out;
+  }
+  const by = (k: string, pred: (s: DepState) => boolean) => [...states].filter(([, s]) => s.kind === k && pred(s)).map(([id]) => id);
+  const groups: [string[], Msg["key"]][] = [
+    [by("off", () => true), "mods.statusDepsOff"],
+    [by("revoked", () => true), "mods.statusDepsRevoked"],
+    [by("notInstalled", (s) => s.kind === "notInstalled" && s.build !== null), "mods.statusDepsNotInstalled"],
+    [by("notInstalled", (s) => s.kind === "notInstalled" && s.build === null), "mods.statusDepsNoBuild"],
+  ];
+  return groups
+    .filter(([ids]) => ids.length)
+    .map(([ids, key]) => ({ key, count: ids.length, args: [names(ids, name), tag] }) as Msg);
+}
+
 /** The line under a mod's name: what the launcher knows about it, or what is wrong. */
-export function modMeta(mod: InstalledMod, tag: string, name: NameOf): { parts: Msg[]; bad: boolean } {
+export function modMeta(mod: InstalledMod, tag: string, name: NameOf, states?: Map<string, DepState>): { parts: Msg[]; bad: boolean } {
   const status: ModStatus = mod.status;
   switch (status) {
     case "off":
@@ -22,12 +91,10 @@ export function modMeta(mod: InstalledMod, tag: string, name: NameOf): { parts: 
         bad: true,
       };
     case "missingDeps":
-      return {
-        parts: [{ key: "mods.statusMissingDeps", count: mod.missingDeps.length, args: [mod.missingDeps.map(name).join(", ")] }],
-        bad: true,
-      };
+      return { parts: missingDepsReasons(mod, tag, name, states), bad: true };
     case "revoked":
-      return { parts: [{ key: "mods.statusRevoked", args: [mod.revokedReason ?? ""] }], bad: true };
+      // The index's reason is its own sentence; ours stands apart from it.
+      return { parts: [{ key: "mods.statusRevoked", args: [(mod.revokedReason ?? "").trim()] }], bad: true };
     case "unchecked":
       return {
         parts: [
@@ -41,7 +108,7 @@ export function modMeta(mod: InstalledMod, tag: string, name: NameOf): { parts: 
       const parts: Msg[] = [mod.weftTag ? { key: "mods.metaBuiltFor", args: [mod.weftTag] } : { key: "mods.metaBuiltForThis", args: [tag] }];
       if (mod.origin.kind === "source") parts.push({ key: "mods.metaFromSource", args: [mod.origin.repo] });
       const deps = mod.deps.filter((d) => d !== "base");
-      if (deps.length) parts.push({ key: "mods.metaNeeds", args: [deps.map(name).join(", ")] });
+      if (deps.length) parts.push({ key: "mods.metaNeeds", args: [names(deps, name)] });
       return { parts, bad: false };
     }
     default:
@@ -49,44 +116,73 @@ export function modMeta(mod: InstalledMod, tag: string, name: NameOf): { parts: 
   }
 }
 
-/** A one-click fix for a mod that stops the game. */
+/** A one-click fix for a mod that stops the game. `install` and `update` open the review dialog. */
 export type Fix =
   | { kind: "turnOff"; id: string; name: string }
   | { kind: "turnOn"; id: string; name: string }
+  | { kind: "install"; id: string; name: string; mod: CatalogMod; sha256: string }
   | { kind: "update"; id: string; name: string; version: string; sha256: string };
+
+/** What gets each dependency that isn't on back on, where something can. */
+function depFixes(states: Map<string, DepState>): Fix[] {
+  const fixes: Fix[] = [];
+  for (const [id, s] of states) {
+    if (s.kind === "off") fixes.push({ kind: "turnOn", id, name: s.mod.name });
+    else if (s.kind === "notInstalled" && s.build) fixes.push({ kind: "install", id, name: s.build.mod.name, mod: s.build.mod, sha256: s.build.sha256 });
+  }
+  return fixes;
+}
 
 export interface Blocker {
   mod: InstalledMod;
-  reason: Msg;
+  reasons: Msg[];
   fixes: Fix[];
 }
 
 /** Each mod that stops this version from starting, why, and what fixes it. */
-export function blockers(report: ProfileReport | undefined, name: NameOf): Blocker[] {
+export function blockers(report: ProfileReport | undefined, name: NameOf, catalog: Catalog | null = null): Blocker[] {
   if (!report) return [];
   const byId = new Map(report.mods.map((m) => [m.id, m]));
   return report.blocking.flatMap((id) => {
     const mod = byId.get(id);
     if (!mod) return [];
     const fixes: Fix[] = [];
-    let reason: Msg;
+    let reasons: Msg[];
     if (mod.status === "missingDeps") {
-      reason = { key: "mods.statusMissingDeps", count: mod.missingDeps.length, args: [mod.missingDeps.map(name).join(", ")] };
-      for (const dep of mod.missingDeps) {
-        const installed = byId.get(dep);
-        if (installed && !installed.enabled && installed.status !== "revoked") {
-          fixes.push({ kind: "turnOn", id: dep, name: installed.name });
-        }
-      }
+      const states = depStates(mod, report, catalog);
+      reasons = missingDepsReasons(mod, report.tag, name, states);
+      fixes.push(...depFixes(states));
     } else {
-      reason = mod.weftTag ? { key: "mods.statusWrongVersionTag", args: [mod.weftTag] } : { key: "mods.statusWrongVersion" };
+      reasons = [mod.weftTag ? { key: "mods.statusWrongVersionTag", args: [mod.weftTag] } : { key: "mods.statusWrongVersion" }];
     }
     if (mod.update) {
       fixes.push({ kind: "update", id: mod.id, name: mod.name, version: mod.update.version, sha256: mod.update.sha256 });
     }
     fixes.push({ kind: "turnOff", id: mod.id, name: mod.name });
-    return [{ mod, reason, fixes }];
+    return [{ mod, reasons, fixes }];
   });
+}
+
+/** The fixes a crash notice offers, beside Open log and Dismiss. */
+export function crashFixes(failure: ModFailure | null, report: ProfileReport | undefined, catalog: Catalog | null): Fix[] {
+  const mod = failure?.modId ? report?.mods.find((m) => m.id === failure.modId) : undefined;
+  if (!failure || !report) return [];
+  const fixes: Fix[] = [];
+  if (failure.kind === "missingDep" && failure.other) {
+    const dep = report.mods.find((m) => m.id === failure.other);
+    if (dep && !dep.enabled && dep.status !== "revoked") fixes.push({ kind: "turnOn", id: dep.id, name: dep.name });
+    if (!dep) {
+      const build = dependencyBuild(catalog, failure.other, mod ?? { origin: { kind: "index" }, channel: "release" }, report.versionAbi);
+      if (build) fixes.push({ kind: "install", id: failure.other, name: build.mod.name, mod: build.mod, sha256: build.sha256 });
+    }
+  }
+  // A newer build can fix a build that doesn't load; it can't fix a missing dependency or a file.
+  const updatable: FailureKind[] = ["wrongVersion", "loadFailed", "initPanicked"];
+  if (mod?.update && updatable.includes(failure.kind)) {
+    fixes.push({ kind: "update", id: mod.id, name: mod.name, version: mod.update.version, sha256: mod.update.sha256 });
+  }
+  if (mod?.enabled) fixes.push({ kind: "turnOff", id: mod.id, name: mod.name });
+  return fixes;
 }
 
 export type HeroState = "ready" | "playing" | "blocked";
@@ -96,14 +192,14 @@ export function heroState(report: ProfileReport | undefined, running: boolean): 
   return report && report.blocking.length > 0 ? "blocked" : "ready";
 }
 
-export function failureTitle(failure: ModFailure, name: string): Msg {
+/** What stopped the game, in display names. `name` is the blamed mod's; `nameOf` names the others. */
+export function failureTitle(failure: ModFailure, name: string, nameOf: NameOf): Msg {
   const kind: FailureKind = failure.kind;
-  const other = failure.other ?? "";
   switch (kind) {
     case "wrongVersion":
       return { key: "mods.failureWrongVersion", args: [name] };
     case "missingDep":
-      return { key: "mods.failureMissingDep", args: [name, other] };
+      return { key: "mods.failureMissingDep", args: [name, failure.other ? nameOf(failure.other) : ""] };
     case "loadFailed":
       return { key: "mods.failureLoad", args: [name] };
     case "notAMod":
@@ -145,37 +241,62 @@ export interface NoticeText {
   lines: Msg[];
 }
 
+/** What else a change did: dependencies turned on or off, and what has no build. */
+function sideEffects(result: ChangeResult, tag: string, name: NameOf, lines: Msg[]) {
+  if (result.alsoEnabled.length) lines.push({ key: "mods.noticeAlsoEnabled", args: [names(result.alsoEnabled, name)] });
+  if (result.alsoDisabled.length) lines.push({ key: "mods.noticeAlsoDisabled", args: [names(result.alsoDisabled, name)] });
+  // A mod installed turned off already says which dependency has no build.
+  if (result.missing.length && !result.installedOff.length) {
+    lines.push({ key: "mods.noticeMissing", count: result.missing.length, args: [names(result.missing, name), tag] });
+  }
+}
+
 /** What a change did, in names. `primary` is the mod the player acted on, if any. */
-export function describeChange(result: ChangeResult, primary: string | null, name: NameOf): NoticeText | null {
-  const names = (ids: string[]) => ids.map(name).join(", ");
+export function describeChange(result: ChangeResult, primary: string | null, tag: string, name: NameOf): NoticeText | null {
   const lines: Msg[] = [];
   if (primary && result.installed.includes(primary)) {
     const after = result.report.mods.find((m) => m.id === primary);
-    lines.push({ key: after && !after.enabled ? "mods.noticeInstalledOff" : "mods.noticeInstalled", args: [name(primary)] });
+    if (result.installedOff.includes(primary)) {
+      lines.push({
+        key: "mods.noticeInstalledOffMissing",
+        count: result.missing.length,
+        args: [name(primary), names(result.missing, name), tag],
+      });
+    } else {
+      lines.push({ key: after && !after.enabled ? "mods.noticeInstalledOff" : "mods.noticeInstalled", args: [name(primary), tag] });
+    }
   }
   const deps = result.installed.filter((id) => id !== primary);
-  if (deps.length && primary) lines.push({ key: "mods.noticeDepsInstalled", args: [names(deps)] });
-  if (result.alsoEnabled.length) lines.push({ key: "mods.noticeAlsoEnabled", args: [names(result.alsoEnabled)] });
-  if (result.alsoDisabled.length) lines.push({ key: "mods.noticeAlsoDisabled", args: [names(result.alsoDisabled)] });
-  if (result.missing.length) {
-    lines.push({ key: "mods.noticeMissing", count: result.missing.length, args: [names(result.missing)] });
-  }
+  if (deps.length && primary) lines.push({ key: "mods.noticeDepsInstalled", args: [names(deps, name)] });
+  sideEffects(result, tag, name, lines);
   if (!lines.length) return null;
   return { tone: result.missing.length ? "warn" : "ok", lines };
 }
 
-export function describeCopy(result: CopyResult, from: string, name: NameOf): NoticeText {
+export function describeRemove(result: ChangeResult, id: string, tag: string, name: NameOf): NoticeText {
+  const lines: Msg[] = [{ key: "mods.noticeRemoved", args: [name(id), tag] }];
+  sideEffects(result, tag, name, lines);
+  return { tone: "ok", lines };
+}
+
+export function describeRestore(result: ChangeResult, id: string, tag: string, name: NameOf): NoticeText {
+  const after = result.report.mods.find((m) => m.id === id);
+  return { tone: "ok", lines: [{ key: after?.enabled ? "mods.noticeRestored" : "mods.noticeRestoredOff", args: [name(id), tag] }] };
+}
+
+export function describeCopy(result: CopyResult, from: string, tag: string, name: NameOf): NoticeText {
   const lines: Msg[] = [{ key: "mods.noticeCopied", count: result.installed.length, args: [from] }];
+  if (result.installedOff.length) {
+    lines.push({ key: "mods.noticeCopiedOff", count: result.installedOff.length, args: [names(result.installedOff, name), tag] });
+  }
   if (result.leftBehind.length) {
     lines.push({
       key: "mods.noticeLeftBehind",
       count: result.leftBehind.length,
-      args: [result.leftBehind.map((i) => i.name).join(", ")],
+      args: [formatList(result.leftBehind.map((i) => i.name))],
     });
   }
-  if (result.missing.length) {
-    lines.push({ key: "mods.noticeMissing", count: result.missing.length, args: [result.missing.map(name).join(", ")] });
-  }
+  sideEffects({ ...result, installedOff: [] }, tag, name, lines);
   return { tone: result.leftBehind.length || result.missing.length ? "warn" : "ok", lines };
 }
 

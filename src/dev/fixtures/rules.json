@@ -1,0 +1,213 @@
+{
+  "_about": "Input/output cases for the mod-set rules, written from the Rust table tests in src-tauri/src/mods/plan.rs and profile.rs (the test each block follows is named in `rust`). mockRules.test.ts runs them against src/dev/mockRules.ts. Builds are [version, abi, channel, deps]; an entry is the Rust test helper `entry(id, deps, abi)` (version 0.1.0, on, Reviewed, from the index, abi ABI) with the fields given changed. A sha is `<id>@<version>`.",
+  "abi": { "ABI": "f470b1cbb1f9ad91", "OLD": "5f0569a6bea71b81" },
+  "catalogs": {
+    "world": {
+      "rust": "plan.rs tests::world",
+      "mods": [
+        { "id": "cogwork", "origin": "index", "builds": [["0.2.0", "ABI", "release", ["base", "showcase"]], ["0.1.0", "OLD", "release", ["showcase"]]] },
+        { "id": "showcase", "origin": "index", "builds": [["0.1.0", "ABI", "release", []]] },
+        { "id": "lanterns", "origin": "Someone/Lanterns", "builds": [["1.0.0", "ABI", "release", ["glow"]]] },
+        { "id": "glow", "origin": "Someone/Lanterns", "builds": [["1.0.0", "ABI", "release", []]] },
+        { "id": "shiny", "origin": "index", "builds": [["1.0.0", "ABI", "release", ["rcdep"]], ["1.1.0-rc.1", "ABI", "prerelease", ["rcdep"]]] },
+        { "id": "rcdep", "origin": "index", "builds": [["0.1.0-rc.1", "ABI", "prerelease", []]] },
+        { "id": "bad", "origin": "index", "builds": [["1.0.0", "ABI", "release", ["pulled"]]] },
+        { "id": "pulled", "origin": "index", "builds": [["1.0.0", "ABI", "release", []]] },
+        { "id": "base", "origin": "index", "builds": [["1.0.0", "ABI", "release", []]] }
+      ],
+      "revoked": ["pulled@1.0.0"]
+    },
+    "updates": {
+      "rust": "profile.rs tests::update_offers",
+      "mods": [
+        {
+          "id": "cogwork",
+          "origin": "index",
+          "builds": [["0.3.0-rc.1", "ABI", "prerelease", []], ["0.2.0", "ABI", "release", []], ["0.1.0", "ABI", "release", []], ["0.0.9", "OLD", "release", []]]
+        },
+        { "id": "lanterns", "origin": "Someone/Lanterns", "builds": [["1.1.0", "ABI", "release", []]] },
+        { "id": "pulled", "origin": "index", "builds": [["0.2.0", "ABI", "release", []]] }
+      ],
+      "revoked": ["pulled@0.2.0"]
+    },
+    "empty": { "rust": "catalog(vec![], &[sha(\"b\", \"0.1.0\")])", "mods": [], "revoked": ["b@0.1.0"] },
+    "statuses": { "rust": "profile.rs tests::statuses_and_blocking", "mods": [], "revoked": ["pulled@0.1.0"] }
+  },
+  "plans": {
+    "rust": "plan.rs tests::plans, plan_problems_and_replacement; contract R3 §1 for turnsOn",
+    "catalog": "world",
+    "cases": [
+      { "what": "dependency from the index is installed", "target": "cogwork@0.2.0", "lock": [], "install": ["showcase"], "enable": [], "missing": [], "problem": null, "turnsOn": true },
+      { "what": "installed dependency that is off is turned on", "target": "cogwork@0.2.0", "lock": [{ "id": "showcase", "enabled": false }], "install": [], "enable": ["showcase"], "missing": [], "problem": null, "turnsOn": true },
+      { "what": "dependency from the same source", "target": "lanterns@1.0.0", "lock": [], "install": ["glow"], "enable": [], "missing": [], "problem": null, "turnsOn": true },
+      { "what": "a release never pulls in a prerelease dependency", "target": "shiny@1.0.0", "lock": [], "install": [], "enable": [], "missing": ["rcdep"], "problem": null, "turnsOn": false },
+      { "what": "a prerelease may", "target": "shiny@1.1.0-rc.1", "lock": [], "install": ["rcdep"], "enable": [], "missing": [], "problem": null, "turnsOn": true },
+      { "what": "a revoked dependency is missing, not installed", "target": "bad@1.0.0", "lock": [], "install": [], "enable": [], "missing": ["pulled"], "problem": null, "turnsOn": false },
+      { "what": "an installed revoked dependency doesn't count", "target": "bad@1.0.0", "lock": [{ "id": "pulled", "version": "1.0.0" }], "install": [], "enable": [], "missing": ["pulled"], "problem": null, "turnsOn": false },
+      { "what": "a build for another version (its dependencies are still listed)", "target": "cogwork@0.1.0", "lock": [], "install": ["showcase"], "enable": [], "missing": [], "problem": "ModIncompatible", "turnsOn": true },
+      { "what": "a revoked build", "target": "pulled@1.0.0", "lock": [], "install": [], "enable": [], "missing": [], "problem": "ModRevoked", "turnsOn": true },
+      { "what": "the reserved id", "target": "base@1.0.0", "lock": [], "install": [], "enable": [], "missing": [], "problem": "ModIdReserved", "turnsOn": true },
+      { "what": "unknown mod interface", "target": "cogwork@0.2.0", "lock": [], "abi": null, "install": [], "enable": [], "missing": [], "problem": "AbiUnavailable", "turnsOn": false },
+      { "what": "the game is running", "target": "cogwork@0.2.0", "lock": [], "running": true, "install": ["showcase"], "enable": [], "missing": [], "problem": "GameRunning", "turnsOn": true },
+      {
+        "what": "an update of a mod that is off: nothing turns on, and it stays off",
+        "target": "cogwork@0.2.0",
+        "lock": [{ "id": "cogwork", "deps": ["showcase"], "abi": "OLD", "enabled": false, "trust": "unreviewed" }],
+        "install": ["showcase"],
+        "enable": [],
+        "missing": [],
+        "problem": null,
+        "turnsOn": false,
+        "replaces": { "enabled": false, "trust": "unreviewed" }
+      }
+    ]
+  },
+  "commits": {
+    "rust": "plan.rs tests::an_update_keeps_the_on_off_state; contract R3 §1 for installedOff",
+    "catalog": "world",
+    "cases": [
+      {
+        "what": "off stays off, and so does its new dependency",
+        "wanted": ["cogwork@0.2.0"],
+        "lock": [{ "id": "cogwork", "deps": ["showcase"], "abi": "OLD", "enabled": false }],
+        "installed": ["cogwork", "showcase"],
+        "alsoEnabled": [],
+        "installedOff": [],
+        "after": { "cogwork": false, "showcase": false }
+      },
+      {
+        "what": "on stays on",
+        "wanted": ["cogwork@0.2.0"],
+        "lock": [{ "id": "cogwork", "deps": ["showcase"], "abi": "OLD" }],
+        "installed": ["cogwork", "showcase"],
+        "alsoEnabled": [],
+        "installedOff": [],
+        "after": { "cogwork": true, "showcase": true }
+      },
+      {
+        "what": "a new install is on and turns on what it needs",
+        "wanted": ["cogwork@0.2.0"],
+        "lock": [{ "id": "showcase", "enabled": false }],
+        "installed": ["cogwork"],
+        "alsoEnabled": ["showcase"],
+        "installedOff": [],
+        "after": { "cogwork": true, "showcase": true }
+      },
+      {
+        "what": "a missing dependency installs the mod turned off",
+        "wanted": ["shiny@1.0.0"],
+        "lock": [],
+        "installed": ["shiny"],
+        "alsoEnabled": [],
+        "installedOff": ["shiny"],
+        "after": { "shiny": false }
+      },
+      {
+        "what": "copying two mods: only the one missing a dependency stays off",
+        "wanted": ["cogwork@0.2.0", "bad@1.0.0"],
+        "lock": [],
+        "installed": ["cogwork", "bad", "showcase"],
+        "alsoEnabled": [],
+        "installedOff": ["bad"],
+        "after": { "cogwork": true, "bad": false, "showcase": true }
+      }
+    ]
+  },
+  "toggles": {
+    "rust": "plan.rs tests::the_enable_cascade, removing_turns_off_what_needed_it; contract R3 §2",
+    "catalog": "empty",
+    "cases": [
+      {
+        "what": "turning a on turns on what it needs, transitively",
+        "lock": [{ "id": "a", "deps": ["c"], "enabled": false }, { "id": "c", "deps": ["d"], "enabled": false }, { "id": "d", "enabled": false }],
+        "action": ["on", "a"],
+        "alsoEnabled": ["c", "d"],
+        "alsoDisabled": []
+      },
+      {
+        "what": "turning d off turns off everything that needs it",
+        "lock": [{ "id": "a", "deps": ["c"] }, { "id": "c", "deps": ["d"] }, { "id": "d" }],
+        "action": ["off", "d"],
+        "alsoEnabled": [],
+        "alsoDisabled": ["a", "c"]
+      },
+      { "what": "a revoked dependency refuses the cascade", "lock": [{ "id": "e", "deps": ["b"], "enabled": false }, { "id": "b", "enabled": false }], "action": ["on", "e"], "error": "ModRevoked" },
+      { "what": "a revoked mod can't be turned on", "lock": [{ "id": "b", "enabled": false }], "action": ["on", "b"], "error": "ModRevoked" },
+      {
+        "what": "a revocation remembered in the lock refuses too",
+        "lock": [{ "id": "kept", "enabled": false, "revoked": { "reason": "broken", "at": "2026-11-04T00:00:00Z" } }],
+        "action": ["on", "kept"],
+        "error": "ModRevoked"
+      },
+      { "what": "not installed", "lock": [], "action": ["on", "zzz"], "error": "ModNotInstalled" },
+      { "what": "removing turns off what needed it", "lock": [{ "id": "a", "deps": ["b"] }, { "id": "b" }], "action": ["remove", "b"], "alsoEnabled": [], "alsoDisabled": ["a"], "after": { "a": false } },
+      { "what": "removing what isn't there", "lock": [], "action": ["remove", "b"], "error": "ModNotInstalled" }
+    ]
+  },
+  "copies": {
+    "rust": "plan.rs tests::copy_preview_outcomes",
+    "catalog": "world",
+    "from": [
+      { "id": "cogwork", "deps": ["showcase"], "abi": "OLD" },
+      { "id": "showcase", "abi": "OLD" },
+      { "id": "nobuild", "abi": "OLD" },
+      { "id": "mytweak", "abi": null, "origin": { "kind": "file", "name": "t.zip" } },
+      { "id": "pulled", "abi": "OLD" },
+      { "id": "lanterns", "deps": ["glow"], "abi": "OLD", "origin": { "kind": "source", "repo": "someone/lanterns" } },
+      { "id": "shiny", "abi": "OLD", "enabled": false }
+    ],
+    "to": [{ "id": "showcase" }],
+    "outcomes": {
+      "cogwork": ["install", "0.2.0"],
+      "showcase": ["alreadyThere", null],
+      "nobuild": ["noBuild", null],
+      "mytweak": ["localFile", null],
+      "pulled": ["revoked", null],
+      "lanterns": ["install", "1.0.0"],
+      "shiny": null
+    },
+    "picks": ["cogwork", "lanterns"]
+  },
+  "statuses": {
+    "rust": "profile.rs tests::statuses_and_blocking; contract R3 §1 (depsNotInstalled) and §2 (kept revocations)",
+    "catalog": "statuses",
+    "lock": [
+      { "id": "cogwork", "deps": ["base", "showcase", "signals"] },
+      { "id": "showcase", "enabled": false },
+      { "id": "old", "abi": "OLD" },
+      { "id": "file", "abi": null },
+      { "id": "fine", "deps": ["base"] },
+      { "id": "pulled", "enabled": false },
+      { "id": "kept", "enabled": false, "revoked": { "reason": "remembered", "at": "2026-11-04T00:00:00Z" } }
+    ],
+    "cases": [
+      ["ABI", "cogwork", "missingDeps"],
+      ["ABI", "showcase", "off"],
+      ["ABI", "old", "wrongVersion"],
+      ["ABI", "file", "unchecked"],
+      ["ABI", "fine", "ready"],
+      ["ABI", "pulled", "revoked"],
+      ["ABI", "kept", "revoked"],
+      [null, "old", "unchecked"],
+      [null, "fine", "unchecked"],
+      [null, "cogwork", "missingDeps"]
+    ],
+    "blocking": ["cogwork", "old"],
+    "missingDeps": { "cogwork": ["showcase", "signals"] },
+    "depsNotInstalled": { "cogwork": ["signals"] },
+    "revokedReason": { "pulled": "broken", "kept": "remembered" }
+  },
+  "updates": {
+    "rust": "profile.rs tests::update_offers",
+    "catalog": "updates",
+    "cases": [
+      { "what": "older release", "entry": { "id": "cogwork", "version": "0.1.0" }, "want": "0.2.0" },
+      { "what": "newest already", "entry": { "id": "cogwork", "version": "0.2.0" }, "want": null },
+      { "what": "prerelease player gets the rc", "entry": { "id": "cogwork", "version": "0.2.0", "channel": "prerelease" }, "want": "0.3.0-rc.1" },
+      { "what": "built for another version: any fitting build", "entry": { "id": "cogwork", "version": "0.0.9", "abi": "OLD" }, "want": "0.2.0" },
+      { "what": "source, repo case differs", "entry": { "id": "lanterns", "version": "1.0.0", "origin": { "kind": "source", "repo": "someone/lanterns" } }, "want": "1.1.0" },
+      { "what": "revoked build is never offered", "entry": { "id": "pulled", "version": "0.1.0" }, "want": null },
+      { "what": "local file has no updates", "entry": { "id": "cogwork", "version": "0.1.0", "origin": { "kind": "file", "name": "c.zip" } }, "want": null }
+    ]
+  }
+}

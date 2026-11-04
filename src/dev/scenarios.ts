@@ -27,6 +27,18 @@ export const SCENARIOS: Scenario[] = [
   { name: "revoked", description: "The installed Cogwork build has been pulled from the index.", flags: { revoked: "cogwork" } },
   { name: "ratelimited", description: "GitHub rate-limits the source; its last mods are shown.", flags: { source: "ratelimited" } },
   { name: "indexdown", description: "The index has never been reached, so there are no Reviewed mods.", flags: { index: "unavailable" } },
+  { name: "stale", description: "The index verifies, but its signature is over 30 days old.", flags: { index: "stale" } },
+  {
+    name: "missingdep",
+    description:
+      "Mods that need others: Hearth needs Cogwork, which is off; Lanterns needs Glowmoss, which isn't installed; Railways needs Signals, which has no build yet.",
+    flags: {},
+  },
+  {
+    name: "lateblock",
+    description: "Nothing blocks Play until Play itself finds Cogwork revoked; Hearth, which needs it, then blocks the start.",
+    flags: { prelaunch: "revoke" },
+  },
   { name: "long", description: "Very long mod names, ids and repos, for overflow checks.", flags: { long: "1" } },
 ];
 
@@ -37,15 +49,15 @@ export interface Flag {
 }
 
 export const FLAGS: Flag[] = [
-  { name: "index", values: ["fresh", "cached", "unavailable", "invalid", "rollback"], description: "State of the signed mod index." },
+  { name: "index", values: ["fresh", "stale", "cached", "unavailable", "invalid", "rollback"], description: "State of the signed mod index." },
   { name: "source", values: ["ok", "notfound", "ratelimited", "offline"], description: "State of the added GitHub source." },
   { name: "revoked", values: ["<mod id>"], description: "Revokes the installed builds of that mod." },
   { name: "abi", values: ["error"], description: "The game version's mod interface can't be found out." },
   {
     name: "fail",
-    values: ["install", "network", "toolarge", "catalog", "sources"],
+    values: ["install", "network", "toolarge", "dep", "meanwhile", "catalog", "sources"],
     description:
-      "Comma-separated. Installs fail at the hash check, mid-download or before it; the catalogue or the source list fails to load.",
+      "Comma-separated. Installs fail at the hash check, mid-download, before it, while downloading a dependency, or because the set changed meanwhile; the catalogue or the source list fails to load.",
   },
   { name: "file", values: ["unverified", "known", "notamod", "revoked", "wrongplatform"], description: "What From file picks." },
   {
@@ -53,6 +65,7 @@ export const FLAGS: Flag[] = [
     values: ["wrongVersion", "loadFailed", "notAMod", "wrongName", "missingDep", "initPanicked", "exit"],
     description: "Play starts the game and it stops with this failure; `exit` is a crash that names no mod.",
   },
+  { name: "prelaunch", values: ["revoke"], description: "Play finds Cogwork revoked, as a fresh index would, before it starts the game." },
   { name: "long", values: ["1"], description: "Adds very long names, ids and repos." },
   { name: "slow", values: ["1"], description: "Everything takes four times as long." },
 ];

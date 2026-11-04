@@ -5,7 +5,7 @@ import { translateError } from "../../i18n/errors";
 import { useMods } from "../../hooks/useMods";
 import type { CatalogMod, InstallPlan } from "../../mods/types";
 import { fittingVersions, installedFor, sourceUrl } from "../../mods/select";
-import { installChecks, replaceNotes } from "../../mods/checks";
+import { activeStep, installChecks, installOutcome, replaceNotes, weakerDeps, type InstallCheckContext } from "../../mods/checks";
 import { Dialog } from "../Dialog";
 import { VersionSelect } from "../VersionSelect";
 import { Truncate } from "../Truncate";
@@ -25,16 +25,33 @@ interface InstallDialogProps {
 
 type PlanState = { sha: string; plan: InstallPlan | null; error: string | null };
 
+/** What the plan and checks need from the version's set. */
+export function useCheckContext(tag: string): InstallCheckContext {
+  const { profile, nameIn } = useMods();
+  const report = profile(tag);
+  return useMemo(() => {
+    const mods = report?.mods ?? [];
+    return {
+      tag,
+      name: nameIn(tag),
+      enabled: new Set(mods.filter((m) => m.enabled).map((m) => m.id)),
+      trustOf: (id: string) => mods.find((m) => m.id === id)?.trust,
+      versionAbi: report?.versionAbi ?? null,
+    };
+  }, [tag, report, nameIn]);
+}
+
 /**
- * Every install and update of a catalogue mod goes through here: what the launcher checked,
- * what else changes, and the plain warning that a mod is a program.
+ * Every install and update of a catalogue mod goes through here: the plain warning that a mod
+ * is a program first, then what the launcher checked and what else changes.
  */
 export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, onClose }: InstallDialogProps) {
-  const { t, formatSize, formatList } = useI18n();
+  const { t, tm, formatSize, formatList } = useI18n();
   const mods = useMods();
-  const { catalog, install, isBusy, progressFor, nameIn } = mods;
+  const { catalog, install, isBusy, progressOf } = mods;
   const report = mods.profile(tag);
   const installed = report ? installedFor(mod, report.mods) : undefined;
+  const ctx = useCheckContext(tag);
   const versionLabelId = useId();
 
   // An offered update, or the build asked for, stays pickable even when prereleases are hidden.
@@ -84,21 +101,17 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
   const replacing = !!installed && installed.sha256 !== v.sha256;
   const authors = formatList(mod.authors) || v.sourceRepo;
   const link = mod.homepage ?? sourceUrl(v);
-  const enabled = new Set((report?.mods ?? []).filter((m) => m.enabled).map((m) => m.id));
-  const checks = plan ? installChecks(plan, v, { tag, name: nameIn(tag), enabled }) : [];
+  const checks = plan ? installChecks(plan, v, ctx) : [];
   const notes = plan ? replaceNotes(plan) : [];
+  const outcome = plan ? installOutcome(plan, replacing, mod.name, ctx) : null;
+  const weaker = plan ? weakerDeps(plan, ctx) : [];
   const blocked = !plan || !!plan.problem;
-  // Whatever is downloading right now: a dependency first, then the mod itself.
-  const shas = [...(plan?.install.map((i) => i.sha256) ?? []), v.sha256];
-  const entries = shas.map((s) => progressFor(s)).filter((p) => p !== undefined);
-  const active = entries.find((p) => p.stage !== "installing") ?? entries[entries.length - 1];
-  const activeName = active ? (plan?.install.find((i) => i.sha256 === active.sha256)?.name ?? mod.name) : mod.name;
-  const unreviewedDeps = plan?.install.filter((i) => i.trust !== "reviewed").map((i) => i.name) ?? [];
+  const step = activeStep(progressOf({ kind: "mod", tag, id: mod.id }), plan, mod.name);
 
   const confirm = async () => {
     if (working || blocked) return;
     setError(null);
-    const result = await install(tag, v.sha256, mod.id);
+    const result = await install(tag, v.sha256, mod.id, plan?.install.map((i) => i.sha256));
     if (result.status === "done") onClose();
     else if (result.status === "failed") setError(result.message);
   };
@@ -119,11 +132,11 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
       footer={
         <>
           {working ? (
-            <ModProgressBar progress={active} name={activeName} />
+            <ModProgressBar progress={step.progress} name={step.name} />
           ) : (
             <>
               <button className="btn-primary" onClick={confirm} disabled={blocked}>
-                {t(replacing ? "mods.updateButton" : "mods.install")}
+                {t(outcome?.button ?? (replacing ? "mods.updateButton" : "mods.install"))}
               </button>
               <button className="btn-secondary" onClick={onClose} data-autofocus>
                 {t("mods.cancel")}
@@ -160,6 +173,11 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
           />
         </div>
       )}
+      <p className={`dialog-warning ${v.trust === "reviewed" && !weaker.length ? "amber" : "red"}`}>
+        {v.trust === "reviewed" ? t("mods.warnNative", mod.name) : t("mods.warnUnreviewed", mod.name, v.sourceRepo)}
+        {weaker.length > 0 && <> {t("mods.warnDepsUnreviewed", formatList(weaker.map((w) => w.name)))}</>}
+      </p>
+      {outcome?.explain && <p className="dialog-note trust-change">{tm(outcome.explain)}</p>}
       {planned?.error ? (
         <div className="inline-error" role="alert">
           {planned.error}
@@ -176,10 +194,6 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
           <RichText msg={n} />
         </p>
       ))}
-      <p className={`dialog-warning ${v.trust === "reviewed" ? "amber" : "red"}`}>
-        {v.trust === "reviewed" ? t("mods.warnNative", mod.name) : t("mods.warnUnreviewed", mod.name, v.sourceRepo)}
-        {unreviewedDeps.length > 0 && v.trust === "reviewed" && <> {t("mods.warnDepsUnreviewed", unreviewedDeps.join(", "))}</>}
-      </p>
       {error && (
         <div className="inline-error" role="alert">
           {error}

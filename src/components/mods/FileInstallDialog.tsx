@@ -3,14 +3,15 @@ import { useI18n } from "../../i18n/useI18n";
 import { translateError } from "../../i18n/errors";
 import { useMods } from "../../hooks/useMods";
 import { modsApi } from "../../mods/api";
-import type { FileInspection } from "../../mods/types";
+import type { FileInspection, InstallPlan } from "../../mods/types";
 import { shortSha } from "../../mods/select";
-import { fileChecks, fileVerdict } from "../../mods/checks";
+import { activeStep, fileChecks, fileVerdict, installOutcome, planDepChecks, weakerDeps } from "../../mods/checks";
 import { Dialog } from "../Dialog";
 import { Code } from "../Truncate";
 import { CheckList } from "./CheckList";
 import { ModProgressBar } from "./ModProgressBar";
 import { TrustBadge } from "./TrustBadge";
+import { useCheckContext } from "./InstallDialog";
 
 interface FileInstallDialogProps {
   tag: string;
@@ -18,14 +19,21 @@ interface FileInstallDialogProps {
   onClose: () => void;
 }
 
-/** A zip from the player's computer: what can be checked, and a typed "yes" when nothing could. */
+/**
+ * A zip from the player's computer: the warning, what can be checked, and for a file the
+ * catalogue knows, everything that install brings along. A typed "yes" when nothing could be
+ * checked, in the footer beside the button it unlocks.
+ */
 export function FileInstallDialog({ tag, path, onClose }: FileInstallDialogProps) {
-  const { t, tr, formatSize } = useI18n();
-  const { installFile, isBusy, progressFor } = useMods();
+  const { t, tm, tr, formatSize, formatList } = useI18n();
+  const { installFile, isBusy, progressOf } = useMods();
+  const ctx = useCheckContext(tag);
   const [inspection, setInspection] = useState<FileInspection | null>(null);
+  const [plan, setPlan] = useState<InstallPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [typed, setTyped] = useState("");
   const inputId = useId();
+  const whyId = useId();
   const fileName = path.split(/[\\/]/).pop() ?? path;
 
   useEffect(() => {
@@ -38,6 +46,20 @@ export function FileInstallDialog({ tag, path, onClose }: FileInstallDialogProps
       live = false;
     };
   }, [tag, path]);
+
+  // A catalogued file installs like that build: with what it needs, by the same plan.
+  const knownSha = inspection?.catalogMatch?.build.sha256;
+  useEffect(() => {
+    if (!knownSha) return;
+    let live = true;
+    modsApi
+      .plan(tag, knownSha)
+      .then((p) => live && setPlan(p))
+      .catch((err) => live && setError(translateError(err)));
+    return () => {
+      live = false;
+    };
+  }, [tag, knownSha]);
 
   if (!inspection) {
     return (
@@ -68,12 +90,18 @@ export function FileInstallDialog({ tag, path, onClose }: FileInstallDialogProps
   const working = isBusy(tag, id);
   const { usable, needsTyping } = fileVerdict(inspection);
   const confirmed = !needsTyping || typed.trim() === id;
+  const waitingForPlan = !!known && !plan;
   const trust = known?.build.trust ?? "unverified";
+  const name = known?.name ?? inspection.name ?? id;
+  const outcome = plan ? installOutcome(plan, !!inspection.replaces, name, ctx) : null;
+  const weaker = plan ? weakerDeps(plan, ctx) : [];
+  const step = activeStep(progressOf({ kind: "mod", tag, id }), plan, name);
+  const checks = [...fileChecks(inspection, tag), ...(plan && known ? planDepChecks(plan, known.build.deps, ctx) : [])];
 
   const confirm = async () => {
-    if (!confirmed || working || !usable) return;
+    if (!confirmed || working || !usable || waitingForPlan) return;
     setError(null);
-    const result = await installFile(tag, path, inspection.sha256, id);
+    const result = await installFile(tag, path, inspection.sha256, id, plan?.install.map((i) => i.sha256));
     if (result.status === "done") onClose();
     else if (result.status === "failed") setError(result.message);
   };
@@ -102,12 +130,37 @@ export function FileInstallDialog({ tag, path, onClose }: FileInstallDialogProps
       }
       footer={
         working ? (
-          <ModProgressBar progress={progressFor(inspection.sha256)} name={known?.name ?? inspection.name ?? id} />
+          <ModProgressBar progress={step.progress} name={step.name} />
         ) : (
           <>
+            {needsTyping && (
+              <span className="typed-confirm">
+                <label htmlFor={inputId} id={whyId}>
+                  {tr("mods.typeToConfirm", <strong key="id">{id}</strong>)}
+                </label>
+                <input
+                  id={inputId}
+                  className="text-input"
+                  value={typed}
+                  onChange={(e) => setTyped(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.repeat) confirm();
+                  }}
+                  spellCheck={false}
+                  autoComplete="off"
+                  data-autofocus
+                />
+              </span>
+            )}
             {usable && (
-              <button className={needsTyping ? "btn-danger" : "btn-primary"} onClick={confirm} disabled={!confirmed}>
-                {t(needsTyping ? "mods.installAnyway" : "mods.install")}
+              <button
+                className={needsTyping ? "btn-danger" : "btn-primary"}
+                onClick={confirm}
+                disabled={!confirmed || waitingForPlan}
+                aria-describedby={needsTyping && !confirmed ? whyId : undefined}
+                title={needsTyping && !confirmed ? t("mods.installAnywayWhy", id) : undefined}
+              >
+                {t(needsTyping ? "mods.installAnyway" : (outcome?.button ?? "mods.install"))}
               </button>
             )}
             <button className="btn-secondary" onClick={onClose} data-autofocus={needsTyping ? undefined : true}>
@@ -117,36 +170,26 @@ export function FileInstallDialog({ tag, path, onClose }: FileInstallDialogProps
         )
       }
     >
+      {usable && (
+        <p className={`dialog-warning ${trust === "reviewed" && !weaker.length ? "amber" : "red"}`}>
+          {trust === "reviewed" ? t("mods.warnNative", name) : t("mods.warnFile")}
+          {weaker.length > 0 && <> {t("mods.warnDepsUnreviewed", formatList(weaker.map((w) => w.name)))}</>}
+        </p>
+      )}
+      {outcome?.explain && <p className="dialog-note trust-change">{tm(outcome.explain)}</p>}
       {archive && !known && inspection.name && (
         <p className="dialog-summary">
           {t("mods.fileSaysItIs", inspection.name)}
           {inspection.summary ? ` ${inspection.summary}` : ""}
         </p>
       )}
-      <CheckList label={t("mods.checksLabel")} checks={fileChecks(inspection, tag)} />
-      {inspection.replaces && usable && <p className="dialog-note">{t("mods.fileReplaces", inspection.replaces)}</p>}
-      {usable && (
-        <p className={`dialog-warning ${trust === "reviewed" ? "amber" : "red"}`}>
-          {trust === "reviewed" ? t("mods.warnNative", known?.name ?? id) : t("mods.warnFile")}
+      <CheckList label={t("mods.checksLabel")} checks={checks} />
+      {waitingForPlan && !error && (
+        <p className="dialog-note" role="status">
+          {t("mods.planning")}
         </p>
       )}
-      {needsTyping && (
-        <div className="typed-confirm">
-          <label htmlFor={inputId}>{tr("mods.typeToConfirm", <strong key="id">{id}</strong>)}</label>
-          <input
-            id={inputId}
-            className="text-input"
-            value={typed}
-            onChange={(e) => setTyped(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.repeat) confirm();
-            }}
-            spellCheck={false}
-            autoComplete="off"
-            disabled={working}
-          />
-        </div>
-      )}
+      {inspection.replaces && usable && <p className="dialog-note">{t("mods.fileReplaces", inspection.replaces)}</p>}
       {error && (
         <div className="inline-error" role="alert">
           {error}

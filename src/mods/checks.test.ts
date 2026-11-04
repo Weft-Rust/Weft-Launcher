@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { buildChecks, fileChecks, fileVerdict, installChecks, pinCheck, replaceNotes, type CheckRow } from "./checks";
-import { build } from "./fixtures";
+import {
+  activeStep,
+  buildChecks,
+  fileChecks,
+  fileVerdict,
+  installChecks,
+  installOutcome,
+  pinCheck,
+  replaceNotes,
+  weakerDeps,
+  type CheckRow,
+} from "./checks";
+import { ABI, OLD_ABI, build } from "./fixtures";
 import type { FileInspection, InstallPlan } from "./types";
 
 const row = (rows: CheckRow[], id: string) => rows.find((r) => r.id === id);
@@ -13,11 +24,18 @@ function plan(extra: Partial<InstallPlan> = {}): InstallPlan {
     enable: [],
     missing: [],
     problem: null,
+    turnsOn: true,
     ...extra,
   };
 }
 
-const ctx = { tag: "v26.11.1", name: (id: string) => id.toUpperCase(), enabled: new Set<string>() };
+const ctx = {
+  tag: "v26.11.1",
+  name: (id: string) => id.toUpperCase(),
+  enabled: new Set<string>(),
+  trustOf: (id: string) => (id === "lamps" ? ("unverified" as const) : undefined),
+  versionAbi: ABI as string | null,
+};
 
 describe("provenance", () => {
   it("is a green check only when the signed index vouches for it", () => {
@@ -63,7 +81,7 @@ describe("installChecks", () => {
       { ...ctx, enabled: new Set(["glue"]) }
     );
     expect(row(rows, "dep:cogwork")).toMatchObject({ state: "yes", title: { key: "mods.ckDepInstall", args: ["Cogwork", "0.2.0"] }, trust: "unreviewed" });
-    expect(row(rows, "dep:lamps")).toMatchObject({ state: "yes", title: { key: "mods.ckDepEnable", args: ["LAMPS"] } });
+    expect(row(rows, "dep:lamps")).toMatchObject({ state: "yes", title: { key: "mods.ckDepEnable", args: ["LAMPS"] }, trust: "unverified" });
     expect(row(rows, "dep:signals")).toMatchObject({ state: "no", title: { key: "mods.ckDepMissing", args: ["SIGNALS", "v26.11.1"] } });
     expect(row(rows, "dep:glue")).toMatchObject({ state: "yes", title: { key: "mods.ckDepHave" } });
     expect(rows.some((r) => r.id === "dep:base")).toBe(false);
@@ -78,6 +96,61 @@ describe("installChecks", () => {
     const rows = installChecks(plan({ problem: { code: "ModIncompatible", detail: "Hearth" } }), build("0.4.0"), ctx);
     expect(rows[0]).toMatchObject({ id: "problem", state: "no" });
     expect(row(rows, "abi")?.state).toBe("no");
+  });
+});
+
+describe("fit with the version", () => {
+  it("is yes only when both mod interfaces are known and equal", () => {
+    expect(row(installChecks(plan(), build("0.4.0"), ctx), "abi")?.state).toBe("yes");
+    expect(row(installChecks(plan(), build("0.4.0", { abi: OLD_ABI }), ctx), "abi")?.state).toBe("no");
+  });
+
+  it("is unknown, never a green check, when the version's interface couldn't be found out", () => {
+    const rows = installChecks(plan({ problem: { code: "AbiUnavailable", detail: "v" } }), build("0.4.0"), { ...ctx, versionAbi: null });
+    expect(row(rows, "abi")).toMatchObject({ state: "unknown", title: { key: "mods.ckFitUnchecked" } });
+  });
+});
+
+describe("installOutcome", () => {
+  it("installs turned off when a dependency has no build, and says so", () => {
+    const o = installOutcome(plan({ missing: ["signals"], turnsOn: false }), false, "Railways", ctx);
+    expect(o.button).toBe("mods.installTurnedOff");
+    expect(o.explain).toEqual({ key: "mods.installsOff", count: 1, args: ["SIGNALS", "v26.11.1", "Railways"] });
+  });
+
+  it("is a plain install or update otherwise, also for an off mod that stays off", () => {
+    expect(installOutcome(plan(), false, "Hearth", ctx)).toEqual({ button: "mods.install", explain: null });
+    const off = plan({ turnsOn: false, replaces: { version: "1", sha256: "o".repeat(64), trust: "reviewed", enabled: false } });
+    expect(installOutcome(off, true, "Hearth", ctx)).toEqual({ button: "mods.updateButton", explain: null });
+  });
+});
+
+describe("weakerDeps", () => {
+  it("names what an install brings that nobody reviewed, downloaded or turned on", () => {
+    const p = plan({
+      install: [
+        { id: "glow", name: "Glowmoss", version: "1", sha256: "g".repeat(64), trust: "unreviewed", channel: "release", size: 1 },
+        { id: "fine", name: "Fine", version: "1", sha256: "f".repeat(64), trust: "reviewed", channel: "release", size: 1 },
+      ],
+      enable: ["lamps"],
+    });
+    expect(weakerDeps(p, ctx)).toEqual([
+      { name: "Glowmoss", trust: "unreviewed" },
+      { name: "LAMPS", trust: "unverified" },
+    ]);
+  });
+});
+
+describe("activeStep", () => {
+  it("shows the dependency still downloading before the mod that waits for it", () => {
+    const p = plan({ install: [{ id: "cogwork", name: "Cogwork", version: "1", sha256: "c".repeat(64), trust: "reviewed", channel: "release", size: 1 }] });
+    const entries = [
+      { sha256: "c".repeat(64), modId: "cogwork", stage: "downloading" as const, percent: 40 },
+      { sha256: "h".repeat(64), modId: "hearth", stage: "installing" as const, percent: 100 },
+    ];
+    expect(activeStep(entries, p, "Hearth")).toMatchObject({ name: "Cogwork", progress: { percent: 40 } });
+    expect(activeStep([entries[1]], p, "Hearth")).toMatchObject({ name: "Hearth" });
+    expect(activeStep([], p, "Hearth")).toEqual({ progress: undefined, name: "Hearth" });
   });
 });
 

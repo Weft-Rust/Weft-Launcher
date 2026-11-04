@@ -474,6 +474,8 @@ pub struct CopyItem {
     /// The build that will be installed (outcome `install`).
     pub version: Option<String>,
     pub trust: Option<Trust>,
+    /// That build's hash (outcome `install`).
+    pub sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -488,6 +490,8 @@ pub struct CopyPreview {
     pub enable: Vec<String>,
     /// Ids of items that will be installed turned off, because something they need is missing.
     pub installed_off: Vec<String>,
+    /// Ids of dependencies nothing provides for `to`: why `installed_off` are off.
+    pub missing: Vec<String>,
 }
 
 /// What copying the turned-on mods of `from` into `to` would bring over, each as the build made
@@ -508,6 +512,7 @@ pub fn copy_preview(
             outcome,
             version: pick.map(|v| v.version.clone()),
             trust: pick.map(|v| v.trust),
+            sha256: pick.map(|v| v.sha256.clone()),
         };
         if to.1.get(&entry.id).is_some() {
             items.push(item(CopyOutcome::AlreadyThere, None));
@@ -541,6 +546,7 @@ pub fn copy_preview(
             .collect(),
         enable: out.enable,
         installed_off: out.installed_off,
+        missing: res.missing.clone(),
     };
     (preview, picks)
 }

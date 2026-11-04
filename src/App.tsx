@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "./i18n/useI18n";
 import { translateError } from "./i18n/errors";
 import { useInstall } from "./hooks/useInstall";
@@ -12,7 +11,7 @@ import { NotesPage } from "./pages/Notes";
 import { ModsPage } from "./pages/Mods";
 import { useMods } from "./hooks/useMods";
 import { getLatestTag, getNewTag } from "./utils/version";
-import { COMMANDS } from "./mods/ipc";
+import { launcherApi } from "./mods/api";
 
 interface AssetInfo {
   name: string;
@@ -64,7 +63,7 @@ function App() {
     setLoading(true);
     setError(null);
     try {
-      const data = await invoke<Release[]>(COMMANDS.listVersions, { forceRefresh: forceRefresh });
+      const data = await launcherApi.versions(forceRefresh);
       const cached = data.some((r) => r.from_cache);
       setReleases(data);
       setFromCache(cached);

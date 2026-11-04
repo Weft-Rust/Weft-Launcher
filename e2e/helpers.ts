@@ -18,11 +18,22 @@ export async function goToTab(page: Page, index: number) {
 
 export const MODS_TAB = 2;
 
+export async function browse(page: Page) {
+  await page.locator(".switch [role=tab]").nth(1).click();
+  await expect(page.locator("#mods-panel-browse")).toBeVisible();
+}
+
 /** What has keyboard focus, and whether it is inside the open dialog. */
 export const focused = (page: Page) =>
   page.evaluate(() => {
     const a = document.activeElement;
-    return { tag: a?.tagName ?? "", text: a?.textContent?.trim() ?? "", inDialog: !!a?.closest("[role=dialog]") };
+    return {
+      tag: a?.tagName ?? "",
+      text: a?.textContent?.trim() ?? "",
+      label: a?.getAttribute("aria-label") ?? "",
+      inDialog: !!a?.closest("[role=dialog]"),
+      row: a?.closest("[data-mod]")?.getAttribute("data-mod") ?? null,
+    };
   });
 
 /** Nothing sticks out sideways, and the dialog's buttons (if one is open) are inside the window. */
@@ -36,4 +47,20 @@ export async function expectFits(page: Page) {
     expect(box, "dialog actions are rendered").not.toBeNull();
     expect(box!.y + box!.height, "dialog actions are below the window").toBeLessThanOrEqual(viewport.height);
   }
+}
+
+/** On Browse, the banners leave room for two whole rows of cards, when there are that many. */
+export async function expectTwoCardRows(page: Page) {
+  const { total, visible } = await page.locator(".mod-card").evaluateAll((cards) => ({
+    total: cards.length,
+    visible: cards.filter((c) => c.getBoundingClientRect().bottom <= window.innerHeight).length,
+  }));
+  expect(visible, `whole cards in view (of ${total})`).toBeGreaterThanOrEqual(Math.min(4, total));
+}
+
+/** An element is inside the window, not below the fold. */
+export async function expectInView(page: Page, selector: string) {
+  const box = await page.locator(selector).first().boundingBox();
+  expect(box, `${selector} is rendered`).not.toBeNull();
+  expect(box!.y + box!.height, `${selector} is below the window`).toBeLessThanOrEqual(page.viewportSize()!.height);
 }
