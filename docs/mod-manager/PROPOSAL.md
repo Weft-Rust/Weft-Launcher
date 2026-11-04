@@ -48,8 +48,8 @@ The engine checks these folders in order; for each id, the first copy found wins
 
 ### What the launcher already does that we can reuse
 - It reads the GitHub releases API with ETag caching (`releases.rs`).
-- It requires a SHA-256 and verifies it (`install.rs:181-186, 323-341`).
-- It restricts download URLs to one repo (`install.rs:187-190`).
+- It requires a SHA-256 and verifies it (`install_version` in `install.rs`).
+- It restricts download URLs to one repo (also `install_version`).
 - It extracts archives safely and installs atomically.
 - It enforces one running game at a time and captures logs per version.
 - **`minisign-verify` 0.3 is already in `Cargo.lock`**, pulled in by the updater, so signature checking costs no new dependency.
@@ -78,47 +78,57 @@ mods/
   sources.json                    the GitHub repos the player added, as GitHub spells them
 profiles/<weft-tag>/
   mods/<id>.zip                   only the turned-on mods (hardlink, or a copy if that fails)
-  mods.lock.json                  every installed mod: id, version, sha256, origin, trust, enabled, ABI, deps
+  mods.lock.json                  every installed mod: id, version, sha256, origin, trust, enabled,
+                                  ABI, deps, and the revocation once one applied
+  removed.json                    the last removed mod, until the version's next change (Undo)
 cache/
   mod-index/<n>/index.json        verified index generations, each with its index.json.minisig;
   mod-index/current               `current` names the newest; the newest two are kept
+  mod-index.state.json            the newest (generated, signedAt) ever accepted, for rollback refusal
   mod-sources/<owner__repo>.json  the last good answer of each source, with when it was fetched
   mod-icons/<hash>.png            catalogue icons
   abi.json                        ABI hash per Weft tag, kept forever since tags don't change
 downloads/mod-<sha256>-<unique>.part   a download in progress; never shared by two downloads
 ```
 
-The index URL is built in (`index.rs`); `sources.json` holds only repos.
+The index URL is built in (`index/fetch.rs`); `sources.json` holds only repos.
 
-Launch becomes `weft --mods <profiles/<tag>/mods>`. Turning a mod on or off just adds or removes the link. When a version is deleted, its profile goes with it, and unused store entries are garbage-collected. Garbage collection skips any store object an install is still working on, and deletes nothing if any lock file can't be read.
+Launch becomes `weft --mods <profiles/<tag>/mods>`. Turning a mod on or off just adds or removes the link. When a version is deleted, its profile goes with it, and unused store entries are garbage-collected. Garbage collection skips any store object an install is still working on or a removal can still undo, and deletes nothing if any lock file can't be read. Lock files are checked when read: an id that isn't a mod id or a hash that isn't one is an error, never a path.
 
 ### Backend modules (`src-tauri/src/mods/`)
 
 | Module | Job |
 |---|---|
 | `abi.rs` | ABI hash of a Weft tag: the index's `weft[]` table, else a cache, else FNV-1a-64 of `raw.githubusercontent.com/Weft-Rust/Weft/<tag>/crates/abi/src/lib.rs` (verified against v26.10.2 and v26.10.4). **Later:** read a `weft-abi.txt` release asset. |
-| `index.rs` | The index contract: parse it entry by entry (a bad entry is skipped, not fatal), verify it (minisign), refuse an older one than the last verified copy, and keep verified copies as cache generations for offline use. |
+| `index/` | The index contract. `format.rs` parses it entry by entry (a bad entry is skipped, not fatal); `signature.rs` verifies it (minisign) and reads the signing time; `cache.rs` keeps verified copies as generations for offline use, refuses an index older than the newest ever accepted, and calls one signed over 30 days ago stale; `fetch.rs` gets it. |
 | `sources.rs` | GitHub repos the player added: read their releases (ETag-cached, up to 5 pages of 100) and accept a `<id>.mod.json` only where it agrees with GitHub (see [INDEX_FORMAT.md](INDEX_FORMAT.md)). Falls back to the last good answer and reports why. |
 | `catalog.rs` | Merge the index and the sources into one list with a trust tier per version; a source build with a reviewed hash counts as Reviewed. |
 | `archive.rs` | Check the zip structure (below) before anything is stored. |
 | `profile.rs` | Rules on a mod set: the status of each mod, what blocks the game, which update fits, revocations. |
 | `plan.rs` | Rules for changing a mod set: what an install brings along (`plan_mod_install`), what a copy brings over, turning on and off, removal. |
-| `store.rs` | The store, lock files, the per-version folders (`reconcile`), reservations for in-flight installs, garbage collection. |
-| `install.rs` | Download a build through the shared `download.rs`, check its SHA-256 and zip, move it into the store. |
+| `store.rs` | The store, lock files, the undo record, the per-version folders (`reconcile`), reservations for in-flight installs, garbage collection. `admit` is the one way into the store: it hashes the file and checks its zip and platform, also for a build the store already has. |
+| `install.rs` | Download a build through the shared `download.rs` and hand it to `store::admit`. |
 | `inspect.rs` | Describe a zip from the player's computer before it is installed. |
 | `diagnose.rs` | Read the game log after a crash and name the mod that stopped it. |
-| `service.rs` | The steps that need the running app: catalogue loading, the ABI, reports, the install flow, progress events. |
-| `commands.rs` | The Tauri commands: argument checks and locking. |
+| `context.rs` | `Ctx`: what the operations need from the app (folders, the mods lock, reservations, the catalogue the page last saw, the running game, progress events). Tests build one on a temporary folder. |
+| `service.rs` | The operations, one per command: catalogue loading, the ABI, reports, the install flow, removal and undo, copying, the pre-Play check. |
+| `commands.rs` | The Tauri commands: each one is a single call into `service.rs`. |
 
-Pure rules (`plan.rs`, `profile.rs`, `catalog.rs`, `index.rs`, `diagnose.rs`) take plain data, and everything on disk takes a `Paths` root, so all of it is tested without the app. The TypeScript types for IPC are generated from the Rust types into `src/mods/bindings/`.
+Pure rules (`plan.rs`, `profile.rs`, `catalog.rs`, `index/format.rs`, `diagnose.rs`) take plain data, and everything else takes a `Paths` root or a `Ctx`, so all of it is tested without the app (`service_tests.rs` runs installs against a local HTTP server). The TypeScript types for IPC are generated from the Rust types into `src/mods/bindings/`, with every command's arguments and result (`CommandSignatures`) and every event's payload (`EventPayloads`); `src/mods/api.ts` calls commands only through them.
 
-Tauri commands: `list_mod_catalog`, `get_mod_sources`, `add_mod_source`, `remove_mod_source`, `get_mod_profile`, `plan_mod_install`, `install_mod`, `inspect_mod_file`, `install_mod_file`, `set_mod_enabled`, `remove_mod`, `preview_copy_mod_profile`, `copy_mod_profile`, `get_mod_icon`, `open_player_mods_folder`. The pre-Play check runs inside `launch_version`, which holds the mod lock from that check until the game counts as running, so no mod change can land in between.
+Tauri commands: `list_mod_catalog`, `get_mod_sources`, `add_mod_source`, `remove_mod_source`, `get_mod_profile`, `plan_mod_install`, `install_mod`, `inspect_mod_file`, `install_mod_file`, `set_mod_enabled`, `remove_mod`, `restore_mod`, `preview_copy_mod_profile`, `copy_mod_profile`, `get_mod_icon`, `open_player_mods_folder`. The pre-Play check runs inside `launch_version`, which holds the mod lock from that check until the game counts as running, so no mod change can land in between.
+
+### Changing a mod set safely
+- Every change to a profile or the store's contents happens under the mods lock. Downloads happen before taking it; their store files are reserved so garbage collection leaves them alone.
+- An install resolves what it needs against the profile, downloads it, then takes the lock and checks again before writing: the version must still be installed and not running, no build may be revoked in the latest catalogue, and resolving again against the latest profile must need nothing more, turn on nothing more, and leave each mod on or off as the player agreed. Otherwise it fails with `ModChangedMeanwhile` and writes nothing; the page can plan again.
+- **Missing dependencies never block Play.** A mod is installed turned on when it is new or was on, and nothing it needs is missing (`InstallPlan.turnsOn`). Otherwise it is installed turned off and listed in `ChangeResult.installedOff`; the dependencies it brought come in off too. Copies follow the same rule per mod.
+- **Remove can be undone.** `remove_mod` keeps the removed entry in `removed.json`, and its store file, until the version's next change; `restore_mod` puts it back exactly as it was, and turns on again what the removal turned off.
 
 ### Checking the zip structure (before it is stored)
-- Only `<id>.dll`, `lib<id>.so`, `lib<id>.dylib` and `assets/**` are allowed.
+- Only `<id>.dll`, `lib<id>.so`, `lib<id>.dylib` and `assets/**` are allowed, for the expected `<id>`.
 - No `..`, absolute paths or symlinks.
 - Caps on entry count, uncompressed size and compression ratio (zip bombs).
-- The file name is exactly `<id>.zip`, and `<id>` passes `validate_name`.
+- `<id>` is a mod id (`[a-z0-9_]{1,64}`). The store names the file `<sha256>.zip`; the version's folder names it `<id>.zip`, which the engine requires.
 
 The launcher never unpacks the zip to run anything, and **never `dlopen`s a mod to read its metadata**: that would run its code.
 
@@ -126,18 +136,19 @@ The launcher never unpacks the zip to run anything, and **never `dlopen`s a mod 
 - Every turned-on mod's ABI must equal the version's ABI.
 - Every dependency must be turned on, or be `base`.
 - If either fails, Play is blocked with the reason and a fix (turn off / find update).
+- It never touches the network: it uses the catalogue the page last loaded (or the cached one) and the cached ABI. With no ABI known, mods are only "unchecked" and Play isn't blocked for it; the game has the last word.
 - Also list what is in the player's own `<data>/mods`. The path comes from the `game folder …` log line the launcher already parses. Warn: "these load in every version and can't be checked". This is the one place the launcher *reads* the game folder, and it's a listing only.
 
 ### Diagnosing a failure after Play
-On `exit(1)`, scan the version's log for the engine's fixed messages:
-- `mod X was built against another mod ABI`
-- `loading mod X from`
-- `is not a Weft mod`
-- `missing dependency`
+On `exit(1)`, scan the version's log for the engine's fixed messages. The engine's loader returns them as errors (`crates/engine/src/modloader.rs`, `content.rs`), and the `weft` binary logs them at ERROR, as `<time> ERROR [weft] <message>`; only ERROR lines count:
+- `mod X was built against another mod ABI (…)`
+- `loading mod X from <path>: <why>`
+- `<path> is not a Weft mod`
+- `mod X is the crate Y: name its folder or zip Y`
+- `mod X requires missing mod Y`
+- `X: init panicked`, after the mod's own `[mod:X] panicked at …` line. Without the `X:` prefix, the mod comes from that line.
 
 Show "X stopped Weft from starting" with Turn off / Find update / Open log (mockup 4). This builds on the existing `lastCrash` UI in `Home.tsx`.
-
-As built, `diagnose.rs` also recognises `mod X is the crate Y` (wrong name) and `init panicked`. For the latter, the mod comes from the lines before it: the mod's own `[mod:X] panicked at …` line.
 
 ### Moving to a new Weft version
 When a new version is installed, offer "Copy mod set from v26.10.4". Each mod is resolved to the build for the new ABI, and the launcher lists the ones that have no build yet. Because the ABI breaks with nearly every release, this is the feature players will use most.
@@ -160,7 +171,14 @@ Each build has exactly one tier. As built:
 | **Unreviewed** (grey) | From a GitHub repo the player added as a source; nobody reviewed it | The `<id>.mod.json` agrees with GitHub's record of the release ✔, SHA-256 equals GitHub's `digest` (from the same server as the file) ✔, zip structure ✔. A provenance claim in the `.mod.json` is shown as the publisher's claim, not verified. |
 | **Unverified** (red) | A file from the player's computer that isn't in the catalogue | Zip structure only. Typed confirmation needed (mockup 3). A local file whose hash is in the catalogue installs with that build's tier instead. |
 
-**Revoked** is a status, not a tier. A build of any tier whose `sha256` the index lists in `revoked` is turned off on the next refresh, never installed, and can't be turned back on, not even by turning on something that needs it. The UI says why.
+**Revoked** is a status, not a tier. A build of any tier whose `sha256` the index lists in `revoked` is never installed, and can't be turned back on, not even by turning on something that needs it. The UI says why, and shows a Revoked badge instead of the tier.
+
+When it applies:
+- The launcher learns of a revocation whenever it reads the index: from its cache, or from the network when the catalogue is refreshed.
+- An installed revoked build is turned off the next time its version's mods are read (`get_mod_profile`) or before Play, whichever comes first. The revocation is then recorded in `mods.lock.json` with its reason, and stays even if the index can't be loaded later, until the build is replaced or removed.
+- An install already downloading when the revocation arrives checks the latest catalogue before it writes anything, and fails with `ModChangedMeanwhile`.
+
+**Age.** The launcher reports when the index was signed (`signedAt`, from the signature's trusted comment). An index signed more than 30 days ago is `stale`: it is still used, and the UI says revocations since then may be missing. The index repository re-signs weekly. An index older than the newest one ever accepted is refused, even after the cached copy was deleted (see [INDEX_FORMAT.md](INDEX_FORMAT.md#launcher-behaviour)).
 
 ### The checks, from cheapest to strongest
 
@@ -184,19 +202,7 @@ The UI deliberately has **no permission list**. Native code has no permissions t
 ## 5. Changes needed outside this repo
 
 ### weft-mods (small; you own it)
-1. Publish `<id>.mod.json` next to `<id>.zip`, generated in `tools/ci/publish.sh`. It replaces the prose compatibility record:
-   ```json
-   {
-     "schema": 1, "id": "cogwork", "name": "Cogwork", "summary": "…", "authors": ["Zorro909"],
-     "license": "MPL-2.0", "version": "0.2.0", "channel": "release", "tag": "cogwork-v0.2.0",
-     "source": { "repo": "Zorro909/weft-mods", "commit": "cceea78…" },
-     "weft":   { "tag": "v26.11.1", "commit": "ff9c712…", "abi": "f470b1cbb1f9ad91" },
-     "deps": [{ "id": "base" }],
-     "platforms": ["windows-x64", "linux-x64", "macos-arm64"],
-     "asset": { "name": "cogwork.zip", "size": 2642469, "sha256": "989b2191…" },
-     "icon": "assets/textures/gui/icon.png"
-   }
-   ```
+1. Publish `<id>.mod.json` next to `<id>.zip`, generated in `tools/ci/publish.sh`. It replaces the prose compatibility record. The format, with a complete example the launcher's tests accept, is in [INDEX_FORMAT.md](INDEX_FORMAT.md#idmodjson-for-unreviewed-sources): every hash and commit in full, `asset.url` included, and `icon` as an absolute `https://` URL.
 2. Add `actions/attest-build-provenance` to the `publish` jobs. This needs `id-token: write` and `attestations: write`, packing into a known directory instead of `mktemp -d`, and optionally uploading `<id>.zip.sigstore.json`.
 3. Add a LICENSE and `license` fields, and an icon for showcase.
 
@@ -244,5 +250,9 @@ Implemented on `feat/mod-manager`; names below are the ones in the code.
 - **Copying a mod set** ("Bring mods from vX") has a preview (`preview_copy_mod_profile`) and merges into a set that already has mods, skipping the ones it has.
 - **Updates keep the on/off state.** A mod that is off stays off after an update.
 - **Matching is by ABI, not tag.** Builds made from untagged Weft commits fit every release with the same ABI.
+- **Missing dependencies never block Play.** A mod that needs something no build provides is installed turned off (`turnsOn`, `installedOff`), and the report tells a dependency that isn't installed (`depsNotInstalled`) from one that is off.
+- **Revocations are remembered** in `mods.lock.json`, so they outlive the index.
+- **The index has an age**: `signedAt`, freshness `stale` after 30 days, and rollback refusal kept in its own state file.
+- **Installs are checked again before they are written** (`ModChangedMeanwhile`), and **Remove has Undo** (`restore_mod`).
 - **Deferred:** everything in Phase 3, and the open questions above. The player's own `mods` folder is listed read-only for the warning (question 3) and never written to.
 - **Working on the UI without Tauri:** `npm run dev:mock` (see the README).

@@ -197,3 +197,32 @@ pub fn sha256_file(path: &Path) -> std::io::Result<String> {
     std::io::copy(&mut file, &mut hasher)?;
     Ok(format!("{:x}", hasher.finalize()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redirects_stay_on_github_over_https() {
+        for ok in [
+            "https://github.com/a/b/releases/download/t/x.zip",
+            "https://objects.githubusercontent.com/github-production-release-asset/1",
+            "https://release-assets.githubusercontent.com/x",
+            "https://raw.githubusercontent.com/a/b/main/x",
+            "https://zorro909.github.io/weft-mods-index/v1/index.json",
+        ] {
+            assert!(redirect_allowed(&url::Url::parse(ok).unwrap()), "{ok}");
+        }
+        for bad in [
+            "http://objects.githubusercontent.com/x",
+            "https://evil.example/x",
+            "https://github.com.evil.example/x",
+            "https://notgithub.com/x",
+            "https://github.com:8443/x",
+            "https://user@github.com/x",
+            "https://127.0.0.1/x",
+        ] {
+            assert!(!redirect_allowed(&url::Url::parse(bad).unwrap()), "{bad}");
+        }
+    }
+}

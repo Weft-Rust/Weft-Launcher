@@ -14,6 +14,8 @@ The JSON examples below are complete and valid: a test in the launcher (`src-tau
 - The signature is a minisign signature of the exact bytes of `index.json`.
 - The launcher embeds the public key (`keys/index.pub` in the index repo).
 - An index whose signature doesn't verify is rejected. The launcher then keeps using its last verified copy.
+- The signature's trusted comment should carry `timestamp:<unix seconds>`, as `minisign -S` writes by default (for example `timestamp:1793819114 file:index.json`). The key signs the trusted comment too, so this is when the index was signed; the launcher reports it as `signedAt`. Without it, the launcher judges the index's age by `generated` alone.
+- The index repository re-signs the index weekly, even when nothing changed, so that its signing time stays recent (see [Stale](#launcher-behaviour)).
 
 ## `index.json`
 
@@ -69,33 +71,44 @@ The JSON examples below are complete and valid: a test in the launcher (`src-tau
 
 ### Fields
 
-| Field | Required | Meaning |
+"Default" is what the launcher uses when the field is missing. A field without a default is required: an entry that lacks it is skipped (or, for `schema` and `generated`, the whole index is refused).
+
+| Field | Default | Meaning |
 |---|---|---|
-| `schema` | yes | Always `1`. |
-| `generated` | yes | RFC 3339 time the index was built. Used to refuse an older index (see [Launcher behaviour](#launcher-behaviour)). |
-| `weft[]` | no | The ABI hash per Weft release (`tag`, `commit`, `abi`), so the launcher doesn't have to compute it. |
-| `mods[].id` | yes | `[a-z0-9_]{1,64}`, equal to the crate name and the zip stem. `base` is reserved. |
-| `mods[].name`, `summary`, `authors`, `license`, `homepage`, `icon` | `name` only | Display fields. `summary` is one line, at most 140 characters. `homepage` and `icon` are absolute `https://` URLs, or they are dropped. `icon` is a PNG. |
-| `versions[]` | yes | Newest first (the launcher sorts again anyway). |
-| `version` | yes | Semver, e.g. `0.2.1-rc.1`. |
-| `channel` | yes | `release`, `prerelease` or `experimental`. |
-| `tag` | yes | The GitHub release tag of this build. |
-| `published` | no | RFC 3339. |
-| `source` | yes | The repo (`owner/name`) and full commit the build was made from. |
-| `weft` | yes | The Weft `tag` (optional) and `commit` it was built against, and the 16-hex `abi`. |
-| `deps[]` | no | `{ "id": … }` of every mod it needs. `base` ships with Weft and is never installed. |
-| `platforms[]` | no | Which libraries the zip has (table below). |
-| `asset` | yes | `name`, `url`, `size` and lowercase `sha256` of the zip. |
-| `provenance` | no | The attestation the index CI checked with `gh attestation verify`, or `null`. |
-| `reviewed` | yes | Who reviewed exactly these bytes, and when. |
-| `revoked[]` | no | Builds that must never be used again, by `sha256`, with a `reason`. |
+| `schema` | required | Always `1`. |
+| `generated` | required | RFC 3339 time the index was built. With the signing time, it decides whether an index is newer (see [Launcher behaviour](#launcher-behaviour)). |
+| `weft[]` | `[]` | The ABI hash per Weft release, so the launcher doesn't have to compute it. Each entry needs `tag`, `commit` and `abi`. |
+| `mods[]` | `[]` | The mods. |
+| `mods[].id` | required | `[a-z0-9_]{1,64}`, equal to the crate name and the zip stem. `base` is reserved. |
+| `mods[].name` | required | Display name. |
+| `mods[].summary` | `""` | One line. The launcher shows the first line, cut to 140 characters. |
+| `mods[].authors` | `[]` | Display names. |
+| `mods[].license`, `homepage`, `icon` | `null` | `homepage` and `icon` are absolute `https://` URLs, or they are dropped. `icon` is a PNG of at most 512 KB, or it isn't shown. |
+| `versions[]` | `[]` | Newest first (the launcher sorts again anyway). A mod without a valid version is left out. |
+| `version` | required | Semver: `MAJOR.MINOR.PATCH`, optionally `-prerelease` and `+build`, e.g. `0.2.1-rc.1`. |
+| `channel` | required | `release`, `prerelease` or `experimental`. |
+| `tag` | required | The GitHub release tag of this build. |
+| `published` | `""` | RFC 3339, when given. |
+| `source` | required | `repo` (`owner/name`) and `commit` (the full hash) the build was made from. Both are required. |
+| `weft` | required | `abi` (required, 16 hex), and the Weft `tag` (default `null`) and `commit` (default `""`, else a full hash) it was built against. |
+| `deps[]` | `[]` | `{ "id": … }` of every mod it needs. `base` ships with Weft and is never installed. |
+| `platforms[]` | `[]` | Which libraries the zip has (table below). An unknown platform string is ignored. |
+| `asset` | required | `name`, `url`, `size` and `sha256` of the zip, all required. |
+| `provenance` | `null` | The attestation the index CI checked with `gh attestation verify`. `kind` is required; `repo`, `workflow`, `ref` and `verified_at` default to `null`. |
+| `reviewed` | required in the index | `by` and `at`: who reviewed exactly these bytes, and when. Not read from sources. |
+| `revoked[]` | `[]` | Builds that must never be used again. |
+| `revoked[].sha256` | required | The build's hash. |
+| `revoked[].reason`, `at` | `""` | Why, for the player, and when. |
 
 ### Rules the launcher enforces
 
 A version that breaks any of these is left out. The rest of the index is still used.
 
 - `id` matches `[a-z0-9_]{1,64}` and is not `base`.
+- `version` is semver (see the table).
 - `source.repo` is `owner/name`, each part 1–100 of `A–Z a–z 0–9 - _ .`, and neither `.` nor `..`.
+- `source.commit` is a full commit hash: 40 lowercase hex characters, or 64 in a SHA-256 repository. So is `weft.commit` when it isn't empty.
+- `published` is RFC 3339 when it isn't empty.
 - `tag`, `weft.tag` and `weft[].tag` are 1–100 of `A–Z a–z 0–9 . - _`, and don't start with `.`.
 - `asset.name` is `<id>.zip`.
 - `asset.url` is exactly `https://github.com/<owner>/<repo>/releases/download/<tag>/<id>.zip`, where `<owner>/<repo>` is `source.repo` (compared without case, as GitHub does) and `<tag>` is `tag`. See [the URL rule](#the-asset-url-rule).
@@ -104,12 +117,14 @@ A version that breaks any of these is left out. The rest of the index is still u
 - Every `deps[].id` is a valid mod id.
 - `reviewed` is present, with a non-empty `by`. In the index, Reviewed means someone reviewed it.
 - `revoked[].sha256` is 64 lowercase hex characters; other entries are dropped.
-- Unknown fields are ignored. Missing optional fields mean `null`.
-- A mod whose `sha256` appears in `revoked` is never installed. If it is already installed, it is turned off, and nothing that needs it can turn it back on.
+- Unknown fields are ignored. Missing fields take the defaults in the table.
+- A mod whose `sha256` appears in `revoked` is never installed. If it is already installed, it is turned off, and nothing that needs it can turn it back on. The launcher records the revocation, with its reason, in the version's `mods.lock.json`, so the mod stays revoked even if the index can't be loaded later, until the build is replaced or removed.
+
+Not enforced: that `summary` is one short line (it is cut instead), that `versions[]` is sorted, and that `published` is in the past.
 
 ## `<id>.mod.json`, for Unreviewed sources
 
-A GitHub repo the player adds as a source publishes `<id>.mod.json` next to `<id>.zip` in each release. It holds the mod-level fields plus one version's fields at the top level:
+A GitHub repo the player adds as a source publishes `<id>.mod.json` next to `<id>.zip` in each release. It holds the mod-level fields plus one version's fields at the top level, with the same defaults as in the index; `schema` is required too:
 
 ```json
 {
@@ -142,7 +157,7 @@ A GitHub repo the player adds as a source publishes `<id>.mod.json` next to `<id
 The launcher reads the repo's releases and accepts a `<id>.mod.json` only when all of these agree with GitHub's own record of the same release (`sources.rs`, `accept`):
 
 1. `schema` is `1`.
-2. The release also has an asset `<id>.zip`, and `id` equals its stem.
+2. The release also has an asset `<id>.zip`, `id` equals its stem, and `id` is a mod id (`[a-z0-9_]{1,64}`, not `base`).
 3. `tag` equals the release's tag.
 4. `source.repo` equals the source repo (compared without case).
 5. `asset.name` equals the zip's name.
@@ -159,16 +174,25 @@ Then:
 - The downloaded bytes must hash to `asset.sha256`, as for the index.
 - Draft releases are ignored.
 
-A source build whose `sha256` is also in the index shows once, as Reviewed.
+When several releases publish the same mod:
+
+- They are read newest release first, as GitHub lists them. The mod's name, summary, icon and other mod-level fields come from the newest release that passes.
+- A version string, or a zip `sha256`, that a newer release already published is skipped in older releases.
+
+A source mod is its own catalogue entry (`source:<owner/repo>:<id>`), even when the index has a mod with the same `id` (`index:<id>`). Dependencies are looked up in the index first, then in the same source. A source build whose `sha256` is also in the index shows once, as Reviewed.
 
 ## Launcher behaviour
 
 What the launcher does with all of this, beyond the field rules:
 
-- **Size limits.** The index and its signature are at most 8 MB each. A `<id>.mod.json` is read up to 64 KB, and a longer one is ignored. A mod zip is at most 512 MB, at most 20,000 entries, at most 1 GB unpacked, and no entry over 1 MB may compress better than 200:1.
+- **Size limits.** The index and its signature are at most 8 MB each. A `<id>.mod.json` is read up to 64 KB, and a longer one is ignored. An icon is read up to 512 KB and must be a PNG. A mod zip is at most 512 MB (and at most 1 KB more than its `asset.size`), at most 20,000 entries, at most 1 GB unpacked, and no entry over 1 MB may compress better than 200:1.
+- **Redirects.** Every download follows redirects only over `https`, and only to `github.com`, `githubusercontent.com`, `github.io` and their subdomains.
+- **The bytes.** Every file is hashed again when it enters the launcher's store and must equal `asset.sha256`; its zip and its library for this system are checked then, also when the store already had a file with that hash.
 - **The zip itself.** Only `<id>.dll`, `lib<id>.so`, `lib<id>.dylib` and files under `assets/` are allowed. Folders elsewhere, `..`, absolute paths, `\` in names and symbolic links are refused. The library for the player's system must be there.
-- **Rollback refusal.** An index whose `generated` is older than the last verified one is refused. The launcher keeps the copy it has and reports `IndexRollback`.
-- **The cache.** Each verified index and its signature are stored together as one generation, and the launcher keeps the newest two. The signature is checked again on every read. If the newest pair doesn't verify, for example after a crash while writing it, the previous generation is used. Offline, the cached index is used, with freshness `cached`.
+- **Rollback refusal.** An index's age is the pair (`generated`, signing time). Pairs compare by `generated` first; with the same `generated`, the later signing time is newer, and a signature without a time is older than one with it. A fetched index older than the newest pair ever accepted is refused: the launcher keeps the copy it has and reports `IndexRollback`. That pair is kept in `cache/mod-index.state.json`, apart from the cached index, so deleting the cached index doesn't reset it. The same index fetched again is accepted.
+- **Dated in the future.** An index whose `generated` or signing time is more than a day ahead of the computer's clock is refused with `IndexInvalid`, since it would lock out every honest index until then.
+- **Stale.** An index that verified but was signed more than 30 days ago (by `generated`, without a signing time) has freshness `stale`. Its entries are still used; the launcher says revocations since then may be missing. A cached copy shown because a refresh failed keeps freshness `cached`, with the error.
+- **The cache.** Each verified index and its signature are stored together as one generation, and the launcher keeps the newest two. The signature is checked again on every read. If the newest pair doesn't verify, for example after a crash while writing it, the previous generation is used. Offline, the cached index is used, with freshness `cached` (or `stale`). The launcher only fetches the index when the catalogue is refreshed; Play never waits on it.
 - **Skipping bad entries.** A mod, version, `weft` or `revoked` entry that doesn't parse (for example an unknown `channel`), or that breaks a rule above, is skipped on its own. The rest of the index is used. An unknown platform string is ignored.
 - **The URL rule.** See below.
 - **Reviewed needs a review.** An index version without `reviewed` is dropped.

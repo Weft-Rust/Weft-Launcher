@@ -1,15 +1,20 @@
-//! The JSON examples in `docs/mod-manager/INDEX_FORMAT.md`, read with the launcher's own code:
-//! the documented format is the accepted one.
+//! The JSON examples in `docs/mod-manager/INDEX_FORMAT.md` and `PROPOSAL.md`, read with the
+//! launcher's own code: the documented format is the accepted one.
 
 use super::catalog::{self, IndexStatus, Trust};
 use super::index::{self, Freshness};
 use super::sources::{GhAsset, GhRelease, ModJson, accept};
 
 const DOC: &str = include_str!("../../../docs/mod-manager/INDEX_FORMAT.md");
+const PROPOSAL: &str = include_str!("../../../docs/mod-manager/PROPOSAL.md");
 
 fn json_blocks() -> Vec<serde_json::Value> {
+    json_blocks_in(DOC)
+}
+
+fn json_blocks_in(doc: &str) -> Vec<serde_json::Value> {
     let mut out = Vec::new();
-    let mut rest = DOC;
+    let mut rest = doc;
     while let Some(start) = rest.find("```json\n") {
         let body = &rest[start + "```json\n".len()..];
         let end = body.find("\n```").expect("closed code block");
@@ -63,7 +68,23 @@ fn the_index_example_parses_and_keeps_everything() {
 
 #[test]
 fn the_mod_json_example_is_accepted() {
-    let raw = example("asset");
+    assert_accepted(example("asset"));
+}
+
+/// The proposal links to INDEX_FORMAT instead of keeping its own examples; any it gains must be
+/// valid too.
+#[test]
+fn the_proposal_has_no_stale_examples() {
+    for raw in json_blocks_in(PROPOSAL) {
+        if raw.get("asset").is_some() {
+            assert_accepted(raw);
+        } else if raw.get("mods").is_some() {
+            index::parse(raw.to_string().as_bytes()).unwrap();
+        }
+    }
+}
+
+fn assert_accepted(raw: serde_json::Value) {
     let json: ModJson = serde_json::from_value(raw.clone()).unwrap();
     let zip = GhAsset {
         name: json.asset.name.clone(),

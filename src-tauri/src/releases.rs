@@ -269,6 +269,7 @@ pub async fn list_versions(
 ) -> Result<Vec<Release>, AppError> {
     let client = reqwest::Client::builder()
         .timeout(GITHUB_API_TIMEOUT)
+        .redirect(crate::download::redirect_policy())
         .build()
         .map_err(ReleasesError::Network)?;
 
