@@ -42,7 +42,7 @@ npm run tauri dev     # dev mode (plain `cargo run` won't work - UI is served by
 npm run tauri build   # installer
 ```
 
-Before a PR: `cargo fmt --check && cargo clippy && cargo test` in `src-tauri`, and `npm run build`. UI strings go through `src/i18n` - add keys to all four languages (en, pt-BR, es, ru); `npm run check:i18n` (also part of `npm run build`) lists missing keys and placeholder mismatches.
+Before a PR: `cargo fmt --check && cargo clippy && cargo test` in `src-tauri`, and `npm run build`. UI strings go through `src/i18n` - add keys to all four languages (en, pt-BR, es, ru); `npm run check:i18n` (also part of `npm run build`) lists missing keys, placeholder mismatches, missing plural forms (counted messages have `_one`, `_other` and, per language, `_few`/`_many` keys), message keys used in `src` that don't exist, and backend error codes without an `errors.*` message. `npm test` runs the unit tests (vitest) for the pure logic in `src/mods` and `src/i18n`.
 
 ### UI without Tauri
 
@@ -50,7 +50,34 @@ Before a PR: `cargo fmt --check && cargo clippy && cargo test` in `src-tauri`, a
 npm run dev:mock      # http://localhost:1420/?scenario=mods
 ```
 
-Runs the UI in a browser against a fake backend (`src/dev/mockBackend.ts`). Pick a state with `?scenario=`: `mods` (default: problems, updates, a source, a local file), `empty`, `offline`, `crash` (Play fails on a mod), `fresh` (no versions) or `knownfile` (the file picker returns a catalogued file). The mock is never part of a production build.
+Runs the UI in a browser against a fake backend (`src/dev/mockBackend.ts`) that follows the backend's rules: version fitting and order from `src/mods/select.ts`, dependency cascades, revocation, updates that keep a mod's on/off state, copy previews that merge. The mock is never part of a production build.
+
+Pick a state with `?scenario=` and adjust it with flags, which combine: `?scenario=mods&index=cached&revoked=cogwork&slow=1`. Flags in the URL override the ones a scenario sets. Both lists come from `src/dev/scenarios.ts`; `npm test` fails if this README misses one.
+
+| Scenario | What it shows | Flags it sets |
+|---|---|---|
+| `mods` | The default. A mod built for another version (with a fitting update), an update, a prerelease that is off, a source, a local file and a file in the player's own folder. | — |
+| `empty` | The newest version has no mods; the older one has mods to copy. | — |
+| `fresh` | No game version installed. | — |
+| `offline` | No network: the cached index and a source's cached mods. | `index=cached` `source=offline` |
+| `crash` | Nothing blocks Play; the game then stops while loading Structures, which has an update. | `crash=loadFailed` |
+| `knownfile` | From file picks a zip that is a catalogued build (Cogwork 0.2.0). | `file=known` |
+| `revoked` | The installed Cogwork build has been pulled from the index. | `revoked=cogwork` |
+| `ratelimited` | GitHub rate-limits the source; its last mods are shown. | `source=ratelimited` |
+| `indexdown` | The index has never been reached, so there are no Reviewed mods. | `index=unavailable` |
+| `long` | Very long mod names, ids and repos, for overflow checks. | `long=1` |
+
+| Flag | Values | Effect |
+|---|---|---|
+| `index` | `fresh`, `cached`, `unavailable`, `invalid`, `rollback` | State of the signed mod index. |
+| `source` | `ok`, `notfound`, `ratelimited`, `offline` | State of the added GitHub source. |
+| `revoked` | `<mod id>` | Revokes the installed builds of that mod. |
+| `abi` | `error` | The game version's mod interface can't be found out. |
+| `fail` | `install`, `network`, `toolarge`, `catalog`, `sources` | Comma-separated. Installs fail at the hash check, mid-download or before it; the catalogue or the source list fails to load. |
+| `file` | `unverified`, `known`, `notamod`, `revoked`, `wrongplatform` | What From file picks. |
+| `crash` | `wrongVersion`, `loadFailed`, `notAMod`, `wrongName`, `missingDep`, `initPanicked`, `exit` | Play starts the game and it stops with this failure; `exit` is a crash that names no mod. |
+| `long` | `1` | Adds very long names, ids and repos. |
+| `slow` | `1` | Everything takes four times as long. |
 
 ## Releasing
 
