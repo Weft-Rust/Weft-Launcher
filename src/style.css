@@ -169,7 +169,7 @@ button:disabled { cursor: not-allowed; }
 .lang-menu, .version-select-menu { margin: 0; padding: var(--px); list-style: none; background: var(--ink); }
 .lang-menu { position: absolute; right: 0; top: 40px; min-width: 176px; }
 .lang-item { display: flex; gap: 16px; width: 100%; padding: 2px 8px; text-align: left; }
-.lang-item:hover { background: var(--g2); }
+.lang-item:hover, .lang-item:focus-visible { background: var(--g2); outline: none; }
 .lang-item strong { color: var(--g5); }
 .lang-item.active strong { color: var(--a3); }
 

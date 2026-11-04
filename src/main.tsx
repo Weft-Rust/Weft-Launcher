@@ -4,10 +4,11 @@ import App from "./App";
 import { GameStateProvider } from "./hooks/useGameState";
 import { InstallProvider } from "./hooks/useInstall";
 import { ModsProvider } from "./hooks/useMods";
-import { initI18n } from "./i18n";
+import { getLocale, initI18n } from "./i18n";
 import "./style.css";
 
 initI18n();
+document.documentElement.lang = getLocale();
 
 document.addEventListener("contextmenu", (e) => e.preventDefault());
 
