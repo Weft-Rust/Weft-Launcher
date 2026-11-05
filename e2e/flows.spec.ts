@@ -201,6 +201,36 @@ test.describe("every install shows what it does", () => {
     await expect(row.locator(".toggle")).toHaveAttribute("aria-checked", "false");
   });
 
+  test("the install button doesn't flicker while the set and the catalogue load again", async ({ page }) => {
+    await open(page, "scenario=mods");
+    // The button's state every frame from the moment the dialog shows.
+    await page.evaluate(() => {
+      const w = window as unknown as { seq: string[] };
+      w.seq = [];
+      const tick = () => {
+        const b = document.querySelector<HTMLButtonElement>("[role=dialog] .dialog-actions .btn-primary");
+        if (b) w.seq.push(b.disabled ? "D" : "e");
+        requestAnimationFrame(tick);
+      };
+      tick();
+    });
+    await goToTab(page, MODS_TAB);
+    // As early as it can be opened: the catalogue and every set are still being read again.
+    await page.locator(".mod-row", { hasText: "Lanterns" }).locator(".update-btn-row").click();
+    const button = page.locator(`${dialog} .dialog-actions .btn-primary`);
+    await expect(button).toBeEnabled();
+    await page.waitForTimeout(1500);
+    // A refresh from the header brings the same plan again: nothing changes either.
+    await page.evaluate(() => (document.querySelector(".btn-refresh") as HTMLButtonElement | null)?.click());
+    await page.waitForTimeout(800);
+    const seq = await page.evaluate(() => (window as unknown as { seq: string[] }).seq.join(""));
+    // Off until the first plan, then on for good.
+    expect(seq.replace(/(.)\1*/g, "$1"), "enabled, disabled, enabled again").toBe("De");
+    // A click the moment it is enabled starts the install.
+    await button.click();
+    await expect(page.locator(`${dialog} .progress-bar`)).toHaveCount(1);
+  });
+
   test("a failed dependency download leaves no progress behind", async ({ page }) => {
     await open(page, "scenario=mods&fail=dep");
     await goToTab(page, MODS_TAB);
