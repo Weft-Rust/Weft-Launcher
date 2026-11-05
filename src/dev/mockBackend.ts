@@ -480,12 +480,13 @@ async function runInstall(
     if (!skipFetch.includes(p.v.sha256)) await fetchBuild(op, files[i], !res.wanted.includes(p.mod.id));
   }
   op.check();
-  // `installing` comes before the set is rewritten; past this, a cancel is too late.
-  for (const f of files) await progress(op, f, "installing", 100);
-  await sleep(350);
+  // Checked again under the lock, as `service::commit` does, before anything says `installing`.
   if (!locks[tag] || token() !== expected) fail("ModChangedMeanwhile", tag);
   if (running.has(tag)) fail("GameRunning", tag);
   for (const p of res.picks) if (R.revocation(catalog, p.v.sha256)) fail("ModChangedMeanwhile", p.mod.name);
+  // `installing` comes before the set is rewritten; past this, a cancel is too late.
+  for (const f of files) await progress(op, f, "installing", 100);
+  await sleep(350);
   const lock = lockOf(tag);
   const done = R.commit(lock, res, new Date().toISOString());
   changed(tag);

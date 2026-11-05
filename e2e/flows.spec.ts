@@ -1,8 +1,20 @@
 // The flows the mod manager's safety depends on, and keyboard use, against the mock backend.
 import { expect, test, type Page } from "@playwright/test";
+import trace from "../src/dev/fixtures/trace.json" with { type: "json" };
 import { LOCALES, MODS_TAB, browse, cutButtons, focused, fullRows, goToTab, open, spoken, tops } from "./helpers";
 
 const dialog = "[role=dialog]";
+
+/** `file:stage:percent`, keeping the first and last percent of each run (see the fixture). */
+function collapseTrace(events: { index: number; stage: string; percent: number }[]): string[] {
+  const runs: { index: number; stage: string; first: number; last: number }[] = [];
+  for (const e of events) {
+    const r = runs[runs.length - 1];
+    if (r && r.index === e.index && r.stage === e.stage) r.last = e.percent;
+    else runs.push({ index: e.index, stage: e.stage, first: e.percent, last: e.percent });
+  }
+  return runs.flatMap((r) => [`${r.index}:${r.stage}:${r.first}`, ...(r.last !== r.first ? [`${r.index}:${r.stage}:${r.last}`] : [])]);
+}
 
 test.describe("launch safety", () => {
   test("blocked mods disable Play and one click fixes it", async ({ page }) => {
@@ -275,6 +287,28 @@ async function updateLanterns(page: Page, query: string) {
 }
 
 test.describe("operations", () => {
+  test("the mock's progress follows the backend's trace", async ({ page }) => {
+    const d = await updateLanterns(page, "scenario=mods");
+    // Listened to on the event bus, as the page listens: what the mock sends, not what it shows.
+    await page.evaluate(() => {
+      const w = window as unknown as {
+        __TAURI_INTERNALS__: { transformCallback(f: (e: { payload: unknown }) => void): number; invoke(cmd: string, args: unknown): Promise<unknown> };
+        progressSeen: unknown[];
+      };
+      w.progressSeen = [];
+      const handler = w.__TAURI_INTERNALS__.transformCallback((e) => w.progressSeen.push(e.payload));
+      return w.__TAURI_INTERNALS__.invoke("plugin:event|listen", { event: "mod-progress", target: { kind: "Any" }, handler });
+    });
+    await d.locator(".dialog-actions .btn-primary").click();
+    await expect(d).toHaveCount(0, { timeout: 15_000 });
+    type Seen = { operationId: string; index: number; count: number; stage: string; percent: number };
+    const seen = (await page.evaluate(() => (window as unknown as { progressSeen: unknown[] }).progressSeen)) as Seen[];
+    const want = trace.installWithDependency;
+    expect(new Set(seen.map((e) => e.operationId)).size).toBe(1);
+    expect(seen.every((e) => e.count === want.count)).toBe(true);
+    expect(collapseTrace(seen)).toEqual(want.steps);
+  });
+
   test("progress names the file, and Cancel stops it calmly with nothing changed", async ({ page }) => {
     const d = await updateLanterns(page, "scenario=mods&slow=1");
     await d.locator(".dialog-actions .btn-primary").click();

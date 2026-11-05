@@ -911,6 +911,84 @@ mod operations {
         assert!(!ctx.operations.cancel("op-a"));
     }
 
+    /// The events of an install, step by step, are the ones in `src/dev/fixtures/trace.json`,
+    /// which the mock is held to as well.
+    #[test]
+    fn progress_follows_the_shared_trace() {
+        const TRACE: &str = include_str!("../../../src/dev/fixtures/trace.json");
+        let trace: serde_json::Value = serde_json::from_str(TRACE).unwrap();
+        for (case, stored) in [
+            ("installWithDependency", false),
+            ("installWithStoredDependency", true),
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            let (ctx, world) = setup(&tmp);
+            if stored {
+                std::fs::create_dir_all(ctx.paths.store_dir()).unwrap();
+                std::fs::write(
+                    ctx.paths.store_object(&world.sha("showcase")),
+                    &world.showcase,
+                )
+                .unwrap();
+            }
+            let seen: Arc<Mutex<Vec<super::super::install::ModProgress>>> = Arc::default();
+            let log = seen.clone();
+            let ctx = ctx.with_progress(move |p| log.lock().unwrap().push(p));
+            let plan = run(service::plan(&ctx, TAG, &world.sha("cogwork"))).unwrap();
+            run(service::install(
+                &ctx,
+                TAG,
+                &world.sha("cogwork"),
+                &plan.plan_token,
+                "op-t",
+            ))
+            .unwrap();
+            let seen = seen.lock().unwrap();
+            let want = &trace[case];
+            let count = want["count"].as_u64().unwrap() as u32;
+            assert!(
+                seen.iter()
+                    .all(|p| p.operation_id == "op-t" && p.count == count),
+                "{case}"
+            );
+            let want: Vec<String> = want["steps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|s| s.as_str().unwrap().to_string())
+                .collect();
+            assert_eq!(collapse(&seen), want, "{case}");
+        }
+    }
+
+    /// `file:stage:percent`, keeping the first and last percent of each run of one file's stage.
+    fn collapse(events: &[super::super::install::ModProgress]) -> Vec<String> {
+        let stage = |s: ProgressStage| {
+            serde_json::to_value(s)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let mut runs: Vec<(u32, String, u32, u32)> = Vec::new();
+        for e in events {
+            let st = stage(e.stage);
+            match runs.last_mut() {
+                Some(r) if r.0 == e.index && r.1 == st => r.3 = e.percent,
+                _ => runs.push((e.index, st, e.percent, e.percent)),
+            }
+        }
+        runs.into_iter()
+            .flat_map(|(i, st, first, last)| {
+                let mut out = vec![format!("{i}:{st}:{first}")];
+                if last != first {
+                    out.push(format!("{i}:{st}:{last}"));
+                }
+                out
+            })
+            .collect()
+    }
+
     /// Cancelling during the second download stops it at once, and leaves no trace: no lock
     /// change, no partial file, and not the first build either.
     #[test]

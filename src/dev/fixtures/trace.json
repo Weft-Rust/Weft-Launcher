@@ -1,0 +1,28 @@
+{
+  "about": "The mod-progress events of one install, as the backend sends them, run against the backend (src-tauri/src/mods/service_tests.rs, `traces`) and the mock (e2e/flows.spec.ts, `the mock's progress follows the backend's trace`). Each step is `file:stage:percent`; a run of events for the same file and stage keeps only its first and last percent, since how many come in between depends on the connection. Every event carries the operation's id and the plan's file count.",
+  "installWithDependency": {
+    "about": "Installing a mod that brings one dependency, neither in the store yet: the mod first, then what it needs, each downloaded and checked before the next; `installing` for both once the plan is checked again under the lock, before the set is written.",
+    "count": 2,
+    "steps": [
+      "1:downloading:0",
+      "1:downloading:100",
+      "1:verifying:100",
+      "2:downloading:0",
+      "2:downloading:100",
+      "2:verifying:100",
+      "1:installing:100",
+      "2:installing:100"
+    ]
+  },
+  "installWithStoredDependency": {
+    "about": "The same install when the dependency's build is already in the store and intact: nothing is said about it until it is installed.",
+    "count": 2,
+    "steps": [
+      "1:downloading:0",
+      "1:downloading:100",
+      "1:verifying:100",
+      "1:installing:100",
+      "2:installing:100"
+    ]
+  }
+}
