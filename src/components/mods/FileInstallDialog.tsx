@@ -48,7 +48,7 @@ function fileConsent(inspection: FileInspection, plan: InstallPlan | null): Cons
  * install, update, or replace; a replace says when the tier changes.
  */
 export function FileInstallDialog({ tag, path, onClose }: FileInstallDialogProps) {
-  const { t, tm, tr, formatSize, formatList } = useI18n();
+  const { t, tn, tm, tr, formatSize, formatList } = useI18n();
   const mods = useMods();
   const { installFile, isBusy, progressOf, cancel, isCancelling, profile, catalog, catalogError, loadProfile, nameIn } = mods;
   const report = profile(tag);
@@ -149,6 +149,7 @@ export function FileInstallDialog({ tag, path, onClose }: FileInstallDialogProps
           : t("mods.fileUnverifiedTitle", fileName, tag);
   const button = needsTyping ? (replacing ? "mods.replaceAnyway" : "mods.installAnyway") : (outcome?.button ?? (replacing ? "mods.updateButton" : "mods.install"));
   const label = t(button);
+  const notPassed = checks.filter((c) => c.state === "no" || c.state === "unknown");
 
   return (
     <Dialog
@@ -171,6 +172,18 @@ export function FileInstallDialog({ tag, path, onClose }: FileInstallDialogProps
           <>
             {needsTyping && (
               <span className="typed-confirm">
+                {/* What wasn't shown, in one line, beside what is asked: seen without scrolling the checks. */}
+                {notPassed.length > 0 && (
+                  <span className="typed-summary" data-testid="typed-summary">
+                    {tn("mods.typedNotPassed", notPassed.length)}{" "}
+                    {notPassed.map((c, i) => (
+                      <span key={c.id} className="typed-summary-item">
+                        {i > 0 && ", "}
+                        <RichText msg={c.title} />
+                      </span>
+                    ))}
+                  </span>
+                )}
                 <label htmlFor={inputId} id={whyId}>
                   {tr(replacing ? "mods.typeToReplace" : "mods.typeToConfirm", <strong key="id">{id}</strong>)}
                 </label>

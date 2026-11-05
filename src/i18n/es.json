@@ -294,6 +294,7 @@
     "ckLooksLikeModDetail": "{0} · nada más en el zip",
     "ckNotAModDetail": "{0}",
     "typeToConfirm": "Escribe {0} para instalarlo de todos modos",
+    "typedNotPassed_one": "Sin prueba de que sea seguro ({n}):",
     "sourcesMods_one": "{n} mod",
     "sourcesMods_many": "{n} mods",
     "sourcesMods_other": "{n} mods",
@@ -528,7 +529,9 @@
     "indexUnsavedShort": "Índice no guardado: funciona hasta reiniciar",
     "sourceRetryLabel": "Volver a consultar {0}",
     "tabInstalledLabel_many": "Instalados en {0}: {n} de mods",
-    "tabInstalledLabel_other": "Instalados en {0}: {n} mods"
+    "tabInstalledLabel_other": "Instalados en {0}: {n} mods",
+    "typedNotPassed_many": "Sin prueba de que sea seguro ({n}):",
+    "typedNotPassed_other": "Sin prueba de que sea seguro ({n}):"
   },
   "sizeUnits": {
     "B": "B",

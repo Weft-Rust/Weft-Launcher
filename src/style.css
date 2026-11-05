@@ -539,6 +539,7 @@ button:disabled { cursor: not-allowed; }
 /* In the footer, beside the button it unlocks: never below the fold. */
 .typed-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; flex: 1 1 100%; line-height: 24px; color: var(--pale); }
 .typed-confirm strong { color: var(--a3); }
+.typed-summary { flex: 1 1 100%; color: var(--a3); line-height: 24px; }
 .typed-confirm .text-input { flex: 1 1 160px; height: 36px; }
 .source-list { display: grid; gap: 4px; margin-top: 16px; }
 .source-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "name retry action" "meta meta meta"; gap: 0 12px; align-items: center; padding: 8px 12px; background: var(--ink); }

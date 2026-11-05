@@ -292,6 +292,7 @@
     "ckLooksLikeModDetail": "{0} · nothing else in the zip",
     "ckNotAModDetail": "{0}",
     "typeToConfirm": "Type {0} to install it anyway",
+    "typedNotPassed_one": "Not shown to be safe ({n}):",
     "sourcesMods_one": "{n} mod",
     "sourcesMods_other": "{n} mods",
     "sourcesChecked": "checked {0}",
@@ -500,7 +501,8 @@
     "indexUnsaved": "The mod index in use couldn't be saved on this computer. It works now; it is fetched again at the next start.",
     "indexUnsavedShort": "Mod index not saved: works until restart",
     "sourceRetryLabel": "Ask {0} again",
-    "tabInstalledLabel_other": "Installed in {0}: {n} mods"
+    "tabInstalledLabel_other": "Installed in {0}: {n} mods",
+    "typedNotPassed_other": "Not shown to be safe ({n}):"
   },
   "sizeUnits": {
     "B": "B",

@@ -718,6 +718,9 @@ test.describe("keyboard", () => {
     await expect(install).toBeDisabled();
     const why = await install.getAttribute("aria-describedby");
     await expect(page.locator(`[id="${why}"]`)).toHaveText("Type mytweak to replace it anyway");
+    // What wasn't shown is said right above, without scrolling the checks.
+    await expect(page.getByTestId("typed-summary")).toContainText("Not shown to be safe");
+    await expect(page.getByTestId("typed-summary")).toContainText("Not in the Weft mod index");
     await page.keyboard.type("mytweak");
     await expect(install).toBeEnabled();
     await page.keyboard.press("Enter");
