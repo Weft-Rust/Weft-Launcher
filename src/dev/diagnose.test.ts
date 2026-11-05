@@ -41,7 +41,8 @@ describe("crash diagnosis", () => {
   it.each(cases)("reads the Rust fixture: $what", (c) => {
     const f = findFailure(c.log);
     expect(f).not.toBeNull();
-    expect([f!.kind, f!.modId, f!.other]).toEqual([c.kind, c.id, c.other]);
+    const named = f!.kind === "missingDep" ? f!.dependency : f!.kind === "wrongName" ? f!.crate : null;
+    expect([f!.kind, f!.modId, named]).toEqual([c.kind, c.id, c.other]);
     expect(f!.line).not.toContain("\x1b");
   });
 

@@ -267,12 +267,13 @@ export function crashFixes(failure: ModFailure | null, report: ProfileReport | u
   const mod = failure?.modId ? report?.mods.find((m) => m.id === failure.modId) : undefined;
   if (!failure || !report) return [];
   const fixes: Fix[] = [];
-  if (failure.kind === "missingDep" && failure.other) {
-    const dep = report.mods.find((m) => m.id === failure.other);
+  if (failure.kind === "missingDep") {
+    const { dependency } = failure;
+    const dep = report.mods.find((m) => m.id === dependency);
     if (dep && !dep.enabled && dep.status !== "revoked") fixes.push({ kind: "turnOn", id: dep.id, name: dep.name });
     if (!dep) {
-      const build = dependencyBuild(catalog, failure.other, mod ?? { origin: { kind: "index" }, channel: "release" }, report.versionAbi);
-      if (build) fixes.push({ kind: "install", id: failure.other, name: build.mod.name, mod: build.mod, sha256: build.sha256 });
+      const build = dependencyBuild(catalog, dependency, mod ?? { origin: { kind: "index" }, channel: "release" }, report.versionAbi);
+      if (build) fixes.push({ kind: "install", id: dependency, name: build.mod.name, mod: build.mod, sha256: build.sha256 });
     }
   }
   // A newer build can fix a build that doesn't load; it can't fix a missing dependency or a file.
@@ -303,12 +304,11 @@ export function heroState(report: ProfileReport | undefined, running: boolean, r
 
 /** What stopped the game, in display names. `name` is the blamed mod's; `nameOf` names the others. */
 export function failureTitle(failure: ModFailure, name: string, nameOf: NameOf): Msg {
-  const kind: FailureKind = failure.kind;
-  switch (kind) {
+  switch (failure.kind) {
     case "wrongVersion":
       return { key: "mods.failureWrongVersion", args: [name] };
     case "missingDep":
-      return { key: "mods.failureMissingDep", args: [name, failure.other ? nameOf(failure.other) : ""] };
+      return { key: "mods.failureMissingDep", args: [name, nameOf(failure.dependency)] };
     case "loadFailed":
       return { key: "mods.failureLoad", args: [name] };
     case "notAMod":
@@ -318,7 +318,7 @@ export function failureTitle(failure: ModFailure, name: string, nameOf: NameOf):
     case "initPanicked":
       return failure.modId ? { key: "mods.failureInitNamed", args: [name] } : { key: "mods.failureInit" };
     default:
-      return unreachable(kind);
+      return unreachable(failure);
   }
 }
 
@@ -345,7 +345,7 @@ export function snapshotFor(failure: ModFailure | null, report: ProfileReport | 
     sha256: mod.sha256,
     enabled: mod.enabled,
     kind: failure.kind,
-    dependency: failure.kind === "missingDep" ? failure.other : null,
+    dependency: failure.kind === "missingDep" ? failure.dependency : null,
     shadowFile: shadowOf(report, mod.id)?.file ?? null,
   };
 }

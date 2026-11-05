@@ -24,15 +24,93 @@ pub enum FailureKind {
     InitPanicked,
 }
 
+/// The first mod failure in a run's log, by kind, each with what that kind names. `modId` is the
+/// mod the engine blamed, when the line names one; `line` is the log line, so the player can
+/// search for it.
 #[derive(Debug, Clone, Serialize, PartialEq, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct ModFailure {
-    pub kind: FailureKind,
-    pub mod_id: Option<String>,
-    /// For `missingDep`: the mod that is missing. For `wrongName`: the crate the library is.
-    pub other: Option<String>,
-    /// The log line, so the player can search for it.
-    pub line: String,
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ModFailure {
+    WrongVersion {
+        #[serde(rename = "modId")]
+        mod_id: Option<String>,
+        line: String,
+    },
+    LoadFailed {
+        #[serde(rename = "modId")]
+        mod_id: Option<String>,
+        line: String,
+    },
+    NotAMod {
+        #[serde(rename = "modId")]
+        mod_id: Option<String>,
+        line: String,
+    },
+    WrongName {
+        #[serde(rename = "modId")]
+        mod_id: Option<String>,
+        /// The crate the library is: the name its folder or zip needs.
+        #[serde(rename = "crate")]
+        crate_name: String,
+        line: String,
+    },
+    MissingDep {
+        #[serde(rename = "modId")]
+        mod_id: Option<String>,
+        /// The mod that is missing.
+        dependency: String,
+        line: String,
+    },
+    InitPanicked {
+        #[serde(rename = "modId")]
+        mod_id: Option<String>,
+        line: String,
+    },
+}
+
+impl ModFailure {
+    pub fn kind(&self) -> FailureKind {
+        match self {
+            Self::WrongVersion { .. } => FailureKind::WrongVersion,
+            Self::LoadFailed { .. } => FailureKind::LoadFailed,
+            Self::NotAMod { .. } => FailureKind::NotAMod,
+            Self::WrongName { .. } => FailureKind::WrongName,
+            Self::MissingDep { .. } => FailureKind::MissingDep,
+            Self::InitPanicked { .. } => FailureKind::InitPanicked,
+        }
+    }
+
+    fn mod_id_mut(&mut self) -> &mut Option<String> {
+        match self {
+            Self::WrongVersion { mod_id, .. }
+            | Self::LoadFailed { mod_id, .. }
+            | Self::NotAMod { mod_id, .. }
+            | Self::WrongName { mod_id, .. }
+            | Self::MissingDep { mod_id, .. }
+            | Self::InitPanicked { mod_id, .. } => mod_id,
+        }
+    }
+
+    pub fn mod_id(&self) -> Option<&str> {
+        match self {
+            Self::WrongVersion { mod_id, .. }
+            | Self::LoadFailed { mod_id, .. }
+            | Self::NotAMod { mod_id, .. }
+            | Self::WrongName { mod_id, .. }
+            | Self::MissingDep { mod_id, .. }
+            | Self::InitPanicked { mod_id, .. } => mod_id.as_deref(),
+        }
+    }
+
+    pub fn line(&self) -> &str {
+        match self {
+            Self::WrongVersion { line, .. }
+            | Self::LoadFailed { line, .. }
+            | Self::NotAMod { line, .. }
+            | Self::WrongName { line, .. }
+            | Self::MissingDep { line, .. }
+            | Self::InitPanicked { line, .. } => line,
+        }
+    }
 }
 
 fn word_after<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
@@ -100,41 +178,43 @@ fn is_id(s: &str) -> bool {
 }
 
 fn classify(line: &str) -> Option<ModFailure> {
-    use FailureKind as K;
+    use ModFailure as F;
     let message = engine_error(line)?;
-    let failure = |kind, mod_id: Option<&str>, other: Option<&str>| ModFailure {
-        kind,
-        mod_id: mod_id.map(str::to_string),
-        other: other.map(str::to_string),
-        line: line.trim().to_string(),
-    };
+    let line = line.trim().to_string();
+    let named = |prefix: &str| word_after(message, prefix).map(str::to_string);
     if message.contains("was built against another mod ABI") {
-        return Some(failure(K::WrongVersion, word_after(message, "mod "), None));
+        return Some(F::WrongVersion {
+            mod_id: named("mod "),
+            line,
+        });
     }
+    // The engine always names the missing mod and the crate; a line without them isn't its.
     if message.contains(" requires missing mod ") {
-        return Some(failure(
-            K::MissingDep,
-            word_after(message, "mod "),
-            word_after(message, " requires missing mod "),
-        ));
+        return Some(F::MissingDep {
+            mod_id: named("mod "),
+            dependency: named(" requires missing mod ")?,
+            line,
+        });
     }
     if message.contains(" is the crate ") {
-        return Some(failure(
-            K::WrongName,
-            word_after(message, "mod "),
-            word_after(message, " is the crate "),
-        ));
+        return Some(F::WrongName {
+            mod_id: named("mod "),
+            crate_name: named(" is the crate ")?,
+            line,
+        });
     }
     if let Some(id) = word_after(message, "loading mod ")
         && message.starts_with(&format!("loading mod {id} from "))
     {
-        return Some(failure(K::LoadFailed, Some(id), None));
+        return Some(F::LoadFailed {
+            mod_id: Some(id.to_string()),
+            line,
+        });
     }
     if let Some(at) = message.find(" is not a Weft mod") {
-        let path = message[..at].trim();
-        return Some(ModFailure {
-            mod_id: id_from_library(path),
-            ..failure(K::NotAMod, None, None)
+        return Some(F::NotAMod {
+            mod_id: id_from_library(message[..at].trim()),
+            line,
         });
     }
     if let Some(before) = message.trim_end().strip_suffix("init panicked") {
@@ -144,7 +224,10 @@ fn classify(line: &str) -> Option<ModFailure> {
             .strip_suffix(':')
             .map(str::trim)
             .filter(|id| is_id(id));
-        return Some(failure(K::InitPanicked, id, None));
+        return Some(F::InitPanicked {
+            mod_id: id.map(str::to_string),
+            line,
+        });
     }
     None
 }
@@ -171,8 +254,8 @@ pub fn find(log: &str) -> Option<ModFailure> {
     let lines: Vec<String> = log.lines().map(crate::launch::strip_ansi_codes).collect();
     lines.iter().enumerate().find_map(|(i, l)| {
         let mut failure = classify(l)?;
-        if failure.kind == FailureKind::InitPanicked && failure.mod_id.is_none() {
-            failure.mod_id = panicked_mod(&lines[..i]);
+        if failure.kind() == FailureKind::InitPanicked && failure.mod_id().is_none() {
+            *failure.mod_id_mut() = panicked_mod(&lines[..i]);
         }
         Some(failure)
     })
@@ -244,10 +327,15 @@ mod tests {
         ];
         for (what, log, kind, id, other) in cases {
             let f = find(log).unwrap_or_else(|| panic!("{what}: nothing found"));
-            assert_eq!(f.kind, *kind, "{what}");
-            assert_eq!(f.mod_id.as_deref(), *id, "{what}");
-            assert_eq!(f.other.as_deref(), *other, "{what}");
-            assert!(!f.line.contains('\x1b'), "{what}: colour codes stripped");
+            assert_eq!(f.kind(), *kind, "{what}");
+            assert_eq!(f.mod_id(), *id, "{what}");
+            let named = match &f {
+                ModFailure::MissingDep { dependency, .. } => Some(dependency.as_str()),
+                ModFailure::WrongName { crate_name, .. } => Some(crate_name.as_str()),
+                _ => None,
+            };
+            assert_eq!(named, *other, "{what}");
+            assert!(!f.line().contains('\x1b'), "{what}: colour codes stripped");
         }
     }
 
@@ -257,8 +345,8 @@ mod tests {
         let line =
             "[stderr]     0.402 ERROR [weft] /home/u/mods [old] /x/libmytweak.so is not a Weft mod";
         let f = find(line).unwrap();
-        assert_eq!(f.kind, K::NotAMod);
-        assert_eq!(f.mod_id.as_deref(), Some("mytweak"));
+        assert_eq!(f.kind(), K::NotAMod);
+        assert_eq!(f.mod_id(), Some("mytweak"));
     }
 
     #[test]
@@ -273,21 +361,48 @@ mod tests {
 [stderr] cogwork: init panicked
 ";
         let f = find(log).unwrap();
-        assert_eq!(f.kind, K::InitPanicked);
-        assert_eq!(f.mod_id.as_deref(), Some("showcase"));
+        assert_eq!(f.kind(), K::InitPanicked);
+        assert_eq!(f.mod_id(), Some("showcase"));
 
         // Without the prefix (older engines), the mod's own panic line names it.
         let log = "\
 [stderr]     0.310 ERROR [mod:cogwork::pipes] panicked at src/pipes.rs:3: x
 [stderr]     0.320 ERROR [weft] init panicked
 ";
-        assert_eq!(find(log).unwrap().mod_id.as_deref(), Some("cogwork"));
+        assert_eq!(find(log).unwrap().mod_id(), Some("cogwork"));
 
         let log = "\
 [stderr]     0.200 DEBUG [weft] loading mod lanterns
 [stderr]     0.320 ERROR [weft] init panicked
 ";
-        assert_eq!(find(log).unwrap().mod_id.as_deref(), Some("lanterns"));
+        assert_eq!(find(log).unwrap().mod_id(), Some("lanterns"));
+    }
+
+    /// What the page gets: one shape per kind, with only that kind's fields.
+    #[test]
+    fn each_kind_crosses_with_its_own_fields() {
+        let f = find("[stderr]     0.402 ERROR [weft] mod cogwork requires missing mod showcase")
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&f).unwrap(),
+            serde_json::json!({
+                "kind": "missingDep",
+                "modId": "cogwork",
+                "dependency": "showcase",
+                "line": "[stderr]     0.402 ERROR [weft] mod cogwork requires missing mod showcase"
+            })
+        );
+        let f = find("[stderr]     0.402 ERROR [weft] mod cogworks is the crate cogwork: name its folder or zip cogwork").unwrap();
+        let v = serde_json::to_value(&f).unwrap();
+        assert_eq!(
+            (v["kind"].as_str(), v["crate"].as_str()),
+            (Some("wrongName"), Some("cogwork"))
+        );
+        let f = find("[stderr]     0.903 ERROR [weft] init panicked").unwrap();
+        assert_eq!(
+            serde_json::to_value(&f).unwrap(),
+            serde_json::json!({ "kind": "initPanicked", "modId": null, "line": "[stderr]     0.903 ERROR [weft] init panicked" })
+        );
     }
 
     #[test]

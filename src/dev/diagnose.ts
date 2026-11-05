@@ -45,17 +45,18 @@ const isId = (s: string) => /^[A-Za-z0-9_]+$/.test(s);
 
 function classify(line: string): ModFailure | null {
   if (!isError(line)) return null;
-  const failure = (kind: FailureKind, modId: string | null, other: string | null = null): ModFailure => ({
-    kind,
-    modId,
-    other,
-    line: line.trim(),
-  });
+  const trimmed = line.trim();
+  const failure = (kind: Exclude<FailureKind, "missingDep" | "wrongName">, modId: string | null): ModFailure => ({ kind, modId, line: trimmed });
   if (line.includes("was built against another mod ABI")) return failure("wrongVersion", wordAfter(line, "mod "));
+  // The engine always names the missing mod and the crate; a line without them isn't its.
   if (line.includes(" requires missing mod ")) {
-    return failure("missingDep", wordAfter(line, "mod "), wordAfter(line, " requires missing mod "));
+    const dependency = wordAfter(line, " requires missing mod ");
+    return dependency ? { kind: "missingDep", modId: wordAfter(line, "mod "), dependency, line: trimmed } : null;
   }
-  if (line.includes(" is the crate ")) return failure("wrongName", wordAfter(line, "mod "), wordAfter(line, " is the crate "));
+  if (line.includes(" is the crate ")) {
+    const crate = wordAfter(line, " is the crate ");
+    return crate ? { kind: "wrongName", modId: wordAfter(line, "mod "), crate, line: trimmed } : null;
+  }
   const loading = wordAfter(line, "loading mod ");
   if (loading && line.includes(`loading mod ${loading} from `)) return failure("loadFailed", loading);
   const notMod = line.indexOf(" is not a Weft mod");

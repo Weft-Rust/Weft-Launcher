@@ -14,7 +14,7 @@ import {
 } from "./status";
 import { build, catalog, catalogMod, installed, report } from "./fixtures";
 import type { ChangeResult } from "./types";
-import type { FailureKind, ModStatus } from "./types";
+import type { FailureKind, ModFailure, ModStatus } from "./types";
 
 const name = (id: string) => id.toUpperCase();
 
@@ -105,7 +105,7 @@ describe("heroState", () => {
 });
 
 describe("crash notices", () => {
-  const failure = { kind: "loadFailed" as const, modId: "structures", other: null, line: "x" };
+  const failure: ModFailure = { kind: "loadFailed", modId: "structures", line: "x" };
   const before = report([installed("structures")]);
   const snap = snapshotFor(failure, before);
 
@@ -148,13 +148,22 @@ describe("crash notices", () => {
   });
 
   it("have a title for every failure kind", () => {
+    const all: ModFailure[] = [
+      { kind: "wrongVersion", modId: "structures", line: "x" },
+      { kind: "loadFailed", modId: "structures", line: "x" },
+      { kind: "notAMod", modId: "structures", line: "x" },
+      { kind: "wrongName", modId: "structures", crate: "structure", line: "x" },
+      { kind: "missingDep", modId: "structures", dependency: "cogwork", line: "x" },
+      { kind: "initPanicked", modId: "structures", line: "x" },
+    ];
     const kinds: FailureKind[] = ["wrongVersion", "loadFailed", "notAMod", "wrongName", "missingDep", "initPanicked"];
-    for (const kind of kinds) expect(failureTitle({ ...failure, kind }, "Structures", name).key).toMatch(/^mods\.failure/);
+    expect(all.map((f) => f.kind)).toEqual(kinds);
+    for (const f of all) expect(failureTitle(f, "Structures", name).key).toMatch(/^mods\.failure/);
     expect(failureTitle({ ...failure, kind: "initPanicked", modId: null }, "", name)).toEqual({ key: "mods.failureInit" });
   });
 
   it("name the missing dependency by its display name", () => {
-    expect(failureTitle({ ...failure, kind: "missingDep", other: "cogwork" }, "Structures", name)).toEqual({
+    expect(failureTitle({ ...failure, kind: "missingDep", dependency: "cogwork" }, "Structures", name)).toEqual({
       key: "mods.failureMissingDep",
       args: ["Structures", "COGWORK"],
     });
@@ -165,7 +174,7 @@ describe("crash notices", () => {
       installed("structures", { update: { version: "0.1.3", sha256: "u".repeat(64), channel: "release", trust: "reviewed" } }),
       installed("cogwork", { enabled: false, status: "off" }),
     ]);
-    const fixes = crashFixes({ ...failure, kind: "missingDep", other: "cogwork" }, r, null);
+    const fixes = crashFixes({ ...failure, kind: "missingDep", dependency: "cogwork" }, r, null);
     expect(fixes.map((f) => f.kind)).toEqual(["turnOn", "turnOff"]);
     // A library that didn't load: turning it off surely helps, so it leads; the update is a try.
     const loadFixes = crashFixes(failure, r, null);
@@ -177,7 +186,7 @@ describe("crash notices", () => {
 
   it("offer installing a missing dependency the catalogue has", () => {
     const cogwork = catalogMod("cogwork", [build("0.2.0")]);
-    const fixes = crashFixes({ ...failure, kind: "missingDep", other: "cogwork" }, report([installed("structures")]), catalog([cogwork]));
+    const fixes = crashFixes({ ...failure, kind: "missingDep", dependency: "cogwork" }, report([installed("structures")]), catalog([cogwork]));
     expect(fixes[0]).toMatchObject({ kind: "install", id: "cogwork", sha256: cogwork.versions[0].sha256 });
   });
 });
@@ -281,7 +290,7 @@ describe("contract R4: shadowing, reasons and recovery", () => {
   });
 
   it("a missing-dependency crash clears once that dependency is on and usable", () => {
-    const failure = { kind: "missingDep" as const, modId: "hearth", other: "cogwork", line: "x" };
+    const failure: ModFailure = { kind: "missingDep", modId: "hearth", dependency: "cogwork", line: "x" };
     const before = report([installed("hearth"), installed("cogwork", { enabled: false, status: "off" })]);
     const snap = snapshotFor(failure, before);
     expect(crashResolved(snap, before)).toBe(false);
