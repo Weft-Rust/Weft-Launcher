@@ -1044,6 +1044,26 @@ test.describe("keyboard", () => {
     await expect(d).toHaveCount(0);
   });
 
+  test("the page behind a dialog is inert while it is open, except the live region", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    const opener = page.locator(".mod-row[data-mod=lanterns] .update-btn-row");
+    await opener.click();
+    await expect(page.locator(dialog)).toBeVisible();
+    const inert = () =>
+      page.evaluate(() => ({
+        tabs: !!document.querySelector(".tab-btn")?.closest("[inert]"),
+        rows: !!document.querySelector(".mod-row")?.closest("[inert]"),
+        live: !!document.querySelector("[data-testid=live-region]")?.closest("[inert]"),
+        dialog: !!document.querySelector("[role=dialog]")?.closest("[inert]"),
+      }));
+    expect(await inert()).toEqual({ tabs: true, rows: true, live: false, dialog: false });
+    await page.keyboard.press("Escape");
+    await expect(page.locator(dialog)).toHaveCount(0);
+    expect(await page.evaluate(() => document.querySelectorAll("[inert]").length)).toBe(0);
+    await expect(opener).toBeFocused();
+  });
+
   test("a tooltip under the mouse doesn't stop Escape on Cancel", async ({ page }) => {
     await open(page, "scenario=mods");
     await goToTab(page, MODS_TAB);

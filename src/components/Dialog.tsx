@@ -102,7 +102,10 @@ export function Dialog({ title, subtitle, onClose, locked = false, children, foo
     };
     document.addEventListener("keydown", onKey, true);
     document.addEventListener("focusin", onFocusIn);
+    const outside = inertOutside(box.current);
     return () => {
+      // The page comes back first, so focus can return to the opener.
+      outside.forEach((el) => (el.inert = false));
       observer.disconnect();
       document.removeEventListener("keydown", onKey, true);
       document.removeEventListener("focusin", onFocusIn);
@@ -137,4 +140,22 @@ export function Dialog({ title, subtitle, onClose, locked = false, children, foo
       </div>
     </div>
   );
+}
+
+/**
+ * Makes everything outside an open dialog inert: not clickable, not focusable, not in the
+ * accessibility tree, beyond what `aria-modal` asks of a screen reader. The polite live region
+ * stays, so a result is still said while the dialog is open. Returns what it changed.
+ */
+function inertOutside(dialog: HTMLElement | null): HTMLElement[] {
+  const made: HTMLElement[] = [];
+  for (let n = dialog; n && n.parentElement && n !== document.body; n = n.parentElement) {
+    for (const sibling of n.parentElement.children) {
+      if (sibling === n || !(sibling instanceof HTMLElement) || sibling.inert) continue;
+      if (sibling.matches("[aria-live], script") || sibling.querySelector("[aria-live]")) continue;
+      sibling.inert = true;
+      made.push(sibling);
+    }
+  }
+  return made;
 }
