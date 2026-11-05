@@ -206,7 +206,9 @@ pub async fn install_version(
         .filter(|s| !s.is_empty())
         .ok_or(InstallError::HashMissing)?;
     if let Some(why) = version_url_problem(&tag, &asset_name, &asset_url) {
-        return Err(InstallError::DownloadFailed(format!("unexpected URL {asset_url}: {why}")).into());
+        return Err(
+            InstallError::DownloadFailed(format!("unexpected URL {asset_url}: {why}")).into(),
+        );
     }
 
     let active = app_handle.state::<ActiveInstalls>().inner().clone();
@@ -696,7 +698,8 @@ mod tests {
     #[test]
     fn version_urls_are_the_release_asset() {
         let (tag, name) = ("v26.11.1", "weft-linux-x64.tar.gz");
-        let good = "https://github.com/Weft-Rust/Weft/releases/download/v26.11.1/weft-linux-x64.tar.gz";
+        let good =
+            "https://github.com/Weft-Rust/Weft/releases/download/v26.11.1/weft-linux-x64.tar.gz";
         assert_eq!(version_url_problem(tag, name, good), None);
         for bad in [
             "https://github.com/Weft-Rust/Weft/releases/download/../../../evil/repo/releases/download/v26.11.1/weft-linux-x64.tar.gz",

@@ -367,7 +367,10 @@ pub(crate) fn revalidate(repo: &str, mods: Vec<IndexMod>) -> Vec<IndexMod> {
                 match problem {
                     None => true,
                     Some(why) => {
-                        eprintln!("mod source {repo}: dropping cached {id} {}: {why}", v.version);
+                        eprintln!(
+                            "mod source {repo}: dropping cached {id} {}: {why}",
+                            v.version
+                        );
                         false
                     }
                 }
@@ -472,12 +475,17 @@ pub async fn fetch(
 }
 
 /// The repo as GitHub spells it, if it exists. A renamed repo gives its new name.
-pub async fn canonical_name(client: &reqwest::Client, repo: &str) -> Result<String, ModsError> {
+/// `api` is GitHub's API (`https://api.github.com`).
+pub async fn canonical_name(
+    client: &reqwest::Client,
+    api: &str,
+    repo: &str,
+) -> Result<String, ModsError> {
     #[derive(Deserialize)]
     struct GhRepo {
         full_name: String,
     }
-    let url = format!("https://api.github.com/repos/{repo}");
+    let url = format!("{api}/repos/{repo}");
     let response = client
         .get(&url)
         .header(USER_AGENT, USER_AGENT_VALUE)

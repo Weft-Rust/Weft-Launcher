@@ -138,6 +138,11 @@ impl RunningGames {
     pub fn insert(&self, tag: &str) {
         self.0.lock().unwrap().insert(tag.to_string());
     }
+
+    #[cfg(test)]
+    pub fn remove(&self, tag: &str) {
+        self.0.lock().unwrap().remove(tag);
+    }
 }
 
 fn running_games(app_handle: &AppHandle) -> RunningGames {

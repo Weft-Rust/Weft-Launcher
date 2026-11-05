@@ -414,9 +414,15 @@ mod tests {
         {
             use std::os::unix::fs::MetadataExt;
             assert_eq!(std::fs::metadata(&in_v1).unwrap().nlink(), 1);
-            assert_eq!(std::fs::metadata(paths.store_object(&a)).unwrap().nlink(), 1);
+            assert_eq!(
+                std::fs::metadata(paths.store_object(&a)).unwrap().nlink(),
+                1
+            );
         }
-        let mut f = std::fs::OpenOptions::new().write(true).open(&in_v1).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&in_v1)
+            .unwrap();
         f.write_all(b"evil!").unwrap();
         drop(f);
         assert_eq!(std::fs::read(paths.store_object(&a)).unwrap(), b"mod a");

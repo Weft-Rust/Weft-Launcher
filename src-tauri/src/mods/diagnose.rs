@@ -254,7 +254,8 @@ mod tests {
     /// A path with `] ` in it doesn't move the message.
     #[test]
     fn paths_with_brackets() {
-        let line = "[stderr]     0.402 ERROR [weft] /home/u/mods [old] /x/libmytweak.so is not a Weft mod";
+        let line =
+            "[stderr]     0.402 ERROR [weft] /home/u/mods [old] /x/libmytweak.so is not a Weft mod";
         let f = find(line).unwrap();
         assert_eq!(f.kind, K::NotAMod);
         assert_eq!(f.mod_id.as_deref(), Some("mytweak"));

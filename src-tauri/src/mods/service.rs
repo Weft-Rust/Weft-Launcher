@@ -182,7 +182,7 @@ pub fn source_list(ctx: &Ctx) -> Vec<String> {
 /// Adds a repo as GitHub spells it. Adding one already there, in any case, keeps one entry.
 pub async fn add_source(ctx: &Ctx, repo: &str) -> Result<Vec<String>, ModsError> {
     let repo = sources::normalize(repo)?;
-    let canonical = sources::canonical_name(&http()?, &repo).await?;
+    let canonical = sources::canonical_name(&http()?, ctx.github_api(), &repo).await?;
     let _held = ctx.lock_mods().await;
     let repos = sources::with_repo(sources::list(&ctx.paths), &canonical);
     sources::save(&ctx.paths, &repos)?;
@@ -643,20 +643,20 @@ pub async fn install_file(
         sha256: &sha,
         mod_id: "",
     };
-    ctx.emit(at, ProgressStage::Verifying, 0);
-    let info = admit(None, current_platform()).await?;
-    if info.id == RESERVED_ID {
-        return Err(ModsError::IdReserved(info.id));
-    }
-    let at = Step {
-        mod_id: &info.id,
-        ..at
-    };
-    ctx.emit(at, ProgressStage::Verifying, 100);
-    let mut entry = inspect::local_entry(&info, &ctx.paths.store_object(&sha), &source, &sha)?;
-
-    let guard = ctx.lock_mods().await;
     let result = async {
+        ctx.emit(at, ProgressStage::Verifying, 0);
+        let info = admit(None, current_platform()).await?;
+        if info.id == RESERVED_ID {
+            return Err(ModsError::IdReserved(info.id));
+        }
+        let at = Step {
+            mod_id: &info.id,
+            ..at
+        };
+        ctx.emit(at, ProgressStage::Verifying, 100);
+        let mut entry = inspect::local_entry(&info, &ctx.paths.store_object(&sha), &source, &sha)?;
+
+        let _guard = ctx.lock_mods().await;
         op.check()?;
         if ensure_installed(&ctx.paths, tag).is_err() {
             return Err(ModsError::ChangedMeanwhile(format!("{tag} was removed")));
@@ -678,19 +678,17 @@ pub async fn install_file(
         entry.enabled = lock.get(&entry.id).is_none_or(|e| e.enabled);
         lock.put(entry);
         save(ctx, tag, &lock, None, vec![hold]).await?;
-        Ok((lock, latest))
+        Ok((lock, latest, info.id))
     }
     .await;
     match result {
-        Ok((lock, latest)) => {
-            drop(guard);
-            Ok(ChangeResult {
-                installed: vec![info.id],
-                ..change_result(ctx, tag, &lock, &latest).await
-            })
-        }
+        Ok((lock, latest, id)) => Ok(ChangeResult {
+            installed: vec![id],
+            ..change_result(ctx, tag, &lock, &latest).await
+        }),
         Err(e) => {
-            // The copy in the store is nobody's now.
+            // Whatever reached the store is nobody's now.
+            let _held = ctx.lock_mods().await;
             ctx.collect_garbage().await;
             Err(e)
         }

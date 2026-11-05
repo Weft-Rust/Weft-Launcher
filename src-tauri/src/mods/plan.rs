@@ -162,7 +162,7 @@ pub struct Resolution {
 
 /// A mod the resolution walks through: a build it picks, or an installed mod.
 enum Node {
-    Pick(CatalogMod, CatalogVersion),
+    Pick(Box<(CatalogMod, CatalogVersion)>),
     Have(String),
 }
 
@@ -185,11 +185,13 @@ pub fn resolve(
         missing: Vec::new(),
     };
     let node_id = |n: &Node| match n {
-        Node::Pick(m, _) => m.id.clone(),
+        Node::Pick(p) => p.0.id.clone(),
         Node::Have(id) => id.clone(),
     };
-    let mut todo: std::collections::VecDeque<Node> =
-        wanted.into_iter().map(|(m, v)| Node::Pick(m, v)).collect();
+    let mut todo: std::collections::VecDeque<Node> = wanted
+        .into_iter()
+        .map(|p| Node::Pick(Box::new(p)))
+        .collect();
     while let Some(node) = todo.pop_front() {
         let id = node_id(&node);
         if res.picks.iter().any(|(p, _)| p.id == id) || res.installed.iter().any(|(i, _)| *i == id)
@@ -197,7 +199,7 @@ pub fn resolve(
             continue;
         }
         let (deps, origin, channel) = match &node {
-            Node::Pick(m, v) => (v.deps.clone(), m.origin.clone(), v.channel),
+            Node::Pick(p) => (p.1.deps.clone(), p.0.origin.clone(), p.1.channel),
             Node::Have(id) => {
                 let e = lock.get(id).expect("an installed node is in the lock");
                 (
@@ -234,12 +236,12 @@ pub fn resolve(
                 .iter()
                 .find_map(|k| best_version(catalog, k, fit, channel))
             {
-                Some((dm, dv)) => todo.push_back(Node::Pick(dm.clone(), dv.clone())),
+                Some((dm, dv)) => todo.push_back(Node::Pick(Box::new((dm.clone(), dv.clone())))),
                 None => res.missing.push(dep.clone()),
             }
         }
         match node {
-            Node::Pick(m, v) => res.picks.push((m, v)),
+            Node::Pick(p) => res.picks.push(*p),
             Node::Have(id) => res.installed.push((id, deps)),
         }
     }
@@ -1246,5 +1248,161 @@ mod tests {
         assert!(matches!(err, ModsError::Revoked(ref d) if d.contains("deletes saves")));
         assert!(set_enabled(&mut l, &c, "needs", true).is_err());
         assert!(!l.get("pulled").unwrap().enabled && !l.get("needs").unwrap().enabled);
+    }
+
+    /// Contract R4 §1: a needs b, which is installed and needs c. The graph goes through b.
+    #[test]
+    fn dependencies_resolve_through_installed_mods() {
+        let a = build("a", "1.0.0", ABI, REL, &["b"]);
+        let c_build = build("c", "1.0.0", ABI, REL, &[]);
+        let catalog_with = |c: bool, revoked: &[&str]| {
+            let mut mods = vec![catalog_mod("a", Origin::Index, vec![a.clone()])];
+            if c {
+                mods.push(catalog_mod("c", Origin::Index, vec![c_build.clone()]));
+            }
+            catalog(mods, revoked)
+        };
+        let off = |mut e: LockEntry| {
+            e.enabled = false;
+            e
+        };
+        let b = |enabled: bool| {
+            let e = entry("b", &["c"], Some(ABI));
+            if enabled { e } else { off(e) }
+        };
+        struct Case {
+            what: &'static str,
+            catalog: Catalog,
+            lock: Lock,
+            install: &'static [&'static str],
+            enable: &'static [&'static str],
+            missing: &'static [&'static str],
+            turns_on: bool,
+        }
+        let cases = [
+            Case {
+                what: "c installed and off: both turn on",
+                catalog: catalog_with(false, &[]),
+                lock: lock(vec![b(false), off(entry("c", &[], Some(ABI)))]),
+                install: &[],
+                enable: &["b", "c"],
+                missing: &[],
+                turns_on: true,
+            },
+            Case {
+                what: "b already on, c off: c turns on too",
+                catalog: catalog_with(false, &[]),
+                lock: lock(vec![b(true), off(entry("c", &[], Some(ABI)))]),
+                install: &[],
+                enable: &["c"],
+                missing: &[],
+                turns_on: true,
+            },
+            Case {
+                what: "c not installed but in the catalogue: downloaded",
+                catalog: catalog_with(true, &[]),
+                lock: lock(vec![b(false)]),
+                install: &["c"],
+                enable: &["b"],
+                missing: &[],
+                turns_on: true,
+            },
+            Case {
+                what: "c missing: a goes in off, b stays off",
+                catalog: catalog_with(false, &[]),
+                lock: lock(vec![b(false)]),
+                install: &[],
+                enable: &[],
+                missing: &["c"],
+                turns_on: false,
+            },
+            Case {
+                what: "c installed for another version, no build here",
+                catalog: catalog_with(false, &[]),
+                lock: lock(vec![b(false), off(entry("c", &[], Some(OLD_ABI)))]),
+                install: &[],
+                enable: &[],
+                missing: &["c"],
+                turns_on: false,
+            },
+            Case {
+                what: "c installed but revoked",
+                catalog: catalog_with(true, &[&sha("c", "0.1.0"), &sha("c", "1.0.0")]),
+                lock: lock(vec![b(false), off(entry("c", &[], Some(ABI)))]),
+                install: &[],
+                enable: &[],
+                missing: &["c"],
+                turns_on: false,
+            },
+        ];
+        for case in cases {
+            let target = sha("a", "1.0.0");
+            let plan =
+                plan_install(&case.catalog, &case.lock, "v1", &target, Some(fit()), false).unwrap();
+            let mut enable = plan.enable.clone();
+            enable.sort();
+            assert_eq!(ids(&plan.install), case.install, "{}", case.what);
+            assert_eq!(enable, case.enable, "{}", case.what);
+            assert_eq!(plan.missing, case.missing, "{}", case.what);
+            assert_eq!(plan.turns_on, case.turns_on, "{}", case.what);
+
+            // The commit does what the plan says, and leaves nothing on that can't load.
+            let (m, v) = case.catalog.find(&target).unwrap();
+            let mut after = case.lock.clone();
+            let res = resolve(
+                &case.catalog,
+                &case.lock,
+                vec![(m.clone(), v.clone())],
+                fit(),
+            );
+            commit(&mut after, &res);
+            assert_eq!(
+                after.get("a").unwrap().enabled,
+                case.turns_on,
+                "{}",
+                case.what
+            );
+            let r = super::super::profile::report(
+                "v1",
+                &after,
+                Some(ABI.into()),
+                None,
+                &case.catalog,
+                fit().platform,
+                vec![],
+            );
+            assert!(r.blocking.is_empty(), "{}: {:?}", case.what, r.blocking);
+        }
+    }
+
+    /// The token changes with anything the player agreed to, and only with that.
+    #[test]
+    fn plan_tokens() {
+        let c = world();
+        let target = sha("cogwork", "0.2.0");
+        let token = |l: &Lock, abi: &str| {
+            plan_install(&c, l, "v1", &target, Some(Fit { abi, ..fit() }), false)
+                .unwrap()
+                .plan_token
+        };
+        let empty = lock(vec![]);
+        assert_eq!(token(&empty, ABI), token(&empty, ABI), "stable");
+        assert_eq!(
+            plan_install(&c, &empty, "v1", &target, Some(fit()), true)
+                .unwrap()
+                .plan_token,
+            token(&empty, ABI),
+            "a running game is a problem, not a change of plan"
+        );
+        assert_ne!(token(&empty, ABI), token(&empty, OLD_ABI), "the ABI");
+        let mut showcase_off = entry("showcase", &[], Some(ABI));
+        showcase_off.enabled = false;
+        let with_off = lock(vec![showcase_off]);
+        assert_ne!(token(&empty, ABI), token(&with_off, ABI), "what turns on");
+        assert_ne!(
+            token(&with_off, ABI),
+            token(&lock(vec![entry("showcase", &[], Some(ABI))]), ABI),
+            "nothing turns on any more"
+        );
     }
 }

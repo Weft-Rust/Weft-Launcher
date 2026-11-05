@@ -167,7 +167,11 @@ pub struct Ctx {
     /// Whether a download's URL must be its build's GitHub release asset. Only tests, whose
     /// downloads come from a local server, turn this off.
     check_urls: bool,
+    /// Where GitHub's API is: `https://api.github.com`, or a local server in tests.
+    github_api: String,
 }
+
+pub const GITHUB_API: &str = "https://api.github.com";
 
 impl Ctx {
     pub fn of(app: &AppHandle) -> Result<Ctx, ModsError> {
@@ -181,6 +185,7 @@ impl Ctx {
             operations: app.state::<Operations>().inner().clone(),
             progress: Arc::new(move |p| crate::ipc::emit_mod_progress(&emitter, &p)),
             check_urls: true,
+            github_api: GITHUB_API.to_string(),
         })
     }
 
@@ -195,6 +200,7 @@ impl Ctx {
             operations: Operations::default(),
             progress: Arc::new(|_| {}),
             check_urls: true,
+            github_api: GITHUB_API.to_string(),
         }
     }
 
@@ -208,6 +214,17 @@ impl Ctx {
     pub fn trusting_any_url(mut self) -> Ctx {
         self.check_urls = false;
         self
+    }
+
+    /// For tests that stand in for GitHub's API.
+    #[cfg(test)]
+    pub fn with_github_api(mut self, base: &str) -> Ctx {
+        self.github_api = base.to_string();
+        self
+    }
+
+    pub fn github_api(&self) -> &str {
+        &self.github_api
     }
 
     pub fn checks_urls(&self) -> bool {

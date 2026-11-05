@@ -63,9 +63,7 @@ pub async fn fetch_to_store(
     if admit_stored.await?.is_some() {
         return Ok(());
     }
-    if check_url
-        && let Some(why) = asset_url_problem(&m.id, &v.source_repo, &v.tag, &v.url)
-    {
+    if check_url && let Some(why) = asset_url_problem(&m.id, &v.source_repo, &v.tag, &v.url) {
         return Err(ModsError::UrlRefused(format!("{}: {why}", v.url)));
     }
     let tmp = store::temp_path(paths, &v.sha256)?;
@@ -73,13 +71,9 @@ pub async fn fetch_to_store(
     let client = download::client()?;
     let limit = v.size.saturating_add(1024).min(MAX_FILE_BYTES);
     let result = {
-        let download = std::pin::pin!(download::to_file(
-            &client,
-            &v.url,
-            &tmp,
-            Some(limit),
-            |p| progress(ProgressStage::Downloading, p.percent),
-        ));
+        let download = std::pin::pin!(download::to_file(&client, &v.url, &tmp, Some(limit), |p| {
+            progress(ProgressStage::Downloading, p.percent)
+        },));
         let cancelled = std::pin::pin!(op.cancelled());
         match futures_util::future::select(download, cancelled).await {
             futures_util::future::Either::Left((r, _)) => {

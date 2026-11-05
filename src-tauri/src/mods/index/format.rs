@@ -301,12 +301,7 @@ pub fn asset_url_problem(id: &str, repo: &str, tag: &str, url: &str) -> Option<&
 /// `https://github.com/<owner>/<repo>/releases/download/<tag>/<file>` exactly as written: no
 /// other host, port, user, query or fragment, no `\`, no percent-encoding, no `.` or `..`.
 /// Game versions (`install.rs`) and mods both go through it.
-pub fn release_asset_problem(
-    repo: &str,
-    tag: &str,
-    file: &str,
-    url: &str,
-) -> Option<&'static str> {
+pub fn release_asset_problem(repo: &str, tag: &str, file: &str, url: &str) -> Option<&'static str> {
     if url.contains('\\') {
         return Some("contains a backslash");
     }
