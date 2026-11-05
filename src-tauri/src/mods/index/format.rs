@@ -459,7 +459,10 @@ pub fn sanitize(mut index: Index) -> Index {
                 }
             }
         });
-        m.icon = m.icon.take().filter(|u| u.starts_with("https://"));
+        m.icon = m
+            .icon
+            .take()
+            .filter(|u| crate::download::icon_url_allowed(u));
         m.homepage = m.homepage.take().filter(|u| u.starts_with("https://"));
         clamp_summary(&mut m.summary);
     }
@@ -562,6 +565,46 @@ pub(crate) mod tests {
             let mut v = ok();
             change(&mut v);
             assert!(version_problem("cogwork", &v).is_some(), "{what}");
+        }
+    }
+
+    /// An icon from anywhere but GitHub is dropped while reading, so the launcher never asks
+    /// another host for it (that would tell it the player's address).
+    #[test]
+    fn icons_only_from_github_hosts() {
+        let sha = "a".repeat(64);
+        let with_icon = |icon: &str| IndexMod {
+            id: "cogwork".into(),
+            name: "Cogwork".into(),
+            summary: String::new(),
+            authors: vec![],
+            license: None,
+            homepage: None,
+            icon: Some(icon.into()),
+            versions: vec![version("cogwork", "Zorro909/weft-mods", &sha)],
+        };
+        let icons = |icon: &str| {
+            let index = sanitize(Index {
+                schema: 1,
+                generated: "2026-11-04T00:00:00Z".into(),
+                weft: vec![],
+                mods: vec![with_icon(icon)],
+                revoked: vec![],
+            });
+            index.mods[0].icon.clone()
+        };
+        let ok = "https://raw.githubusercontent.com/Zorro909/weft-mods/main/icon.png";
+        assert_eq!(icons(ok).as_deref(), Some(ok));
+        assert_eq!(
+            icons("https://zorro909.github.io/icon.png").as_deref(),
+            Some("https://zorro909.github.io/icon.png")
+        );
+        for bad in [
+            "https://tracker.example/icon.png",
+            "https://raw.githubusercontent.com.evil.example/icon.png",
+            "http://raw.githubusercontent.com/Zorro909/weft-mods/main/icon.png",
+        ] {
+            assert_eq!(icons(bad), None, "{bad}");
         }
     }
 

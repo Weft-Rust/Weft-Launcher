@@ -12,7 +12,7 @@ import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 import { EVENTS } from "../mods/ipc";
 import type { CommandSignatures } from "../mods/bindings/commands";
-import { parseRepo, sameRepo } from "../mods/select";
+import { iconUrlAllowed, parseRepo, sameRepo } from "../mods/select";
 import { SCENARIOS } from "./scenarios";
 import { CRASH_LOGS } from "./crashes";
 import { findFailure } from "./diagnose";
@@ -119,6 +119,13 @@ const indexMod = (id: string, name: string, summary: string, versions: CatalogVe
   versions,
 });
 
+/** Where the mock's icons are said to be: GitHub, as an index or a source would name them. */
+const mockIcon = (id: string) => `https://raw.githubusercontent.com/Zorro909/weft-mods/main/${id}/assets/textures/gui/icon.png`;
+
+// A source's `<id>.mod.json` names this icon on a tracker's host: it is dropped while reading, as
+// the backend does (`icon_url_allowed`), so browsing never asks that host for anything.
+const TRACKER_ICON = "https://tracker.example/lanterns/icon.png";
+
 const sourceMod = (id: string, name: string, summary: string, versions: CatalogVersion[]): CatalogMod => ({
   key: `source:${LANTERN_REPO}:${id}`,
   id,
@@ -127,7 +134,7 @@ const sourceMod = (id: string, name: string, summary: string, versions: CatalogV
   authors: ["lantern-dev"],
   license: "MIT",
   homepage: null,
-  icon: null,
+  icon: [id === "lanterns" ? TRACKER_ICON : null].find((u) => u && iconUrlAllowed(u)) ?? null,
   origin: { kind: "source", repo: LANTERN_REPO },
   versions,
 });
@@ -148,7 +155,7 @@ const allMods: CatalogMod[] = [
         version("cogwork", "0.2.0", NEW),
         version("cogwork", "0.1.2", OLD),
       ],
-      "mock://cogwork"
+      mockIcon("cogwork")
     ),
     homepage: "https://github.com/Zorro909/weft-mods/tree/main/cogwork",
   },
@@ -157,7 +164,7 @@ const allMods: CatalogMod[] = [
     "Structures",
     "Overworld buildings and hamlets, a wand, and /structure.",
     [version("structures", "0.1.3", NEW), version("structures", "0.1.2", NEW), version("structures", "0.1.1", OLD)],
-    "mock://structures"
+    mockIcon("structures")
   ),
   indexMod("showcase", "Showcase", "Developer tool: plays and records films that mods define in code.", [
     version("showcase", "0.1.1-rc.2", NEW, { channel: "prerelease", deps: [] }),
@@ -695,6 +702,10 @@ async function launch(tag: string) {
 // ---------------------------------------------------------------------------------------------
 // Icons
 
+/** Every icon the page asked for, for the tests: `window.mockIconRequests`. */
+const iconRequests: string[] = [];
+(window as unknown as { mockIconRequests: string[] }).mockIconRequests = iconRequests;
+
 function iconUrl(id: string): string {
   const art: Record<string, string[]> = {
     cogwork: ["...##...", ".#.##.#.", "########", ".##..##.", ".##..##.", "########", ".#.##.#.", "...##..."],
@@ -793,7 +804,13 @@ const handlers: Handlers = {
     return catalog.sources.map((s) => s.repo);
   },
   get_mod_profile: ({ tag }) => report(tag),
-  get_mod_icon: ({ url }) => iconUrl(url.replace("mock://", "")),
+  get_mod_icon: ({ url }) => {
+    iconRequests.push(url);
+    const known = catalog.mods.some((m) => m.icon === url);
+    if (!known || !iconUrlAllowed(url)) fail("ModNotInCatalog", url);
+    const parts = url.split("/");
+    return iconUrl(parts[parts.length - 5] ?? "");
+  },
   plan_mod_install: async ({ tag, sha256 }) => {
     await sleep(120);
     return R.planInstall(catalog, lockOf(tag), tag, sha256, fitOf(tag), running.has(tag));

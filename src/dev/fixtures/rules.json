@@ -293,5 +293,29 @@
       ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", true],
       ["eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", false]
     ]
+  },
+  "iconHosts": {
+    "rust": "download.rs icon_url_allowed",
+    "cases": [
+      ["https://raw.githubusercontent.com/owner/repo/main/icon.png", true],
+      ["https://github.com/owner/repo/raw/main/icon.png", true],
+      ["https://user-images.githubusercontent.com/1/icon.png", true],
+      ["https://owner.github.io/mod/icon.png", true],
+      ["https://OWNER.GitHub.io/icon.png", true],
+      ["https://raw.githubusercontent.com:443/owner/repo/main/icon.png", true],
+      ["http://raw.githubusercontent.com/owner/repo/main/icon.png", false],
+      ["https://github.io/icon.png", false],
+      ["https://evil.example/icon.png", false],
+      ["https://github.com.evil.example/icon.png", false],
+      ["https://evilgithub.com/icon.png", false],
+      ["https://objects.githubusercontent.com/icon.png", false],
+      ["https://avatars.githubusercontent.com/u/1", false],
+      ["https://raw.githubusercontent.com:8443/owner/repo/main/icon.png", false],
+      ["https://user@raw.githubusercontent.com/owner/repo/main/icon.png", false],
+      ["https://127.0.0.1/icon.png", false],
+      ["mock://cogwork", false],
+      ["not a url", false],
+      ["", false]
+    ]
   }
 }

@@ -49,6 +49,27 @@ pub fn redirect_allowed(url: &url::Url) -> bool {
         && (on("github.com") || on("githubusercontent.com") || on("github.io"))
 }
 
+/// Where a mod's icon may come from: GitHub's own hosts for repository files and images, and
+/// GitHub Pages. Anything else is dropped where a catalogue is read, and refused again before a
+/// fetch, so browsing never tells another host the player's address.
+pub fn icon_url_allowed(raw: &str) -> bool {
+    let Ok(url) = url::Url::parse(raw) else {
+        return false;
+    };
+    let host = url.host_str().unwrap_or("");
+    let pages = host
+        .strip_suffix(".github.io")
+        .is_some_and(|name| !name.is_empty() && !name.contains('.'));
+    url.scheme() == "https"
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && (matches!(
+            host,
+            "github.com" | "raw.githubusercontent.com" | "user-images.githubusercontent.com"
+        ) || pages)
+}
+
 /// Follows at most 10 redirects, each to an allowed place (see [`redirect_allowed`]).
 pub fn redirect_policy() -> reqwest::redirect::Policy {
     reqwest::redirect::Policy::custom(|attempt| {

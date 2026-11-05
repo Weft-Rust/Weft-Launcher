@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import rules from "./fixtures/rules.json";
 import * as R from "./mockRules";
+import { iconUrlAllowed } from "../mods/select";
 import type { Catalog, CatalogMod, Channel, Origin, Trust } from "../mods/types";
 
 type AbiName = keyof typeof rules.abi;
@@ -248,5 +249,11 @@ describe("plan tokens and fit (contract R4 §2, §5)", () => {
   it("a copy preview carries a token", () => {
     const { preview } = R.copyPreview(cat, ["v1", [entry({ id: "cogwork", deps: ["showcase"], abi: "OLD" })]], ["v2", []], FIT);
     expect(preview.planToken).toMatch(/^plan-/);
+  });
+});
+
+describe("icon hosts (rules.json iconHosts, the backend's icon_url_allowed)", () => {
+  it("allows GitHub's hosts and nothing else", () => {
+    for (const [url, allowed] of rules.iconHosts.cases as [string, boolean][]) expect(iconUrlAllowed(url), url).toBe(allowed);
   });
 });

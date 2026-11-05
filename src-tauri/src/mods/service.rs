@@ -167,12 +167,13 @@ pub async fn fetch_icon(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, 
 }
 
 /// A catalogue icon as PNG bytes, from the cache or the network. Only icons the catalogue
-/// names, and only over https.
+/// names, and only from GitHub's hosts ([`crate::download::icon_url_allowed`]); redirects are
+/// held to GitHub too.
 pub async fn icon_png(ctx: &Ctx, url: &str) -> Result<Vec<u8>, ModsError> {
     let known = ctx
         .held_catalog()
         .is_some_and(|c| c.mods.iter().any(|m| m.icon.as_deref() == Some(url)));
-    if !known || !url.starts_with("https://") {
+    if !known || !crate::download::icon_url_allowed(url) {
         return Err(ModsError::NotInCatalog(url.to_string()));
     }
     let cache = ctx.paths.cache_dir().join("mod-icons").join(format!(

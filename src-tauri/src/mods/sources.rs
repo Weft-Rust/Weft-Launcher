@@ -293,7 +293,9 @@ pub(crate) fn accept(
         authors: json.authors,
         license: json.license,
         homepage: json.homepage.filter(|u| u.starts_with("https://")),
-        icon: json.icon.filter(|u| u.starts_with("https://")),
+        icon: json
+            .icon
+            .filter(|u| crate::download::icon_url_allowed(u)),
         versions: vec![version],
     })
 }
@@ -472,7 +474,10 @@ pub(crate) fn revalidate(repo: &str, mods: Vec<IndexMod>) -> Vec<IndexMod> {
                     }
                 }
             });
-            m.icon = m.icon.take().filter(|u| u.starts_with("https://"));
+            m.icon = m
+            .icon
+            .take()
+            .filter(|u| crate::download::icon_url_allowed(u));
             m.homepage = m.homepage.take().filter(|u| u.starts_with("https://"));
             clamp_summary(&mut m.summary);
             (!m.versions.is_empty()).then_some(m)
@@ -669,6 +674,20 @@ pub(crate) mod tests {
             accept("Zorro909/weft-mods", &r, &zip, j).err(),
             Some(NoModsReason::Disagrees)
         );
+    }
+
+    #[test]
+    fn a_source_icon_only_from_github_hosts() {
+        let (r, zip) = release(false);
+        let with = |icon: &str| {
+            let mut j = json();
+            j.icon = Some(icon.into());
+            accept("Zorro909/weft-mods", &r, &zip, j).unwrap().icon
+        };
+        let ok = "https://raw.githubusercontent.com/Zorro909/weft-mods/main/icon.png";
+        assert_eq!(with(ok).as_deref(), Some(ok));
+        assert_eq!(with("https://tracker.example/pixel.png"), None);
+        assert_eq!(with("https://objects.githubusercontent.com/icon.png"), None);
     }
 
     fn release(prerelease: bool) -> (GhRelease, GhAsset) {

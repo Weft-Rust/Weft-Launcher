@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { modsApi } from "../../mods/api";
+import { iconUrlAllowed } from "../../mods/select";
 
 const loaded = new Map<string, Promise<string | null>>();
 
@@ -39,13 +40,14 @@ function Glyph({ id }: { id: string }) {
   );
 }
 
+/** The mod's icon, when it comes from GitHub; else (or until it loads) its pattern. */
 export function ModIcon({ id, url }: { id: string; url: string | null }) {
   const [src, setSrc] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
     setSrc(null);
-    if (url) iconData(url).then((d) => live && setSrc(d));
+    if (url && iconUrlAllowed(url)) iconData(url).then((d) => live && setSrc(d));
     return () => {
       live = false;
     };

@@ -202,6 +202,7 @@ const SECTIONS: &[&str] = &[
     "updates",
     "shadowing",
     "revocations",
+    "iconHosts",
 ];
 
 #[test]
@@ -619,5 +620,17 @@ fn revocations() {
         let m = arr(m);
         let (sha, want) = (text(&m[0]), m[1].as_bool().expect("a match is a bool"));
         assert_eq!(c.revocation(sha).is_some(), want, "revocation of {sha}");
+    }
+}
+
+#[test]
+fn icon_hosts() {
+    let r = Rules::load();
+    let s = r.section("iconHosts");
+    only("iconHosts", s, &["rust", "cases"]);
+    for case in arr(&s["cases"]) {
+        let case = arr(case);
+        let (url, want) = (text(&case[0]), case[1].as_bool().expect("a case is a bool"));
+        assert_eq!(crate::download::icon_url_allowed(url), want, "icon from {url}");
     }
 }

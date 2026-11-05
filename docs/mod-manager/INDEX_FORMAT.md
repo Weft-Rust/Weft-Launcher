@@ -84,7 +84,7 @@ The JSON examples below are complete and valid: a test in the launcher (`src-tau
 | `mods[].name` | required | Display name. |
 | `mods[].summary` | `""` | One line. The launcher shows the first line, cut to 140 characters. |
 | `mods[].authors` | `[]` | Display names. |
-| `mods[].license`, `homepage`, `icon` | `null` | `homepage` and `icon` are absolute `https://` URLs, or they are dropped. `icon` is a PNG of at most 512 KB, or it isn't shown. |
+| `mods[].license`, `homepage`, `icon` | `null` | `homepage` is an absolute `https://` URL, or it is dropped. `icon` is an `https://` URL on `github.com`, `raw.githubusercontent.com`, `user-images.githubusercontent.com` or a `<name>.github.io` Pages site, with no port or user name, or it is dropped: the launcher never asks another host for an icon, which would tell that host the player's address. Redirects are followed only to GitHub hosts. The icon is a PNG of at most 512 KB, or it isn't shown. The same rule holds for a source's `<id>.mod.json`. |
 | `versions[]` | `[]` | Newest first (the launcher sorts again anyway). A mod without a valid version is left out. |
 | `version` | required | Semver: `MAJOR.MINOR.PATCH`, optionally `-prerelease` and `+build`, e.g. `0.2.1-rc.1`. |
 | `channel` | required | `release`, `prerelease` or `experimental`. |

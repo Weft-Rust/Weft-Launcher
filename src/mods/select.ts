@@ -183,3 +183,26 @@ export function networkDown(catalog: Catalog | null, catalogError: { code: strin
   const answered = origins.some((e) => !e || e.code !== "Network");
   return lostConnection && !answered;
 }
+
+/**
+ * Where a mod's icon may come from: GitHub's hosts for repository files and images, and GitHub
+ * Pages. The backend's `download::icon_url_allowed`, checked against the same cases
+ * (`rules.json` iconHosts). Any other icon isn't asked for: the mod shows its pattern instead.
+ */
+export function iconUrlAllowed(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  const host = url.hostname;
+  const page = host.endsWith(".github.io") ? host.slice(0, -".github.io".length) : null;
+  return (
+    url.protocol === "https:" &&
+    url.port === "" &&
+    url.username === "" &&
+    url.password === "" &&
+    (["github.com", "raw.githubusercontent.com", "user-images.githubusercontent.com"].includes(host) || (!!page && !page.includes(".")))
+  );
+}
