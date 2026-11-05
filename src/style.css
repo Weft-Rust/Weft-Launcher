@@ -341,7 +341,7 @@ button:disabled { cursor: not-allowed; }
 .banner-cause { min-width: 0; overflow-wrap: anywhere; }
 .banner-subject { flex: 1 1 0; min-width: 8ch; }
 /* Right under a banner shown in full: one block of notes, not two with a gap between. */
-.banner-fold.docked { margin-top: -4px; }
+.banner-fold.docked { margin-top: -6px; }
 .banner-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex: none; }
 .banner.compact { min-height: 32px; padding-top: 0; padding-bottom: 0; }
 .banner.compact .banner-toggle { flex: none; }
@@ -431,8 +431,8 @@ button:disabled { cursor: not-allowed; }
 .mod-title { grid-area: title; display: flex; flex-wrap: wrap; align-items: center; gap: 0 12px; min-width: 0; align-self: end; }
 .mod-name { font-size: 24px; line-height: 32px; color: var(--a3); }
 .mod-row .mod-name { min-width: 0; overflow-wrap: anywhere; }
-.mod-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; min-width: 0; }
-.mod-badges > .badge { flex: none; }
+.mod-title .mod-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; min-width: 0; }
+.mod-title .mod-badges > .badge { flex: none; }
 .mod-version { color: var(--g5); }
 .mod-meta { grid-area: meta; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; color: var(--g5); line-height: 24px; align-self: start; }
 .mod-meta > .mod-version { flex: none; }

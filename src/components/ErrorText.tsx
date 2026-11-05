@@ -27,7 +27,7 @@ export function ErrorText({ error, className = "inline-error", children, lead, s
   }, [speak, text, id]);
   return (
     <div className={`${className} error-text${children ? " with-action" : ""}`}>
-      <span className="error-message">
+      <span className="error-message" data-must-fit>
         {text}
         {error.detail && <ErrorDetails detail={error.detail} label={t("errors.details")} />}
       </span>

@@ -186,3 +186,40 @@ export async function confirmRemove(page: Page, button: Locator) {
   await page.waitForTimeout(450);
   await button.click();
 }
+
+/**
+ * Elements marked `data-must-fit` (a tier word, a reason, a version, a cause, an installed mod's
+ * name, an error) that don't show whole: their text is wider or taller than their own box, or an
+ * ancestor that clips cuts them. Ancestors that scroll end the search: what is in a scroller is
+ * reached by scrolling. Empty when every one is whole.
+ */
+export const unfit = (page: Page) =>
+  page.evaluate(() => {
+    const bad: string[] = [];
+    for (const el of document.querySelectorAll<HTMLElement>("[data-must-fit]")) {
+      if (!el.getClientRects().length || el.closest("[hidden], .sr-only")) continue;
+      const name = `${el.className || el.tagName} "${(el.textContent ?? "").trim().slice(0, 40)}"`;
+      if (getComputedStyle(el).display !== "inline") {
+        if (el.scrollWidth > el.clientWidth + 0.5) bad.push(`${name}: wider than its box (${el.scrollWidth} > ${el.clientWidth})`);
+        if (el.scrollHeight > el.clientHeight + 0.5) bad.push(`${name}: taller than its box (${el.scrollHeight} > ${el.clientHeight})`);
+      }
+      const r = el.getBoundingClientRect();
+      for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+        const s = getComputedStyle(a);
+        const overflow = s.overflowX + " " + s.overflowY;
+        if (/auto|scroll/.test(overflow)) break;
+        if (!/hidden|clip/.test(overflow)) continue;
+        const c = a.getBoundingClientRect();
+        if (r.left < c.left - 0.5 || r.right > c.right + 0.5 || r.top < c.top - 0.5 || r.bottom > c.bottom + 0.5) {
+          bad.push(`${name}: cut by .${String(a.className).split(" ").join(".")}`);
+          break;
+        }
+      }
+    }
+    return [...new Set(bad)];
+  });
+
+/** Every element that must show whole does. */
+export async function expectWhole(page: Page, where: string) {
+  expect(await unfit(page), `cut on ${where}`).toEqual([]);
+}

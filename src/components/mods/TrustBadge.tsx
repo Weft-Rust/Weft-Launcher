@@ -30,9 +30,10 @@ function ExplainedBadge({ className, glyph, word, hint }: { className: string; g
       <span className={`badge ${className}`} tabIndex={0} aria-describedby={hintId} data-must-fit {...handlers}>
         {glyph && <PixelIcon rows={glyph} />}
         <span className="badge-text">{word}</span>
-        <span className="sr-only" id={hintId}>
-          {hint}
-        </span>
+      </span>
+      {/* Hidden, yet it still describes the badge: a screen reader says the word, then this. */}
+      <span hidden id={hintId}>
+        {hint}
       </span>
       {tip}
     </>

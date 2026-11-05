@@ -31,7 +31,13 @@ test.describe("launch safety", () => {
     const notice = page.locator(".mod-failure");
     await expect(notice).toBeVisible({ timeout: 10_000 });
     await expect(notice.locator(".mod-failure-title")).toHaveText("Structures stopped Weft from starting: its library didn't load.");
-    await expect(notice.locator("button", { hasText: "Update to 0.1.3…" })).toHaveCount(1);
+    // Turning it off surely helps, so it comes first; the update is offered as a try, since
+    // nothing says it fixes a library that didn't load. The log's line is folded behind Details.
+    const fixes = notice.locator(".mod-failure-actions > button");
+    await expect(fixes.first()).toHaveText("Turn off Structures");
+    await expect(notice.locator("button", { hasText: "Try 0.1.3…" })).toHaveCount(1);
+    await expect(notice.locator(".error-details summary")).toHaveText("Log line");
+    await expect(notice.locator(".error-details code")).toBeHidden();
     await goToTab(page, MODS_TAB);
     await expect(page.locator(".mod-failure")).toHaveCount(1);
     await page.locator(".mod-failure button", { hasText: "Turn off" }).click();
@@ -74,7 +80,7 @@ test.describe("launch safety", () => {
     await expect(page.locator(".blocker")).toHaveCount(0);
     await page.locator(".btn-play").click();
     const hearth = page.locator(".blocker", { hasText: "Hearth" });
-    await expect(hearth).toContainText("Needs Cogwork, which was pulled from the index.");
+    await expect(hearth).toContainText("Hearth stops Play: it needs Cogwork, which was pulled from the index.");
     // It appeared just now, so it is said at once.
     await expect(page.locator(".blockers [role=alert]")).toContainText("Hearth");
     await expect(page.locator(".btn-play")).toBeDisabled();
