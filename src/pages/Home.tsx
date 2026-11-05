@@ -42,6 +42,8 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
   const launch = useLaunch();
   const [rereading, setRereading] = useState(false);
   const blockersId = useId();
+  const folderLabelId = useId();
+  const folderButtonId = useId();
 
   const sortedVersions = useMemo(() => [...installedVersions].sort((a, b) => compareTags(b.tag, a.tag)), [installedVersions]);
 
@@ -164,27 +166,33 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
       </section>
 
       <section className="card clear">
-        <div className="card-header">
+        {/* The folder's button on the title's line: in view under a crash notice at 565px. */}
+        <div className="card-header instance-head">
           <h2 className="card-title">{t("instanceCardTitle")}</h2>
+          {selectedVersion && (
+            <>
+              <span className="sr-only" id={folderLabelId}>
+                {t("gameFolderTitle")}
+              </span>
+              <button className="btn-secondary btn-small btn-open-folder" id={folderButtonId} aria-labelledby={`${folderLabelId} ${folderButtonId}`} onClick={handleOpenFolder}>
+                {t("openFolderButton")}
+              </button>
+            </>
+          )}
         </div>
         <div className="card-body">
           {selectedVersion ? (
-            <>
-              <div className="detail-row">
-                <span className="detail-label">{t("versionLabel")}</span>
-                <span className="detail-value">{selectedVersion.tag}</span>
+            // One line that wraps, so the card stays short.
+            <dl className="instance-line">
+              <div className="instance-pair">
+                <dt className="detail-label">{t("versionLabel")}</dt>
+                <dd className="detail-value">{selectedVersion.tag}</dd>
               </div>
-              <div className="detail-row">
-                <span className="detail-label">{t("installedAtLabel")}</span>
-                <span className="detail-value">{new Date(selectedVersion.installed_at).toLocaleString(locale)}</span>
+              <div className="instance-pair">
+                <dt className="detail-label">{t("installedAtLabel")}</dt>
+                <dd className="detail-value">{new Date(selectedVersion.installed_at).toLocaleString(locale)}</dd>
               </div>
-              <div className="detail-row">
-                <span className="detail-label">{t("gameFolderTitle")}</span>
-                <button className="btn-secondary btn-open-folder" onClick={handleOpenFolder}>
-                  {t("openFolderButton")}
-                </button>
-              </div>
-            </>
+            </dl>
           ) : (
             <p className="select-version-hint">{t("selectVersionHint")}</p>
           )}

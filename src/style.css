@@ -245,6 +245,12 @@ button:disabled { cursor: not-allowed; }
 .detail-row { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 24px; align-items: baseline; }
 .detail-row + .detail-row { margin-top: 4px; }
 .detail-label { color: var(--g5); }
+/* Home's instance card: the folder's button on the title's line, the details on one line that wraps. */
+.instance-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.instance-head .card-title { margin-bottom: 0; }
+.instance-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 32px; margin: 0; }
+.instance-pair { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.instance-pair dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .btn-open-folder { justify-self: start; margin-top: 4px; }
 .select-version-hint { color: var(--g5); }
 
@@ -598,6 +604,8 @@ button:disabled { cursor: not-allowed; }
 /* Looking at the log and putting the notice away: links after the fixes, apart from them. */
 .mod-failure-quiet { display: flex; align-items: center; gap: 8px; margin-left: auto; color: var(--g5); }
 .mods-page .mod-failure { max-width: none; margin: 0 0 8px; }
+/* The log's own line, opened: at most four lines, scrolling inside, so the notice stays bounded. */
+.mod-failure .error-details[open] code { max-height: 96px; overflow-y: auto; overscroll-behavior: contain; }
 .mods-line .truncate { min-width: 0; max-width: 520px; }
 .blockers { display: grid; gap: 8px; justify-content: stretch; }
 /* Home: why Play is off, as big as the title over it, and the fixes right under Play. */

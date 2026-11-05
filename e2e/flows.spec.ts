@@ -62,6 +62,9 @@ test.describe("launch safety", () => {
       await expect(notice.locator("button", { hasText: "Dismiss" })).toHaveCount(1);
       await expect(notice.locator("button").first()).toHaveText(c.fix);
       await expectWhole(page, `${c.kind} crash`);
+      // The game folder's button stays in view under the notice, at 565px.
+      const folder = await page.locator(".btn-open-folder").boundingBox();
+      expect(folder!.y + folder!.height, "Open folder in view").toBeLessThanOrEqual(565);
     });
   }
 
