@@ -185,6 +185,8 @@ const CHECKS: Record<string, Checks> = {
       await expect(blocker.locator(".blocker-actions button")).toHaveCount(2);
       await expect(page.locator(".mod-row[data-mod=cogwork]")).toHaveAttribute("data-shadowed", "true");
       if (en) {
+        // Collapsed, the folder's banner still says what matters most: those files load everywhere.
+        await expect(page.locator(".banners")).toContainText("Own folder: 1 file, loads in every version");
         await expect(blocker).toContainText("Cogwork stops Play: it was pulled from the index, but the copy in your own mods folder (cogwork-old.zip) would load instead.");
         await expect(blocker.locator(".blocker-actions button").nth(1)).toHaveText("Show cogwork-old.zip");
       }
