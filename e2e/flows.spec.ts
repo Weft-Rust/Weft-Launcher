@@ -1053,17 +1053,19 @@ test.describe("a slow source holds nothing back", () => {
   test("a refresh shows the index and its revocations before a slow source answers", async ({ page }) => {
     await open(page, "scenario=slowrefresh");
     await goToTab(page, MODS_TAB);
-    const status = page.locator(".header-checking");
-    await expect(status).toHaveText("Still checking lantern-dev/lanterns…");
+    const refresh = page.locator(".mods-refresh");
+    await expect(refresh).toHaveAttribute("title", "Still checking lantern-dev/lanterns…");
+    await expect(page.locator(`#${await refresh.getAttribute("aria-describedby")}`)).toHaveText("Still checking lantern-dev/lanterns…");
     // The index the refresh brought pulled Cogwork: shown, and its set read again, at once.
     await expect(page.locator(".mod-row[data-mod=cogwork] .badge.revoked")).toBeVisible();
-    await expect(status).toHaveCount(1);
+    await expect(refresh).toHaveClass(/pending/);
     // Sources says which one is still being asked.
     await page.locator(".header-actions button", { hasText: "Sources" }).click();
     await expect(page.locator(dialog)).toContainText("checking…");
     await page.keyboard.press("Escape");
     // Then the source answers, and nothing is left waiting.
-    await expect(status).toHaveCount(0, { timeout: 8_000 });
+    await expect(refresh).not.toHaveClass(/pending/, { timeout: 8_000 });
+    await expect(refresh).toHaveAttribute("title", "Check for new mods");
   });
 });
 

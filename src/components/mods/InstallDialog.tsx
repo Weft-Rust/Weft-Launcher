@@ -120,7 +120,7 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
   };
 
   const [retry, retrying] = useRetry(async () => {
-    await loadProfile(tag);
+    await loadProfile(tag, true);
     request.reload();
   });
 

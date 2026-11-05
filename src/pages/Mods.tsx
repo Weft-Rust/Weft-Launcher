@@ -49,6 +49,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
   const [toastRoom, setToastRoom] = useState(0);
   const panel = useRef<HTMLElement>(null);
   const versionLabelId = useId();
+  const pendingId = useId();
   const tabs = useRovingTabs("mods", VIEWS, view, setView);
 
   const versions = useMemo(() => [...installedVersions].sort((a, b) => compareTags(b.tag, a.tag)), [installedVersions]);
@@ -257,6 +258,8 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
 
   const count = report?.mods.length ?? 0;
   const copying = mods.isCopying(tag);
+  const pending = mods.pendingSources;
+  const pendingText = pending.length === 0 ? null : pending.length === 1 ? t("mods.sourcePending", pending[0]) : tn("mods.sourcesPending", pending.length);
 
   return (
     <main className="page mods-page">
@@ -274,24 +277,24 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
             labelledBy={versionLabelId}
             compact
           />
-          {/* The index is in; a slow source is still being asked. Said, not hidden behind Refresh. */}
-          {mods.pendingSources.length > 0 && (
-            <span className="header-checking" role="status" title={formatList(mods.pendingSources)}>
-              {mods.pendingSources.length === 1 ? t("mods.sourcePending", mods.pendingSources[0]) : tn("mods.sourcesPending", mods.pendingSources.length)}
-            </span>
-          )}
           <button className="btn-flat" onClick={() => setShowSources(true)}>
             {t("mods.sources")}
           </button>
           <button
-            className="btn-flat icon-btn mods-refresh"
+            className={`btn-flat icon-btn mods-refresh${pendingText ? " pending" : ""}`}
             onClick={refreshCatalog}
             disabled={catalogLoading}
-            title={t("mods.refresh")}
+            title={pendingText ?? t("mods.refresh")}
             aria-label={t("mods.refresh")}
+            aria-describedby={pendingText ? pendingId : undefined}
           >
             <PixelIcon rows={REFRESH_ICON} scale={3} />
           </button>
+          {/* The index is in and shows; a slow source is still being asked. Said, and named on
+              the refresh button (and in Sources), without taking room from the list. */}
+          <span className="sr-only" role="status" id={pendingId}>
+            {pendingText}
+          </span>
         </div>
       </header>
 
@@ -340,7 +343,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
               <p>{t("mods.profileFailed", tag, loadFailed.message)}</p>
               {loadFailed.detail && <ErrorDetails detail={loadFailed.detail} label={t("errors.details")} />}
               <div className="empty-actions">
-                <button className="btn-primary" onClick={() => loadProfile(tag)}>
+                <button className="btn-primary" onClick={() => loadProfile(tag, true)}>
                   {t("mods.profileRetry")}
                 </button>
               </div>
@@ -405,7 +408,7 @@ function RetryProfile({ tag }: { tag: string }) {
       disabled={busy}
       onClick={async () => {
         setBusy(true);
-        await Promise.all([loadProfile(tag), refreshCatalog()]);
+        await Promise.all([loadProfile(tag, true), refreshCatalog()]);
         setBusy(false);
       }}
     >

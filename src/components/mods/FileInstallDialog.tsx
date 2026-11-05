@@ -68,7 +68,7 @@ export function FileInstallDialog({ tag, path, onClose }: FileInstallDialogProps
   const planned = usePlan<InstallPlan>(knownSha ? `${tag}|${knownSha}` : null, [report, catalog], knownSha ? () => mods.plan(tag, knownSha) : null);
   // Before any early return: hooks run in the same order every render.
   const [retry, retrying] = useRetry(async () => {
-    await loadProfile(tag);
+    await loadProfile(tag, true);
     inspected.reload();
     planned.reload();
   });

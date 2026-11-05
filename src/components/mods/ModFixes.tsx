@@ -48,7 +48,7 @@ function useLookAgainOnReturn(tag: string) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
-    const again = () => loadProfile(tag);
+    const again = () => loadProfile(tag, true);
     window.addEventListener("focus", again);
     return () => window.removeEventListener("focus", again);
   }, [armed, tag, loadProfile]);

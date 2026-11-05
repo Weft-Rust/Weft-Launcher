@@ -58,9 +58,13 @@ interface ModsContextValue {
 
   profile: (tag: string | null | undefined) => ProfileReport | undefined;
   profileError: (tag: string) => Shown | null;
-  loadProfile: (tag: string) => Promise<ProfileReport | undefined>;
+  /**
+   * Reads a version's set. `fresh`: after something changed it (a refresh, a refused Play, the
+   * player's own folder), so a read that began earlier doesn't answer it.
+   */
+  loadProfile: (tag: string, fresh?: boolean) => Promise<ProfileReport | undefined>;
   /** The same read, saying why it failed when it did. */
-  readProfile: (tag: string) => Promise<{ report: ProfileReport } | { error: Shown }>;
+  readProfile: (tag: string, fresh?: boolean) => Promise<{ report: ProfileReport } | { error: Shown }>;
   /** A mod's display name in a version's set, falling back to the catalogue and then the id. */
   nameIn: (tag: string) => NameOf;
 
@@ -109,9 +113,9 @@ export function ModsProvider({ children }: { children: ReactNode }) {
   const { progress, running, begin, end, markCancelling } = useOperations();
 
   const readProfile = useCallback(
-    async (tag: string): Promise<{ report: ProfileReport } | { error: Shown }> => {
+    async (tag: string, fresh = false): Promise<{ report: ProfileReport } | { error: Shown }> => {
       try {
-        const report = await read(tag);
+        const report = await read(tag, fresh);
         setProfileErrors((e) => without(e, tag));
         return { report };
       } catch (err) {
@@ -122,8 +126,8 @@ export function ModsProvider({ children }: { children: ReactNode }) {
     },
     [read]
   );
-  const loadProfile = useCallback(async (tag: string) => {
-    const r = await readProfile(tag);
+  const loadProfile = useCallback(async (tag: string, fresh = false) => {
+    const r = await readProfile(tag, fresh);
     return "report" in r ? r.report : undefined;
   }, [readProfile]);
 
@@ -138,7 +142,7 @@ export function ModsProvider({ children }: { children: ReactNode }) {
 
   // The catalogue, in order; every version's set is read again after each refresh, since
   // revocations and updates come with it.
-  const catalogState = useCatalog(() => Promise.all(tagsRef.current.map((tag) => loadProfile(tag))));
+  const catalogState = useCatalog(() => Promise.all(tagsRef.current.map((tag) => loadProfile(tag, true))));
   const { catalog, catalogLoading, catalogError, refreshCatalog, refreshSource, sourceRefreshing, pendingSources } = catalogState;
 
   // A crash notice stays until its problem is fixed: the blamed mod is off, gone or replaced, or
@@ -194,7 +198,7 @@ export function ModsProvider({ children }: { children: ReactNode }) {
         return { status: "done", result };
       } catch (err) {
         // The set may have changed before the failure: read what it is now.
-        loadProfile(op.tag);
+        loadProfile(op.tag, true);
         return failed(err);
       } finally {
         end(op);

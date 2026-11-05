@@ -145,12 +145,12 @@ for (const code of Object.keys(mapping)) {
 // Russian keeps the three tiers apart, as three steps a reader recognises, and never with the
 // stem of the mechanical checks («провер…»: the signature, the file, the version), which a
 // tier word would be confused with: Reviewed «Одобрен» (approved by the index's reviewers),
-// Unreviewed «Без модерации» (published, nobody moderated it), Unverified «Происхождение
-// неизвестно» (a file of unknown origin, from the player's computer; not «источник», which is
-// what an added GitHub repo is called).
+// Unreviewed «Без модерации» (published, nobody moderated it), Unverified «С компьютера» (a file
+// from the player's computer, of unknown origin; short enough to sit beside a name, and not
+// «источник», which is what an added GitHub repo is called).
 const TIER_FORMS = { ru: [/провер/i] };
 const GLOSSARY = [
-  { en: /\bunverified\b/i, term: { ru: "происхожд", "pt-BR": "não verificad", es: "sin verificar" }, not: TIER_FORMS },
+  { en: /\bunverified\b/i, term: { ru: "компьютер", "pt-BR": "não verificad", es: "sin verificar" }, not: TIER_FORMS },
   { en: /\bunreviewed\b|nobody reviewed|\bnot reviewed\b/i, term: { ru: "модерац", "pt-BR": "revis", es: "revis" }, not: TIER_FORMS },
   // The tier's own word (capitalised in English), and what it means: someone reviewed exactly this file.
   { en: /\bReviewed\b|reviewed exactly/, term: { ru: "одобр", "pt-BR": "revis", es: "revis" }, not: TIER_FORMS },

@@ -45,7 +45,8 @@ export function useLaunch() {
   const reread = useCallback(
     async (refusal: LaunchError): Promise<LaunchError> => {
       setRereading(true);
-      const r = await readProfile(refusal.tag);
+      // Play found something the shown set doesn't have: only a read from after it says what.
+      const r = await readProfile(refusal.tag, true);
       setRereading(false);
       if ("report" in r) return { ...refusal, seen: r.report, unread: undefined };
       return { ...refusal, seen: profile(refusal.tag), unread: r.error };

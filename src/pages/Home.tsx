@@ -138,7 +138,7 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
           <ErrorText error={{ ...shownReadError, message: t("mods.homeProfileFailed", effectiveTag, shownReadError.message) }} className="launch-error">
             <button className="btn-secondary btn-small" disabled={rereading} onClick={async () => {
               setRereading(true);
-              await loadProfile(effectiveTag);
+              await loadProfile(effectiveTag, true);
               setRereading(false);
             }}>
               {rereading ? t("mods.retrying") : t("mods.profileRetry")}

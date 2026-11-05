@@ -79,15 +79,15 @@ describe("locale files", () => {
   it("use the Russian glossary for the tiers, everywhere", () => {
     const mods = (ru as unknown as { mods: Record<string, string> }).mods;
     // Three steps a reader tells apart: approved by the index's reviewers, published without
-    // moderation, of unknown origin. None of them with «провер…», the word of the signature, file
-    // and version checks, or «источник», the word for an added GitHub repo.
+    // moderation, from your computer (of unknown origin). None of them with «провер…», the word of
+    // the signature, file and version checks, or «источник», the word for an added GitHub repo.
     const tiers = [mods.badgeReviewed, mods.badgeUnreviewed, mods.badgeUnverified];
-    expect(tiers).toEqual(["Одобрен", "Без модерации", "Происхождение неизвестно"]);
+    expect(tiers).toEqual(["Одобрен", "Без модерации", "С компьютера"]);
     for (const tier of tiers) expect(tier).not.toMatch(/провер|источник/i);
     // "Не верифицирован" read as a synonym of a failed check, not as the weaker tier.
     const all = JSON.stringify(ru);
     expect(all).not.toMatch(/верифиц/);
-    expect(mods.fileUnverifiedTitle).toMatch(/неизвестного происхождения/);
+    expect(mods.fileUnverifiedTitle).toMatch(/с вашего компьютера/);
     expect(mods.ckIndexDetail).toMatch(/^Одобрил/);
     // «Отзыв» also means a review: a revocation is always «отозван…».
     expect(all).not.toMatch(/[Оо]тзыв/);

@@ -294,7 +294,10 @@ button:disabled { cursor: not-allowed; }
 .link-btn:hover { color: var(--a3); }
 
 .header-for { color: var(--g5); text-shadow: 2px 2px 0 var(--ink); }
-.header-checking { color: var(--g5); text-shadow: 2px 2px 0 var(--ink); max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A refresh whose index is in while a source is still asked: the button pulses, its title names the source. */
+.mods-refresh.pending { animation: pending-pulse 1s steps(2) infinite; }
+@keyframes pending-pulse { 50% { opacity: .5; } }
+@media (prefers-reduced-motion: reduce) { .mods-refresh.pending { animation: none; box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--a2); } }
 .version-select.compact .version-select-btn { --top: 8px; min-width: 160px; }
 .version-select.compact .version-select-menu { top: 56px; }
 
