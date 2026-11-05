@@ -188,7 +188,9 @@ test.describe("every install shows what it does", () => {
     await expect(claimed).toHaveClass(/check-unknown/);
     const spoken = await page.locator(".checks li").evaluateAll((rows) => rows.map((r) => r.querySelector(".sr-only")?.textContent ?? ""));
     expect(spoken.length).toBeGreaterThan(0);
-    for (const s of spoken) expect(s).toMatch(/Passed|Failed|Unknown/);
+    for (const s of spoken) expect(s).toMatch(/Passed|Failed|Unknown|Unreviewed/);
+    // Nobody reviewed it: heard as the tier's word, not as a failed check.
+    await expect(page.locator(".checks li[data-check=review] .sr-only")).toHaveText("Unreviewed: ");
   });
 
   test("a missing dependency installs the mod turned off, and Play keeps working", async ({ page }) => {
