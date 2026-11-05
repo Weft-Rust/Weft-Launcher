@@ -21,7 +21,7 @@ import { Dialog } from "../Dialog";
 import { ErrorText } from "../ErrorText";
 import { VersionSelect } from "../VersionSelect";
 import { Truncate } from "../Truncate";
-import { CheckList } from "./CheckList";
+import { CheckList, useRetry } from "./CheckList";
 import { ModProgressBar } from "./ModProgressBar";
 import { PlanChanges, useOutcomeNote } from "./PlanChanges";
 import { RichText } from "./RichText";
@@ -119,10 +119,10 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
     }
   };
 
-  const retry = async () => {
+  const [retry, retrying] = useRetry(async () => {
     await loadProfile(tag);
     request.reload();
-  };
+  });
 
   return (
     <Dialog
@@ -195,7 +195,7 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
       {request.error ? (
         <ErrorText error={request.error} />
       ) : plan ? (
-        <CheckList label={t("mods.checksLabel")} checks={checks} onRetry={retry} />
+        <CheckList label={t("mods.checksLabel")} checks={checks} onRetry={retry} retrying={retrying} />
       ) : (
         <p className="dialog-note" role="status">
           {t("mods.planning")}

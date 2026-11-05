@@ -1,3 +1,4 @@
+import { useCallback, useRef, useState } from "react";
 import { useI18n } from "../../i18n/useI18n";
 import type { MessageKey } from "../../i18n";
 import type { CheckRow, CheckState } from "../../mods/checks";
@@ -62,4 +63,25 @@ export function CheckList({ checks, label, onRetry, retrying = false }: { checks
       ))}
     </ul>
   );
+}
+
+/**
+ * A Retry that says it is running: on while `run` works, so a second click can't ask twice and
+ * the player sees it was taken.
+ */
+export function useRetry(run: () => Promise<unknown>): [() => Promise<void>, boolean] {
+  const [busy, setBusy] = useState(false);
+  const going = useRef(false);
+  const retry = useCallback(async () => {
+    if (going.current) return;
+    going.current = true;
+    setBusy(true);
+    try {
+      await run();
+    } finally {
+      going.current = false;
+      setBusy(false);
+    }
+  }, [run]);
+  return [retry, busy];
 }

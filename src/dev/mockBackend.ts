@@ -415,17 +415,23 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms * SLOW));
 // Operations (contract R4 §3): each has the client's id; its progress says which file of how many,
 // and `cancel_mod_operation` aborts its downloads, leaving nothing behind.
 
-const operations = new Map<string, { cancelled: boolean }>();
+/** Like the backend's `OpState`: running, then cancelled or writing, never both. */
+type Phase = "running" | "cancelled" | "writing";
+const operations = new Map<string, { phase: Phase }>();
 
 /** Runs `work` as operation `id`; a cancel makes it fail with `ModCancelled` at its next step. */
 async function operation<T>(id: string, work: (op: Op) => Promise<T>): Promise<T> {
-  const state = { cancelled: false };
+  const state: { phase: Phase } = { phase: "running" };
   operations.set(id, state);
   try {
     return await work({
       id,
       check: () => {
-        if (state.cancelled) fail("ModCancelled", id);
+        if (state.phase === "cancelled") fail("ModCancelled", id);
+      },
+      startWriting: () => {
+        if (state.phase !== "running") fail("ModCancelled", id);
+        state.phase = "writing";
       },
     });
   } finally {
@@ -433,10 +439,23 @@ async function operation<T>(id: string, work: (op: Op) => Promise<T>): Promise<T
   }
 }
 
+/** What `cancel_mod_operation` does (`Operations::cancel`): only a running operation, once. */
+export function cancelOperation(id: string): boolean {
+  const op = operations.get(id);
+  if (!op || op.phase !== "running") return false;
+  op.phase = "cancelled";
+  return true;
+}
+
 interface Op {
   id: string;
   /** Throws `ModCancelled` once the operation has been cancelled. */
   check: () => void;
+  /**
+   * From here on it writes, and a cancel is refused (`Operation::start_writing`); `ModCancelled`
+   * if it already was. Called right before `installing`, as the backend does.
+   */
+  startWriting: () => void;
 }
 
 const progress = (op: Op, file: { sha256: string; id: string; index: number; count: number }, stage: ProgressStage, percent: number) =>
@@ -513,6 +532,7 @@ async function runInstall(
   if (running.has(tag)) fail("GameRunning", tag);
   for (const p of res.picks) if (R.revocation(catalog, p.v.sha256)) fail("ModChangedMeanwhile", p.mod.name);
   // `installing` comes before the set is rewritten; past this, a cancel is too late.
+  op.startWriting();
   for (const f of files) await progress(op, f, "installing", 100);
   await sleep(350);
   const lock = lockOf(tag);
@@ -575,7 +595,7 @@ async function restoreMod(tag: string, id: string, operationId: string): Promise
     const file = { sha256: entry!.sha256, id, index: 1, count: 1 };
     await progress(op, file, "verifying", 0);
     await sleep(150);
-    op.check();
+    op.startWriting();
     await progress(op, file, "installing", 100);
     R.put(lockOf(tag), { ...entry! });
     removed[tag] = undefined;
@@ -677,11 +697,13 @@ async function installFile(tag: string, sha256: string, planToken: string, opera
       return runInstall(op, tag, [knownBuild()], () => inspect(tag).planToken, planToken, [sha256]);
     }
     if (flag("file") === "revokedlate") catalog.revoked.push({ sha256, reason: REVOKED_LATE });
-    await progress(op, self, "installing", 100);
     await sleep(300);
-    // Contract R4 §2: revocation is checked again at commit, for an unknown file by its hash.
+    // Contract R4 §2: revocation is checked again at commit, for an unknown file by its hash,
+    // under the lock and before anything is written.
     const late = R.revocation(catalog, sha256);
     if (late) fail("ModRevoked", late.reason ?? "no reason given");
+    op.startWriting();
+    await progress(op, self, "installing", 100);
     const lock = lockOf(tag);
     const existing = lock.find((e) => e.id === fileEntry.id);
     R.put(lock, { ...fileEntry, enabled: existing?.enabled ?? true, installedAt: new Date().toISOString() });
@@ -847,7 +869,11 @@ const handlers: Handlers = {
     catalog.mods = catalog.mods.filter((m) => m.origin.kind !== "source" || !sameRepo(m.origin.repo, repo));
     return catalog.sources.map((s) => s.repo);
   },
-  get_mod_profile: ({ tag }) => readProfile(tag),
+  // Finding out a version's mod interface asks the game; when that fails it takes a while to.
+  get_mod_profile: async ({ tag }) => {
+    if (ABI_ERROR) await sleep(600);
+    return readProfile(tag);
+  },
   get_mod_icon: ({ url }) => {
     iconRequests.push(url);
     const known = catalog.mods.some((m) => m.icon === url);
@@ -879,11 +905,7 @@ const handlers: Handlers = {
     return previewCopy(from, to).preview;
   },
   copy_mod_profile: ({ from, to, planToken, operationId }) => copyProfile(from, to, planToken, operationId),
-  cancel_mod_operation: ({ operationId }) => {
-    const op = operations.get(operationId);
-    if (op) op.cancelled = true;
-    return !!op;
-  },
+  cancel_mod_operation: ({ operationId }) => cancelOperation(operationId),
 };
 
 /** Sources added in this session: refreshing the catalogue fetches them, as GitHub would answer. */

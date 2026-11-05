@@ -1,7 +1,7 @@
 // The flows the mod manager's safety depends on, and keyboard use, against the mock backend.
 import { expect, test, type Page } from "@playwright/test";
 import trace from "../src/dev/fixtures/trace.json" with { type: "json" };
-import { LOCALES, MODS_TAB, browse, confirmRemove, cutButtons, focused, fullRows, goToTab, open, spoken, tops } from "./helpers";
+import { LOCALES, MODS_TAB, browse, confirmRemove, cutButtons, expectWhole, focused, fullRows, goToTab, open, spoken, tops } from "./helpers";
 
 const dialog = "[role=dialog]";
 
@@ -215,6 +215,17 @@ test.describe("every install shows what it does", () => {
     await expect(d.locator(".dialog-title")).toHaveText("Mods copied to v26.11.1", { timeout: 30_000 });
     // The four it was asked for, and Glowmoss, which one of them needs.
     await expect(d.locator(".dialog-summary")).toHaveText("Copied 5 mods from v26.10.4 to v26.11.1.");
+    // Each build it installed stays listed, whole, dependency included, with whether it is on.
+    const doneList = d.getByTestId("copy-done");
+    await expect(doneList.locator("li")).toHaveCount(5);
+    const glow = doneList.locator("li", { hasText: "Glowmoss" });
+    await expect(glow.locator(".mod-version")).toHaveText("0.3.0");
+    await expect(glow).toContainText(/Installed for v26\.11\.1, turned (on|off)/);
+    for (const li of await doneList.locator("li").all()) {
+      await expect(li.locator(".copy-name")).toBeVisible();
+      await expect(li.locator(".mod-version")).toBeVisible();
+    }
+    await expectWhole(page, "copy result");
     await d.locator(".dialog-actions .btn-primary").click();
     await expect(page.locator(".mod-row")).toHaveCount(5);
     await expect(page.locator(".mod-row .mod-name", { hasText: /^Glowmoss$/ })).toHaveCount(1);
@@ -242,8 +253,13 @@ test.describe("every install shows what it does", () => {
     await expect(fit).toContainText("Whether it fits v26.11.1 couldn't be checked");
     await expect(d.locator(".checks li.check-no")).toHaveCount(0);
     await expect(d.locator(".dialog-actions .btn-primary")).toBeDisabled();
-    await fit.locator("button", { hasText: "Retry" }).click();
+    const retry = fit.locator(".check-retry");
+    await retry.click();
+    // Taken, and said so, until the version has been asked again.
+    await expect(retry).toHaveText("Retrying…");
+    await expect(retry).toBeDisabled();
     await expect(d.locator(".checks li").first()).toHaveClass(/check-unknown/);
+    await expect(d.locator(".checks li").first().locator(".check-retry")).toHaveText("Retry");
   });
 
   test("installing a mod that needs mods that need others turns the whole chain on", async ({ page }) => {
@@ -365,6 +381,31 @@ test.describe("operations", () => {
     expect(new Set(seen.map((e) => e.operationId)).size).toBe(1);
     expect(seen.every((e) => e.count === want.count)).toBe(true);
     expect(collapseTrace(seen)).toEqual(want.steps);
+  });
+
+  test("a cancel is refused once the install writes, as the backend refuses it", async ({ page }) => {
+    const d = await updateLanterns(page, "scenario=mods");
+    // At the first `installing`, ask to cancel, as a late click on Cancel would.
+    await page.evaluate(() => {
+      const w = window as unknown as {
+        __TAURI_INTERNALS__: { transformCallback(f: (e: { payload: { operationId: string; stage: string } }) => void): number; invoke(cmd: string, args: unknown): Promise<unknown> };
+        lateCancel: Promise<unknown> | null;
+        earlyCancel: unknown;
+      };
+      w.lateCancel = null;
+      const handler = w.__TAURI_INTERNALS__.transformCallback((e) => {
+        if (e.payload.stage === "installing" && !w.lateCancel) {
+          w.lateCancel = w.__TAURI_INTERNALS__.invoke("cancel_mod_operation", { operationId: e.payload.operationId });
+        }
+      });
+      return w.__TAURI_INTERNALS__.invoke("plugin:event|listen", { event: "mod-progress", target: { kind: "Any" }, handler });
+    });
+    await d.locator(".dialog-actions .btn-primary").click();
+    await expect(d).toHaveCount(0, { timeout: 15_000 });
+    expect(await page.evaluate(() => (window as unknown as { lateCancel: Promise<unknown> }).lateCancel)).toBe(false);
+    // It finished: the update is in, and nothing says it was cancelled.
+    await expect(page.locator(".mod-row").filter({ has: page.locator(".mod-name", { hasText: /^Lanterns$/ }) }).locator(".mod-version")).toHaveText("1.1.0");
+    await expect(page.locator(".banners")).not.toContainText(/cancel/i);
   });
 
   test("progress names the file, and Cancel stops it calmly with nothing changed", async ({ page }) => {

@@ -3,7 +3,7 @@ import { useI18n } from "../../i18n/useI18n";
 import type { Shown } from "../../i18n/errors";
 import { useMods } from "../../hooks/useMods";
 import { usePlan } from "../../hooks/usePlan";
-import type { CopyItem, CopyPreview, CopyResult, Trust, UiProgress } from "../../mods/types";
+import type { CopyItem, CopyPreview, CopyResult, InstalledMod, Trust, UiProgress } from "../../mods/types";
 import { activeStep, consentChanges, copyConsentView, type CheckState, type ConsentView } from "../../mods/checks";
 import { COPY_OUTCOME, copyConsent } from "../../mods/copyPlan";
 import { networkDown } from "../../mods/select";
@@ -35,6 +35,8 @@ export function CopyDialog({ tag, donors, onClose }: CopyDialogProps) {
   const { copyProfile, isCopying, progressOf, profile, nameIn, catalog, catalogError, cancel, isCancelling } = mods;
   const [from, setFrom] = useState(donors[0] ?? "");
   const [result, setResult] = useState<CopyResult | null>(null);
+  /** The preview the player agreed to: what the result is said against, once the plan is gone. */
+  const [accepted, setAccepted] = useState<CopyPreview | null>(null);
   const [error, setError] = useState<Shown | null>(null);
   const [changedFrom, setChangedFrom] = useState<ConsentView | null>(null);
   const outcomeNote = useOutcomeNote();
@@ -63,7 +65,10 @@ export function CopyDialog({ tag, donors, onClose }: CopyDialogProps) {
     setError(null);
     outcomeNote.clear();
     const r = await copyProfile(preview);
-    if (r.status === "done") setResult(r.result);
+    if (r.status === "done") {
+      setAccepted(preview);
+      setResult(r.result);
+    }
     else if (r.status === "cancelled") outcomeNote.cancelled();
     else if (r.status === "failed") {
       if (r.error.code === "ModChangedMeanwhile") {
@@ -94,7 +99,21 @@ export function CopyDialog({ tag, donors, onClose }: CopyDialogProps) {
     </>
   );
 
-  const installedIds = new Set(result?.installed ?? []);
+  // Every build the copy installed, dependencies too, as the new set has it: name, version,
+  // tier, and whether it is on. What the set doesn't list (it can't be read) comes from the preview.
+  const done: DoneRow[] = result
+    ? result.installed.map((id) => {
+        const m: InstalledMod | undefined = result.report.mods.find((x) => x.id === id);
+        const planned = accepted?.items.find((i) => i.id === id) ?? accepted?.deps.find((d) => d.id === id);
+        return {
+          id,
+          name: m?.name ?? planned?.name ?? name(id),
+          version: m?.version ?? planned?.version ?? null,
+          trust: m?.trust ?? planned?.trust ?? null,
+          on: m ? m.enabled : !result.installedOff.includes(id),
+        };
+      })
+    : [];
   // What won't come along first, so it is seen without scrolling; then what installs; then what
   // is there already. Each group keeps the backend's order.
   const items = preview?.items ?? [];
@@ -143,7 +162,7 @@ export function CopyDialog({ tag, donors, onClose }: CopyDialogProps) {
           {result.missing.length > 0 && (
             <p className="dialog-note">{tn("mods.noticeMissing", result.missing.length, formatList(result.missing.map(name)), tag)}</p>
           )}
-          {installedIds.size > 0 && <CopyList items={(preview?.items ?? []).filter((i) => installedIds.has(i.id))} tag={tag} done />}
+          {done.length > 0 && <DoneList rows={done} tag={tag} />}
         </>
       ) : request.error ? (
         <ErrorText error={request.error} />
@@ -229,15 +248,49 @@ function ExtraList({
   );
 }
 
+interface DoneRow {
+  id: string;
+  name: string;
+  version: string | null;
+  trust: Trust | null;
+  on: boolean;
+}
+
+/** What the copy installed, whole: names and versions wrap rather than being cut. */
+function DoneList({ rows, tag }: { rows: DoneRow[]; tag: string }) {
+  const { t } = useI18n();
+  return (
+    <ul className="checks copy-list copy-done" data-testid="copy-done">
+      {rows.map((r) => (
+        <li key={r.id} className={`check check-${r.on ? "yes" : "unknown"}`} data-id={r.id}>
+          <CheckMark state={r.on ? "yes" : "unknown"} />
+          <span className="copy-item">
+            <span className="copy-item-head">
+              <span className="copy-name whole" data-must-fit>
+                {r.name}
+              </span>
+              {r.version && (
+                <span className="mod-version" data-must-fit>
+                  {r.version}
+                </span>
+              )}
+              {r.trust && <TrustBadge trust={r.trust} />}
+            </span>
+            <small>{t(r.on ? "mods.copyInstalledOn" : "mods.copyInstalledOff", tag)}</small>
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function CopyList({
   items,
   tag,
-  done = false,
   progressFor,
 }: {
   items: CopyItem[];
   tag: string;
-  done?: boolean;
   progressFor?: (id: string) => UiProgress | undefined;
 }) {
   const { t } = useI18n();
@@ -258,7 +311,7 @@ function CopyList({
               {p ? (
                 <ModProgressBar progress={p} name={item.name} compact />
               ) : (
-                <small>{done ? t("mods.copyInstalled", tag) : t(o.key, tag)}</small>
+                <small>{t(o.key, tag)}</small>
               )}
             </span>
           </li>

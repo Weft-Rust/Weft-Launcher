@@ -22,7 +22,7 @@ import {
 import { Dialog } from "../Dialog";
 import { ErrorText } from "../ErrorText";
 import { Code } from "../Truncate";
-import { CheckList } from "./CheckList";
+import { CheckList, useRetry } from "./CheckList";
 import { ModProgressBar } from "./ModProgressBar";
 import { PlanChanges, useOutcomeNote } from "./PlanChanges";
 import { RichText } from "./RichText";
@@ -66,6 +66,12 @@ export function FileInstallDialog({ tag, path, onClose }: FileInstallDialogProps
   // A catalogued file installs like that build: with what it needs, by the same plan.
   const knownSha = inspection?.catalogMatch?.build.sha256 ?? null;
   const planned = usePlan<InstallPlan>(knownSha ? `${tag}|${knownSha}` : null, [report, catalog], knownSha ? () => mods.plan(tag, knownSha) : null);
+  // Before any early return: hooks run in the same order every render.
+  const [retry, retrying] = useRetry(async () => {
+    await loadProfile(tag);
+    inspected.reload();
+    planned.reload();
+  });
 
   if (!inspection) {
     return (
@@ -128,12 +134,6 @@ export function FileInstallDialog({ tag, path, onClose }: FileInstallDialogProps
       }
       setError(result.shown);
     }
-  };
-
-  const retry = async () => {
-    await loadProfile(tag);
-    inspected.reload();
-    planned.reload();
   };
 
   const title = !archive
@@ -226,7 +226,7 @@ export function FileInstallDialog({ tag, path, onClose }: FileInstallDialogProps
           {inspection.summary ? ` ${inspection.summary}` : ""}
         </p>
       )}
-      <CheckList label={t("mods.checksLabel")} checks={checks} onRetry={retry} />
+      <CheckList label={t("mods.checksLabel")} checks={checks} onRetry={retry} retrying={retrying} />
       {known && !plan && !planned.error && (
         <p className="dialog-note" role="status">
           {t("mods.planning")}
