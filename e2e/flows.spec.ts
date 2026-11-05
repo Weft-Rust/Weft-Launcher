@@ -1,7 +1,7 @@
 // The flows the mod manager's safety depends on, and keyboard use, against the mock backend.
 import { expect, test, type Page } from "@playwright/test";
 import trace from "../src/dev/fixtures/trace.json" with { type: "json" };
-import { LOCALES, MODS_TAB, browse, confirmRemove, cutButtons, expectWhole, focused, fullRows, goToTab, open, spoken, tops } from "./helpers";
+import { LOCALES, MODS_TAB, VERSIONS_TAB, browse, confirmRemove, cutButtons, expectWhole, focused, fullRows, goToTab, open, settled, spoken, tops } from "./helpers";
 
 const dialog = "[role=dialog]";
 
@@ -114,9 +114,89 @@ test.describe("launch safety", () => {
     await expect(page.locator(".launch-error")).toHaveCount(0);
   });
 
+  test("Versions shows a blocker the backend found at Play, with its fixes, and Home agrees", async ({ page }) => {
+    await open(page, "scenario=lateblock&slow=1");
+    await goToTab(page, VERSIONS_TAB);
+    const entry = page.locator(".version-entry", { hasText: "v26.11.1" });
+    const play = entry.locator(".play-btn");
+    await expect(play).toBeEnabled();
+    await play.click();
+    // While the backend checks the set, the start is pending: said, and not sent twice.
+    await expect(play).toHaveAttribute("aria-label", "Starting...");
+    await expect(play).toBeDisabled();
+    const hearth = entry.locator(".version-blockers .blocker", { hasText: "Hearth" });
+    await expect(hearth).toContainText("Hearth stops Play: it needs Cogwork, which was pulled from the index.");
+    await expect(play).toBeDisabled();
+    await expect(play).toHaveAttribute("aria-label", "Play");
+    // Said by the panel with its fixes; no rawer copy of the refusal beside it.
+    await expect(entry.locator(".launch-error")).toHaveCount(0);
+    await expectWhole(page, "Versions after a refused start");
+    await page.screenshot({ path: test.info().outputPath("versions-refused.png") });
+    // Home read the same set again: it doesn't say READY, and it offers the same fix.
+    await goToTab(page, 0);
+    await expect(page.locator(".hero-version-badge")).toContainText("MODS NEED A FIX");
+    await expect(page.locator(".btn-play")).toBeDisabled();
+    await goToTab(page, VERSIONS_TAB);
+    // Back on Versions, the row says mods block it and where to fix them.
+    await expect(entry.locator(".version-note.bad")).toBeVisible();
+    await expect(play).toBeDisabled();
+  });
+
+  test("a fix applied on Versions clears the refusal there", async ({ page }) => {
+    await open(page, "scenario=lateblock");
+    await goToTab(page, VERSIONS_TAB);
+    const entry = page.locator(".version-entry", { hasText: "v26.11.1" });
+    await entry.locator(".play-btn").click();
+    const hearth = entry.locator(".version-blockers .blocker", { hasText: "Hearth" });
+    await hearth.locator("button", { hasText: "Turn off Hearth" }).click();
+    await expect(entry.locator(".play-btn")).toBeEnabled();
+    await expect(entry.locator(".blocker")).toHaveCount(0);
+    await expect(entry.locator(".launch-error")).toHaveCount(0);
+    await expect(entry.locator(".version-note")).toHaveCount(0);
+  });
+
+  test("a crash after a start from Versions shows its diagnosis and fixes there", async ({ page }) => {
+    await open(page, "scenario=crash");
+    await goToTab(page, VERSIONS_TAB);
+    const entry = page.locator(".version-entry", { hasText: "v26.11.1" });
+    await entry.locator(".play-btn").click();
+    const notice = entry.locator(".version-crash .mod-failure");
+    await expect(notice.locator(".mod-failure-title")).toHaveText("Structures stopped Weft from starting: its library didn't load.", { timeout: 10_000 });
+    await expect(notice.locator("button", { hasText: "Open log" })).toHaveCount(1);
+    await expectWhole(page, "Versions after a crash");
+    await notice.locator("button", { hasText: "Turn off Structures" }).click();
+    await expect(page.locator(".mod-failure")).toHaveCount(0);
+  });
+
+  test("deleting a version takes a deliberate second press, like removing a mod", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, VERSIONS_TAB);
+    const entry = page.locator(".version-entry", { hasText: "v26.10.4" });
+    const del = entry.locator(".delete-btn");
+    // A double-click asks, and says why it didn't delete.
+    await del.dblclick();
+    await expect(del).toHaveClass(/confirming/);
+    await expect(spoken(page)).toContainText("A double-click doesn't delete v26.10.4");
+    // No timer takes the question back while it is being read.
+    await page.waitForTimeout(4500);
+    await expect(del).toHaveClass(/confirming/);
+    // Escape does, and says so.
+    await del.press("Escape");
+    await expect(del).not.toHaveClass(/confirming/);
+    await expect(spoken(page)).toContainText("v26.10.4 stays installed.");
+    // By keyboard: Enter asks, Enter again deletes, with no dead time between.
+    await del.focus();
+    await page.keyboard.press("Enter");
+    await expect(del).toHaveClass(/confirming/);
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".version-entry", { hasText: "v26.10.4" }).locator(".play-btn")).toHaveCount(0);
+  });
+
   test("a refused start stays on screen, with a way to check again, when the set can't be read again", async ({ page }) => {
     await open(page, "scenario=lateblock&profile=failafterplay");
     await expect(page.locator(".hero-version-badge")).toContainText("READY");
+    // The start-up refresh reads every set again when it ends: not in the middle of this.
+    await settled(page);
     await page.locator(".btn-play").click();
     // Play was refused for mods, and reading them again failed: the refusal says so, never
     // silently gone, and Play isn't offered as if all were well.
@@ -492,7 +572,31 @@ test.describe("remove and undo", () => {
     await page.waitForTimeout(300);
     await expect(row).toHaveCount(1);
     await expect(row.locator(".delete-btn")).toHaveClass(/confirming/);
-    await expect(spoken(page)).toContainText("Showcase");
+    // Never silent: it says why the second click didn't remove.
+    await expect(spoken(page)).toContainText("A double-click doesn't remove Showcase. Press Remove again to confirm.");
+  });
+
+  test("a quick second press by keyboard confirms: no dead time once the question shows", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    const remove = page.locator(".mod-row", { hasText: "Showcase" }).locator(".delete-btn");
+    await remove.focus();
+    await page.keyboard.press("Enter");
+    await expect(remove).toHaveClass(/confirming/);
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".mod-row", { hasText: "Showcase" })).toHaveCount(0);
+  });
+
+  test("a held Enter asks once and doesn't repeat into a removal", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    const remove = page.locator(".mod-row", { hasText: "Showcase" }).locator(".delete-btn");
+    await remove.focus();
+    // A key pressed while it is down is the system's auto-repeat (`repeat: true`).
+    for (let i = 0; i < 4; i++) await page.keyboard.down("Enter");
+    await page.keyboard.up("Enter");
+    await expect(remove).toHaveClass(/confirming/);
+    await expect(page.locator(".mod-row", { hasText: "Showcase" })).toHaveCount(1);
   });
 
   test("the Installed tab says which version its count is for", async ({ page }) => {

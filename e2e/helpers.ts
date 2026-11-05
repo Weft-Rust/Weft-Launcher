@@ -12,10 +12,16 @@ export async function open(page: Page, query: string, locale = "en") {
   return errors;
 }
 
+/** Waits until the mock has answered every command the page sent, e.g. the start-up refresh. */
+export async function settled(page: Page) {
+  await page.evaluate(() => (window as unknown as { mockSettled(): Promise<void> }).mockSettled());
+}
+
 export async function goToTab(page: Page, index: number) {
   await page.locator(".tab-btn").nth(index).click();
 }
 
+export const VERSIONS_TAB = 1;
 export const MODS_TAB = 2;
 
 export async function browse(page: Page) {
@@ -177,13 +183,12 @@ export const lowContrast = (page: Page, min = 4.5) =>
   }, min);
 
 /**
- * Remove, then confirm: two presses, the second after the double-click gap (a press closer than
- * that to the first doesn't confirm, so a double-click can't remove a mod).
+ * Remove, then confirm: two separate presses (the second click of a double-click doesn't
+ * confirm, so a double-click can't remove a mod).
  */
-export async function confirmRemove(page: Page, button: Locator) {
+export async function confirmRemove(_page: Page, button: Locator) {
   await button.click();
   await expect(button).toHaveClass(/confirming/);
-  await page.waitForTimeout(450);
   await button.click();
 }
 

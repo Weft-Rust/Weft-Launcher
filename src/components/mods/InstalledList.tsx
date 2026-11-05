@@ -1,4 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState } from "react";
+import { useConfirmPress } from "../../hooks/useConfirmPress";
 import { useI18n } from "../../i18n/useI18n";
 import { useMods } from "../../hooks/useMods";
 import type { InstalledMod, ProfileReport } from "../../mods/types";
@@ -30,14 +31,9 @@ interface RowProps {
   onRemoved: () => void;
 }
 
-/** A second press closer than this to the first is a double-click, not a confirmation. */
-const CONFIRM_GAP_MS = 400;
-
 function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, locked, onRemoving, onRemoved }: RowProps) {
   const { t, tm } = useI18n();
   const { setEnabled, remove, isBusy, progressOf, nameIn, catalog } = useMods();
-  const [confirmRemove, setConfirmRemove] = useState(false);
-  const askedAt = useRef(0);
   const hintId = useId();
   const meta = modMeta(mod, tag, nameIn(tag), mod.status === "missingDeps" ? depStates(mod, report, catalog) : undefined, shadowOf(report, mod.id));
   const metaText = meta.parts.map(tm).join(" ");
@@ -48,27 +44,18 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
   // A reason is read whole: it gets the row's width under the buttons, as many lines as it needs.
   const wide = meta.bad || meta.shadowed;
 
-  // The confirmation lapses on Escape or when focus leaves the button, never on a timer: a
-  // player reading it (or a screen reader saying it) keeps it. Undo limits a mistake anyway.
-  const cancelRemove = (say: boolean) => {
-    setConfirmRemove(false);
-    if (say) announce(`remove-cancelled:${mod.id}:${Date.now()}`, t("mods.removeCancelled", mod.name));
-  };
-
-  const onRemove = async () => {
-    if (!confirmRemove) {
-      askedAt.current = Date.now();
-      announce(`remove-ask:${mod.id}:${askedAt.current}`, t("mods.removeConfirmHint", mod.name));
-      return setConfirmRemove(true);
-    }
-    // The second click of a double-click lands here: it doesn't confirm.
-    if (Date.now() - askedAt.current < CONFIRM_GAP_MS) return;
-    setConfirmRemove(false);
-    onRemoving(mod.id);
-    const r = await remove(tag, mod.id);
-    onError(r.status === "failed" ? r.shown : null);
-    if (r.status === "done") onRemoved();
-  };
+  const removal = useConfirmPress({
+    onAsk: () => announce(`remove-ask:${mod.id}:${Date.now()}`, t("mods.removeConfirmHint", mod.name)),
+    onCancel: (said) => said && announce(`remove-cancelled:${mod.id}:${Date.now()}`, t("mods.removeCancelled", mod.name)),
+    onDoubleClick: () => announce(`remove-double:${mod.id}:${Date.now()}`, t("mods.removeDoubleClick", mod.name)),
+    onConfirm: async () => {
+      onRemoving(mod.id);
+      const r = await remove(tag, mod.id);
+      onError(r.status === "failed" ? r.shown : null);
+      if (r.status === "done") onRemoved();
+    },
+  });
+  const confirmRemove = removal.confirming;
 
   const onToggle = async () => {
     const r = await setEnabled(tag, mod.id, !mod.enabled);
@@ -141,14 +128,7 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
         <button
           className={`delete-btn btn-small${confirmRemove ? " confirming" : ""}`}
           disabled={disabled}
-          onClick={onRemove}
-          onKeyDown={(e) => {
-            if (e.key === "Escape" && confirmRemove) {
-              e.stopPropagation();
-              cancelRemove(true);
-            }
-          }}
-          onBlur={() => confirmRemove && cancelRemove(false)}
+          {...removal.handlers}
           aria-label={confirmRemove ? t("mods.removeConfirmLabel", mod.name) : t("mods.removeLabel", mod.name)}
           aria-describedby={confirmRemove ? hintId : undefined}
         >

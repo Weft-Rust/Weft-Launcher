@@ -1,11 +1,15 @@
-import { useState, useEffect } from "react";
 import { useInstall, InstalledVersion, InstallProgress } from "../hooks/useInstall";
 import { useGameState } from "../hooks/useGameState";
 import { useMods } from "../hooks/useMods";
+import { useLaunch } from "../hooks/useLaunch";
+import { useConfirmPress } from "../hooks/useConfirmPress";
 import { useI18n } from "../i18n/useI18n";
 import { StableLabel } from "./StableLabel";
 import { ErrorText } from "./ErrorText";
-import type { Shown } from "../i18n/errors";
+import { LaunchRefusal } from "./LaunchRefusal";
+import { announce } from "./LiveRegion";
+import { BlockerPanel, useReviewDialog } from "./mods/ModFixes";
+import { ModFailureNotice } from "./mods/ModFailureNotice";
 
 interface VersionActionsProps {
   release: {
@@ -29,44 +33,31 @@ export function VersionActions({ release, installedVersion, onFixMods }: Version
   const report = installedVersion ? profile(release.tag) : undefined;
   const modCount = report?.mods.length ?? 0;
   const blocked = (report?.blocking.length ?? 0) > 0;
-  const { anyRunning, isRunning, launch, runningTags } = useGameState();
-
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [launchError, setLaunchError] = useState<Shown | null>(null);
+  const { anyRunning, isRunning, runningTags, lastCrash } = useGameState();
+  const launch = useLaunch();
+  const review = useReviewDialog(installedVersion ? release.tag : null);
 
   const busy = !!busyTags[release.tag];
   const currentProgress = busy ? progress[release.tag] : undefined;
   const error = errors[release.tag];
   const thisVersionRunning = isRunning(release.tag);
+  const starting = launch.launching === release.tag;
+  // Play was refused here because of mods: the blockers show here, with their fixes, until fixed.
+  const refusedForMods = launch.refusalFor(release.tag).refusedForMods;
+  const crash = installedVersion && lastCrash?.tag === release.tag ? lastCrash : null;
 
-  useEffect(() => {
-    if (confirmDelete) {
-      const timer = setTimeout(() => {
-        setConfirmDelete(false);
-      }, 4000);
-      return () => clearTimeout(timer);
-    }
-  }, [confirmDelete]);
+  // Deleting a version deletes its mod set too: the same deliberate confirmation as a mod's Remove.
+  const deletion = useConfirmPress({
+    onAsk: () =>
+      announce(`delete-ask:${release.tag}:${Date.now()}`, t(modCount > 0 ? "deleteConfirmHint" : "deleteConfirmHintBare", release.tag)),
+    onCancel: (said) => said && announce(`delete-cancelled:${release.tag}:${Date.now()}`, t("deleteCancelled", release.tag)),
+    onDoubleClick: () => announce(`delete-double:${release.tag}:${Date.now()}`, t("deleteDoubleClick", release.tag)),
+    onConfirm: () => remove(release.tag),
+  });
+  const confirmDelete = deletion.confirming;
 
   const handleInstall = () =>
     install(release.tag, release.asset.url, release.asset.name, release.asset.sha256);
-
-  const handleRemove = async () => {
-    if (!confirmDelete) {
-      setConfirmDelete(true);
-      return;
-    }
-
-    // Second click - proceed with deletion
-    setConfirmDelete(false);
-    await remove(release.tag);
-  };
-
-  const handleLaunch = async () => {
-    setLaunchError(null);
-    const r = await launch(release.tag);
-    if (r.status === "failed") setLaunchError(r.shown);
-  };
 
   const getProgressLabel = (current: InstallProgress): string => {
     switch (current.stage) {
@@ -89,8 +80,9 @@ export function VersionActions({ release, installedVersion, onFixMods }: Version
   const playTooltip = anyRunning && otherRunningTag ? t("playDisabledTooltip", otherRunningTag) : undefined;
 
   const deleteDisabled = anyRunning || busy;
-  const playDisabled = anyRunning || thisVersionRunning || busy || blocked;
+  const playDisabled = anyRunning || thisVersionRunning || busy || blocked || !!launch.launching;
   const blockedId = `blocked-${release.tag}`;
+  const playText = thisVersionRunning ? t("playing") : starting ? t("starting") : t("playButton");
   const confirmText = modCount > 0 ? tn("deleteWithMods", modCount) : t("deleteForReal");
 
   if (installedVersion) {
@@ -98,27 +90,25 @@ export function VersionActions({ release, installedVersion, onFixMods }: Version
       <div className="version-actions installed">
         <button
           className="play-btn"
-          onClick={handleLaunch}
+          onClick={() => launch.start(release.tag)}
           disabled={playDisabled}
           title={playTooltip}
-          aria-label={thisVersionRunning ? t("playing") : t("playButton")}
-          aria-describedby={blocked ? blockedId : undefined}
+          aria-label={playText}
+          aria-describedby={blocked ? (refusedForMods ? `${blockedId}-why` : blockedId) : undefined}
+          aria-busy={starting || undefined}
         >
-          <StableLabel
-            text={thisVersionRunning ? t("playing") : t("playButton")}
-            widest={[t("playing"), t("playButton")]}
-          />
+          <StableLabel text={playText} widest={[t("playing"), t("starting"), t("playButton")]} />
         </button>
         <button
           className={`delete-btn${confirmDelete ? " confirming" : ""}`}
-          onClick={handleRemove}
           disabled={deleteDisabled}
           title={anyRunning ? t("deleteDisabledTooltip") : undefined}
           aria-label={confirmDelete ? confirmText : t("deleteButton")}
+          {...deletion.handlers}
         >
           <StableLabel text={confirmDelete ? confirmText : t("deleteButton")} widest={[confirmText, t("deleteButton")]} />
         </button>
-        {blocked && !thisVersionRunning && (
+        {blocked && !thisVersionRunning && !refusedForMods && (
           <span className="version-note bad">
             <span id={blockedId}>{t("versionModsBlocked")}</span>
             {onFixMods && (
@@ -128,7 +118,20 @@ export function VersionActions({ release, installedVersion, onFixMods }: Version
             )}
           </span>
         )}
-        {(launchError || error) && <ErrorText error={(launchError || error)!} className="install-error" />}
+        {/* Play was refused here: why, and the fixes, here too, as on Home. */}
+        {refusedForMods && blocked && (
+          <div className="version-blockers">
+            <BlockerPanel id={blockedId} tag={release.tag} locked={anyRunning} review={review} />
+          </div>
+        )}
+        <LaunchRefusal tag={release.tag} launch={launch} />
+        {error && <ErrorText error={error} className="install-error" />}
+        {crash && (
+          <div className="version-crash">
+            <ModFailureNotice crash={crash} review={review} onGoToMods={onFixMods ? () => onFixMods(release.tag) : undefined} />
+          </div>
+        )}
+        {review.dialog}
       </div>
     );
   }

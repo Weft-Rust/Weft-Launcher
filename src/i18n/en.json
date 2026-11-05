@@ -502,7 +502,8 @@
     "indexUnsavedShort": "Mod index not saved: works until restart",
     "sourceRetryLabel": "Ask {0} again",
     "tabInstalledLabel_other": "Installed in {0}: {n} mods",
-    "typedNotPassed_other": "Not shown to be safe ({n}):"
+    "typedNotPassed_other": "Not shown to be safe ({n}):",
+    "removeDoubleClick": "A double-click doesn't remove {0}. Press Remove again to confirm."
   },
   "sizeUnits": {
     "B": "B",
@@ -517,5 +518,10 @@
   "versionModCount_other": "{n} mods",
   "versionModsBlocked": "Mods stop it from starting. Fix them on Home or the Mods tab.",
   "heroBadgeChecking": "VERSION {0} · CHECKING MODS",
-  "heroBadgeUnchecked": "VERSION {0} · MODS NOT CHECKED"
+  "heroBadgeUnchecked": "VERSION {0} · MODS NOT CHECKED",
+  "starting": "Starting...",
+  "deleteConfirmHint": "Press again to delete {0} with its mods. This can't be undone.",
+  "deleteConfirmHintBare": "Press again to delete {0}. This can't be undone.",
+  "deleteCancelled": "{0} stays installed.",
+  "deleteDoubleClick": "A double-click doesn't delete {0}. Press Delete again to confirm."
 }

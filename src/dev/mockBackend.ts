@@ -728,6 +728,8 @@ async function launch(tag: string) {
   if (running.size) fail("AnotherGameRunning", [...running][0]);
   // `prepare_launch` applies what the catalogue says before anything starts.
   if (flag("prelaunch") === "revoke" && !catalog.revoked.length) revoke("cogwork");
+  // Then it reads the set and hashes what it hands the game: not instant.
+  await sleep(250 * SLOW);
   const r = report(tag);
   if (r.blocking.length) {
     if (profileFlag === "failafterplay") failNextRead = true;
@@ -946,9 +948,21 @@ const plugins: Record<string, () => unknown> = {
   "plugin:opener|open_path": () => null,
 };
 
+/** Commands being answered now, so a test can wait until the start-up reads are done. */
+let inFlight = 0;
+const settledWaiters: (() => void)[] = [];
+/** `window.mockSettled()`: resolves once no command has been in flight for a moment. */
+function mockSettled(): Promise<void> {
+  return new Promise((resolve) => {
+    const check = () => (inFlight === 0 ? setTimeout(() => (inFlight === 0 ? resolve() : settledWaiters.push(check)), 50) : settledWaiters.push(check));
+    check();
+  });
+}
+
 export function installMockBackend() {
   mockWindows("main");
   (window as unknown as { mockPlayer: typeof mockPlayer }).mockPlayer = mockPlayer;
+  (window as unknown as { mockSettled: typeof mockSettled }).mockSettled = mockSettled;
   mockIPC(
     async (cmd, raw) => {
       if (cmd in plugins) return plugins[cmd]();
@@ -956,7 +970,13 @@ export function installMockBackend() {
       const handler = handlers[cmd as keyof Handlers] as ((args: unknown) => unknown) | undefined;
       // A command this mock doesn't know is a bug in the mock, never a silent null.
       if (!handler) throw new Error(`mock backend: no command ${cmd}`);
-      return handler(raw ?? {});
+      inFlight++;
+      try {
+        return await handler(raw ?? {});
+      } finally {
+        inFlight--;
+        if (inFlight === 0) settledWaiters.splice(0).forEach((w) => w());
+      }
     },
     { shouldMockEvents: true }
   );

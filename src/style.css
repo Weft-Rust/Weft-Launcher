@@ -260,8 +260,10 @@ button:disabled { cursor: not-allowed; }
 .prerelease-badge { background: var(--g3); color: var(--pale); }
 .version-meta { display: flex; flex-wrap: wrap; gap: 0 24px; margin-top: 4px; line-height: 24px; color: var(--g5); }
 .version-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 16px; }
-.version-actions:has(.install-error) { flex-basis: 100%; }
-.install-error { flex-basis: 100%; }
+.version-actions:has(.install-error, .launch-error, .version-blockers, .version-crash) { flex-basis: 100%; }
+.install-error, .version-actions .launch-error, .version-blockers, .version-crash { flex-basis: 100%; }
+.version-blockers, .version-crash { text-align: left; }
+.version-crash .mod-failure, .version-blockers .blockers.play-blocked { max-width: none; margin: 0; }
 
 .progress-container { width: 320px; }
 .progress-bar { height: 16px; padding: var(--px); background: var(--ink); }

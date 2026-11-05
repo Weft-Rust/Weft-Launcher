@@ -531,7 +531,8 @@
     "tabInstalledLabel_many": "Instalados en {0}: {n} de mods",
     "tabInstalledLabel_other": "Instalados en {0}: {n} mods",
     "typedNotPassed_many": "Sin prueba de que sea seguro ({n}):",
-    "typedNotPassed_other": "Sin prueba de que sea seguro ({n}):"
+    "typedNotPassed_other": "Sin prueba de que sea seguro ({n}):",
+    "removeDoubleClick": "Un doble clic no quita {0}. Pulsa Quitar otra vez para confirmar."
   },
   "sizeUnits": {
     "B": "B",
@@ -548,5 +549,10 @@
   "versionModCount_other": "{n} mods",
   "versionModsBlocked": "Hay mods que impiden arrancar. Arréglalos en Inicio o en la pestaña Mods.",
   "heroBadgeChecking": "VERSIÓN {0} · COMPROBANDO MODS",
-  "heroBadgeUnchecked": "VERSIÓN {0} · MODS SIN COMPROBAR"
+  "heroBadgeUnchecked": "VERSIÓN {0} · MODS SIN COMPROBAR",
+  "starting": "Iniciando...",
+  "deleteConfirmHint": "Pulsa otra vez para eliminar {0} con sus mods. No se puede deshacer.",
+  "deleteConfirmHintBare": "Pulsa otra vez para eliminar {0}. No se puede deshacer.",
+  "deleteCancelled": "La versión {0} sigue instalada.",
+  "deleteDoubleClick": "Un doble clic no elimina {0}. Pulsa Eliminar otra vez para confirmar."
 }
