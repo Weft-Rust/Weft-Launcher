@@ -1732,6 +1732,37 @@ mod saves {
     }
 
     #[test]
+    fn a_store_copy_that_is_gone_is_said_as_such_and_installing_the_build_again_brings_it_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (ctx, world) = setup(&tmp);
+        run(install(&ctx, &world.sha("showcase"))).unwrap();
+        std::fs::remove_file(ctx.paths.store_object(&world.sha("showcase"))).unwrap();
+        // The game's copy goes too, so the launch has to copy it again from the store.
+        let _ = std::fs::remove_file(ctx.paths.mods_dir(TAG).unwrap().join("showcase.zip"));
+        let Err(err) = run(service::prepare_launch(&ctx, TAG)) else {
+            panic!("a launch with a store copy gone went ahead");
+        };
+        assert!(
+            matches!(err, ModsError::StoreMissing(ref id) if id == "showcase"),
+            "{err:?}"
+        );
+        assert_eq!(
+            crate::error::AppError::from(err).code,
+            crate::error::ErrorCode::ModStoreMissing
+        );
+        // The same build installed again: downloaded, and the launch goes ahead.
+        run(install(&ctx, &world.sha("showcase"))).unwrap();
+        assert!(ctx.paths.store_object(&world.sha("showcase")).exists());
+        assert!(
+            run(service::prepare_launch(&ctx, TAG))
+                .unwrap()
+                .release()
+                .is_some()
+        );
+        assert_eq!(handed_to_game(&ctx), ["showcase.zip"]);
+    }
+
+    #[test]
     fn a_removal_whose_undo_cant_be_kept_still_stands_without_an_undo() {
         let tmp = tempfile::tempdir().unwrap();
         let (ctx, world) = setup(&tmp);

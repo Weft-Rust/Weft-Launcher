@@ -65,6 +65,25 @@ test.describe("launch safety", () => {
     });
   }
 
+  test("a mod whose stored copy is gone offers installing it again, and then Play starts", async ({ page }) => {
+    await open(page, "scenario=crash&crash=&prelaunch=storemissing");
+    await settled(page);
+    await page.locator(".btn-play").click();
+    const refusal = page.locator(".launch-error");
+    await expect(refusal).toContainText("The launcher's stored copy of structures is gone");
+    const again = refusal.locator("button[data-fix=reinstall]");
+    await expect(again).toHaveText("Install Structures again…");
+    await again.click();
+    const d = page.locator(dialog);
+    await expect(d.locator(".dialog-title")).toContainText("Structures");
+    await d.locator(".dialog-actions .btn-primary").click();
+    await expect(d).toHaveCount(0, { timeout: 15_000 });
+    await page.locator(".btn-play").click();
+    await expect(page.locator(".launch-error")).toHaveCount(0);
+    // Started: the badge says the version is playing.
+    await expect(page.locator(".home-page")).toContainText("PLAYING", { timeout: 10_000 });
+  });
+
   test("a crash of a mod from a file offers another file, in the From file dialog", async ({ page }) => {
     await open(page, "scenario=crash&crash=wrongVersion");
     await page.locator(".btn-play").click();

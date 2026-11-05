@@ -103,7 +103,8 @@
     "modSourceRateLimitedUntil": "GitHub is limiting requests until {0}. Try again then.",
     "modUrlRefusedHost": "A download link pointed away from github.com, or not over https, so the launcher refused it. Nothing was downloaded.",
     "modUrlRefusedForm": "A download link wasn't written the one plain way a GitHub download link is, so the launcher refused it. Nothing was downloaded.",
-    "modUrlRefusedAsset": "A download link pointed at a file other than this mod's release on its GitHub repo, so the launcher refused it. Nothing was downloaded."
+    "modUrlRefusedAsset": "A download link pointed at a file other than this mod's release on its GitHub repo, so the launcher refused it. Nothing was downloaded.",
+    "modStoreMissing": "The launcher's stored copy of {0} is gone, so it can't be handed to the game. Install it again to play with it."
   },
   "mods": {
     "title": "Mods",
@@ -524,7 +525,8 @@
     "homeModsOnlyOwn_other": "No mods for {0}, but {n} files from your own folder load",
     "indexUnavailableStatusShort": "No mod index (server said {0}): no Reviewed mods",
     "browseNoIndex": "Reviewed mods appear here once the Weft mod index can be fetched.",
-    "sourceErrRateUntil": "GitHub is limiting requests until {1}, so {0} couldn't be refreshed."
+    "sourceErrRateUntil": "GitHub is limiting requests until {1}, so {0} couldn't be refreshed.",
+    "reinstall": "Install {0} again…"
   },
   "sizeUnits": {
     "B": "B",

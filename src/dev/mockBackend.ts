@@ -558,11 +558,16 @@ async function runInstall(
 
 const planOf = (tag: string, sha256: string) => R.planInstall(catalog, lockOf(tag), tag, sha256, fitOf(tag), running.has(tag));
 
+/** `prelaunch=storemissing`: mods whose store copy is gone, until installed again. */
+const storeMissing = new Set(flag("prelaunch") === "storemissing" ? ["structures"] : []);
+
 async function installMod(tag: string, sha256: string, planToken: string, operationId: string): Promise<ChangeResult> {
   somethingChangesMeanwhile();
   const plan = planOf(tag, sha256);
   if (plan.problem) throw plan.problem;
-  return operation(operationId, (op) => runInstall(op, tag, [findBuild(sha256)], () => planOf(tag, sha256).planToken, planToken));
+  const done = await operation(operationId, (op) => runInstall(op, tag, [findBuild(sha256)], () => planOf(tag, sha256).planToken, planToken));
+  storeMissing.delete(plan.target.id);
+  return done;
 }
 
 function previewCopy(from: string, to: string) {
@@ -734,6 +739,10 @@ async function launch(tag: string) {
   if (running.size) fail("AnotherGameRunning", [...running][0]);
   // `prepare_launch` applies what the catalogue says before anything starts.
   if (flag("prelaunch") === "revoke" && !catalog.revoked.length) revoke("cogwork");
+  // The store's copy of Structures is gone until it is installed again.
+  if (flag("prelaunch") === "storemissing" && storeMissing.has("structures") && lockOf(tag).some((e) => e.id === "structures" && e.enabled)) {
+    fail("ModStoreMissing", "structures");
+  }
   // Then it reads the set and hashes what it hands the game: not instant.
   await sleep(250);
   const r = report(tag);

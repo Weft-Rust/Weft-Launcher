@@ -49,6 +49,10 @@ pub enum ModsError {
     FileChanged,
     #[error("Mod not installed: {0}")]
     NotInstalled(String),
+    /// The store's copy of an installed mod is gone (removed by hand, or a disk restored from an
+    /// older backup): installing the same build again brings it back. The mod's id.
+    #[error("Missing from the store: {0}")]
+    StoreMissing(String),
     /// The display names of the mods that would stop the game.
     #[error("Mods stop the game from starting: {0}")]
     Blocked(String),
@@ -146,6 +150,7 @@ impl ModsError {
             Sha256Mismatch { .. } => C::Sha256Mismatch,
             FileChanged => C::ModFileChanged,
             NotInstalled(_) => C::ModNotInstalled,
+            StoreMissing(_) => C::ModStoreMissing,
             Blocked(_) => C::ModsBlocked,
             SourceInvalid(_) => C::ModSourceInvalid,
             SourceNotFound(_) => C::ModSourceNotFound,
@@ -189,6 +194,7 @@ impl From<ModsError> for AppError {
             | NotForPlatform(d)
             | Revoked(d)
             | NotInstalled(d)
+            | StoreMissing(d)
             | Blocked(d)
             | SourceInvalid(d)
             | SourceNotFound(d)

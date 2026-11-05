@@ -118,7 +118,11 @@ export const FLAGS: Flag[] = [
     values: ["wrongVersion", "loadFailed", "notAMod", "wrongName", "missingDep", "initPanicked", "exit"],
     description: "Play starts the game and it stops with this failure; `exit` is a crash that names no mod.",
   },
-  { name: "prelaunch", values: ["revoke"], description: "Play finds Cogwork revoked, as a fresh index would, before it starts the game." },
+  {
+    name: "prelaunch",
+    values: ["revoke", "storemissing"],
+    description: "Play finds Cogwork revoked, as a fresh index would, before it starts the game; or finds the store's copy of Structures gone (`ModStoreMissing`) until it is installed again.",
+  },
   { name: "long", values: ["1"], description: "Adds very long names, ids and repos." },
   { name: "slow", values: ["1"], description: "Everything takes four times as long: time enough to press Cancel." },
   { name: "fast", values: ["1"], description: "Everything takes a quarter as long, for screenshots of results." },

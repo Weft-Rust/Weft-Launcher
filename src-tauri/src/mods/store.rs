@@ -146,7 +146,10 @@ pub fn reconcile(paths: &Paths, tag: &str, lock: &Lock) -> Result<(), ModsError>
         }
         let _ = std::fs::remove_file(&target);
         let stored = paths.store_object(&m.sha256);
-        let actual = sha256_file(&stored).map_err(|_| ModsError::NotInstalled(m.id.clone()))?;
+        if !stored.exists() {
+            return Err(ModsError::StoreMissing(m.id.clone()));
+        }
+        let actual = sha256_file(&stored)?;
         if actual != m.sha256 {
             return Err(ModsError::Sha256Mismatch {
                 expected: m.sha256.clone(),

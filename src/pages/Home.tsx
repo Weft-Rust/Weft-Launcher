@@ -140,7 +140,7 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
         </div>
         {/* Why Play is off, and the fixes, right under it. */}
         {effectiveTag && <BlockerPanel id={blockersId} tag={effectiveTag} locked={anyRunning} review={review} />}
-        {effectiveTag && <LaunchRefusal tag={effectiveTag} launch={launch} />}
+        {effectiveTag && <LaunchRefusal tag={effectiveTag} launch={launch} review={review} />}
         {shownReadError && effectiveTag && (
           <ErrorText error={{ ...shownReadError, message: t("mods.homeProfileFailed", effectiveTag, shownReadError.message) }} className="launch-error">
             <button className="btn-secondary btn-small" disabled={rereading} onClick={async () => {

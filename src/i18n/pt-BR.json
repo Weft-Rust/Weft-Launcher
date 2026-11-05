@@ -103,7 +103,8 @@
     "modSourceRateLimitedUntil": "O GitHub está limitando as requisições até {0}. Tente de novo depois disso.",
     "modUrlRefusedHost": "Um link de download apontava para fora do github.com, ou não usava https, então o launcher o recusou. Nada foi baixado.",
     "modUrlRefusedForm": "Um link de download não estava escrito da forma simples de um link de download do GitHub, então o launcher o recusou. Nada foi baixado.",
-    "modUrlRefusedAsset": "Um link de download apontava para um arquivo que não é a versão deste mod no repositório do GitHub, então o launcher o recusou. Nada foi baixado."
+    "modUrlRefusedAsset": "Um link de download apontava para um arquivo que não é a versão deste mod no repositório do GitHub, então o launcher o recusou. Nada foi baixado.",
+    "modStoreMissing": "A cópia de {0} guardada pelo launcher sumiu, então ela não pode ser entregue ao jogo. Instale de novo para jogar com ele."
   },
   "mods": {
     "title": "Mods",
@@ -558,7 +559,8 @@
     "homeModsOnlyOwn_other": "Sem mods para {0}, mas {n} arquivos da sua pasta carregam",
     "indexUnavailableStatusShort": "Sem índice de mods (servidor: {0}): sem mods revisados",
     "browseNoIndex": "Os mods revisados aparecem aqui quando o índice de mods do Weft puder ser baixado.",
-    "sourceErrRateUntil": "O GitHub está limitando as requisições até {1}, então não foi possível atualizar {0}."
+    "sourceErrRateUntil": "O GitHub está limitando as requisições até {1}, então não foi possível atualizar {0}.",
+    "reinstall": "Instalar {0} de novo…"
   },
   "sizeUnits": {
     "B": "B",

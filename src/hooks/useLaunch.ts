@@ -21,6 +21,8 @@ export interface LaunchError {
 export interface Refusal {
   /** A refusal for any other reason: shown as it is. */
   shownError: Shown | null;
+  /** The mod whose stored copy is gone (`ModStoreMissing`): installing it again is the fix. */
+  storeMissing: string | null;
   /** A refusal because of mods that couldn't be read again: shown with "Check mods again". */
   unread: LaunchError | null;
   /** The last start was refused because of mods, and that still holds. */
@@ -95,11 +97,14 @@ export function useLaunch() {
   const refusalFor = useCallback(
     (tag: string | null): Refusal => {
       const refusal = tag && launchError?.tag === tag ? launchError : null;
-      if (!refusal) return { shownError: null, unread: null, refusedForMods: false };
-      if (refusal.error.code !== "ModsBlocked") return { shownError: refusal.shown, unread: null, refusedForMods: false };
+      if (!refusal) return { shownError: null, unread: null, refusedForMods: false, storeMissing: null };
+      if (refusal.error.code !== "ModsBlocked") {
+        const storeMissing = refusal.error.code === "ModStoreMissing" ? refusal.error.detail : null;
+        return { shownError: refusal.shown, unread: null, refusedForMods: false, storeMissing };
+      }
       // Said by the blocker panel, with its fixes, unless the set couldn't be read or shows nothing.
       const blocks = (profile(tag)?.blocking.length ?? 0) > 0;
-      return { shownError: null, unread: refusal.unread || !blocks ? refusal : null, refusedForMods: true };
+      return { shownError: null, unread: refusal.unread || !blocks ? refusal : null, refusedForMods: true, storeMissing: null };
     },
     [launchError, profile]
   );

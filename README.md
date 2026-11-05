@@ -104,7 +104,7 @@ Pick a state with `?scenario=` and adjust it with flags, which combine: `?scenar
 | `revocations` | `messy` | Revocations come with uppercase hashes, no reason or time, and one entry that isn't a hash: they still revoke, and only that one is dropped. |
 | `chain` | `1` | Adds Chimneys and Junctions, which need mods that need others. |
 | `crash` | `wrongVersion`, `loadFailed`, `notAMod`, `wrongName`, `missingDep`, `initPanicked`, `exit` | Play starts the game and it stops with this failure; `exit` is a crash that names no mod. |
-| `prelaunch` | `revoke` | Play finds Cogwork revoked, as a fresh index would, before it starts the game. |
+| `prelaunch` | `revoke`, `storemissing` | Play finds Cogwork revoked, as a fresh index would, before it starts the game; or finds the store's copy of Structures gone (`ModStoreMissing`) until it is installed again. |
 | `long` | `1` | Adds very long names, ids and repos. |
 | `slow` | `1` | Everything takes four times as long: time enough to press Cancel. |
 | `fast` | `1` | Everything takes a quarter as long, for screenshots of results. |

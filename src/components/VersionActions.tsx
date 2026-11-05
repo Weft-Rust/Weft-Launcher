@@ -128,7 +128,7 @@ export function VersionActions({ release, installedVersion, onFixMods }: Version
             <BlockerPanel id={blockedId} tag={release.tag} locked={anyRunning} review={review} />
           </div>
         )}
-        <LaunchRefusal tag={release.tag} launch={launch} />
+        <LaunchRefusal tag={release.tag} launch={launch} review={review} />
         {error && <ErrorText error={error} className="install-error" />}
         {crash && (
           <div className="version-crash">

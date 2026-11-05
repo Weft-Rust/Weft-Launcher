@@ -71,6 +71,7 @@ error_codes! {
     ModArchiveInvalid,
     ModFileChanged,
     ModNotInstalled,
+    ModStoreMissing,
     ModsBlocked,
     ModSourceInvalid,
     ModSourceNotFound,
