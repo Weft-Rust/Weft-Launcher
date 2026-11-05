@@ -435,7 +435,9 @@ test.describe("operations", () => {
     // As the backend works: the build asked for first, then what it needs. File 1 of 2.
     await expect(d.locator(".progress-label")).toHaveText(/^File 1 of 2: Lanterns, downloading \d+%/);
     // Heard once per file and step, with no number and no stray "%".
-    await expect(d.locator(".progress-container [aria-live]")).toHaveText("File 1 of 2: Lanterns, downloading");
+    await expect(spoken(page)).toContainText("File 1 of 2: Lanterns, downloading");
+    await expect(spoken(page)).not.toContainText("%");
+    await expect(d.locator("[aria-live]")).toHaveCount(0);
     await d.locator(".progress-cancel").click();
     await expect(d.getByTestId("cancelled-note")).toHaveText("Cancelled. Nothing was changed.", { timeout: 15_000 });
     await expect(d.locator(".inline-error, [role=alert]")).toHaveCount(0);

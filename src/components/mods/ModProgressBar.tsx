@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useI18n } from "../../i18n/useI18n";
 import type { UiProgress, UiStage } from "../../mods/types";
 import type { MessageKey } from "../../i18n";
+import { announce } from "../LiveRegion";
 
 /** What is shown: "downloading 40%" has the percent in it, the others don't. */
 const STEP: Record<UiStage, MessageKey> = {
@@ -64,6 +65,12 @@ export function ModProgressBar({ progress, name, onCancel, cancelling = false, c
   // Said on each new file and step, not on each percent.
   const spoken = whole(t(SPOKEN[stage]));
   const canCancel = !!onCancel && stage !== "installing";
+  // Said through the one live region, once per file and step of this bar. A compact bar sits
+  // beside a full one that says the same, so only the full one speaks.
+  const bar = useId();
+  useEffect(() => {
+    if (!compact) announce(`progress:${bar}:${spoken}`, spoken);
+  }, [bar, compact, spoken]);
   return (
     <div className={`progress-container${compact ? " compact" : ""}`} data-stage={stage}>
       <div className="progress-row">
@@ -78,9 +85,6 @@ export function ModProgressBar({ progress, name, onCancel, cancelling = false, c
       </div>
       <span className="progress-label" aria-hidden="true">
         {compact ? step : label}
-      </span>
-      <span className="sr-only progress-spoken" aria-live="polite">
-        {spoken}
       </span>
     </div>
   );
