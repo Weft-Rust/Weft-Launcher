@@ -119,6 +119,9 @@ pub fn inspect<R: Read + std::io::Seek>(
         {
             return Err(P::UnsafePath(raw).into());
         }
+        // Declared sizes, from the central directory: the launcher copies the zip whole and only
+        // inflates its small manifest, so it never learns what the library really inflates to.
+        // INDEX_FORMAT.md says so ("Size limits").
         total = total.saturating_add(entry.size());
         if total > MAX_TOTAL_BYTES {
             return Err(P::TooLarge.into());

@@ -69,6 +69,11 @@ jobs:
 
       - run: npm ci
 
+      # On its own, so a missing translation or a sentence assembled from pieces is labelled as
+      # such, not as a failed build (the build runs it again).
+      - name: Check translations
+        run: npm run check:i18n
+
       # check:i18n, tsc and vite build
       - name: Build
         run: npm run build

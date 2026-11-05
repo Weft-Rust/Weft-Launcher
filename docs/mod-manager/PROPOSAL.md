@@ -1,6 +1,6 @@
 # Mod manager for Weft Launcher: proposal
 
-Status: Phases 1 and 2 are implemented on `feat/mod-manager` (see [What shipped](#what-shipped)); Phase 3 needs engine changes and is not started. Written 2026-11-04. Mockup (the first design; the app has moved on since): [`mockup.html`](mockup.html). Open it in a browser; it's drawn at 1:1 in the launcher's own pixel style.
+Status: Phases 1 and 2 are implemented on `feat/mod-manager` (see [What shipped](#what-shipped)); Phase 3 needs engine changes and is not started. Written 2026-11-04. Mockup (the first design; the app has moved on since): [`history/mockup.html`](history/mockup.html). Open it in a browser; it's drawn at 1:1 in the launcher's own pixel style.
 
 Sources:
 - Read-only research of the engine (`Weft` @ `7c69c9c`, `master`).
@@ -261,28 +261,33 @@ Open:
 
 ## What shipped
 
-Implemented on `feat/mod-manager`; names below are the ones in the code.
+Implemented on `feat/mod-manager`; names below are the ones in the code. §3 and §4 describe the
+design; this is where the build differs from it, or settles what they left open.
 
-- **Phase 1 and 2 together.** The signed index lives at `Zorro909/weft-mods-index` and is served from GitHub Pages; the launcher embeds its public key (`INDEX_PUBLIC_KEY` in `src-tauri/src/mods/index/signature.rs`). Sources (none added by default), local files, revocation and "Copy mods from…" (`copy_mod_profile`) all work.
+### Shipped
+
+- **Phases 1 and 2 together.** The signed index lives at `Zorro909/weft-mods-index` and is served from GitHub Pages; the launcher embeds its public key (`INDEX_PUBLIC_KEY` in `src-tauri/src/mods/index/signature.rs`). Sources (none added by default), local files, revocation and "Copy mods from…" (`copy_mod_profile`, with a preview, `preview_copy_mod_profile`, that merges into a set that already has mods) all work.
+- **Consent is binding.** The plan the player reviewed is a token (`planToken`). At commit, under `ModsLock`, the builds are looked up again in the catalogue as it is *now*, revocations and installability are checked again, and the token is recomputed from the current mod interface: anything different is refused as `ModChangedMeanwhile` and planned again on screen. Dependencies resolve transitively, through installed mods too.
+- **Operations** have the page's id, per-file progress held to a shared trace (`src/dev/fixtures/trace.json`) on the backend and the mock, and `cancel_mod_operation`. A cancel is accepted until the operation starts writing, never after (`ModCancelled`).
+- **A new install turns on nothing the launcher knows would stop Play.** A mod that needs something no build provides, at any depth, is installed turned off (`turnsOn`, `installedOff`). A mod already on still blocks Play when what it needs goes away; the report tells a dependency that isn't installed (`depsNotInstalled`) from one that is off, and `blockingReasons` says why each blocker blocks. Updates keep a mod's on/off state.
+- **Saving a set** writes in a fixed order: the old Undo is cleared, then the lock, then the removal's Undo (a failure there only loses Undo), then the version's folder is reconciled from the lock. Folders hold copies, never links, and nothing is rewritten while that version runs. **Remove has Undo** (`restore_mod`).
+- **The player's own folder** is checked for shadowing: a copy there is named, and blocks Play when it is revoked, but the launcher never deletes it.
+- **Revocations fail closed** and are remembered in `mods.lock.json`, so they outlive the index. One without a reason carries `reason: null` everywhere; the UI says "No reason given" in the player's language, and quotes a reason in the index's own words.
+- **The index has an age**: `signedAt`, freshness `stale` after 30 days, and rollback refusal kept in its own state file. Cached data, the index's and each source's, is checked again on every read. Cache generations are written and pruned under one lock; a save that fails is reported as `cacheError` while the fetched index is still used.
+- **The catalogue is kept in order.** Each part (the index, each source) carries the ticket of the refresh that fetched it, so a slow refresh finishing last can't replace newer answers, and every catalogue has a `revision` the page keeps the highest of. One source can be asked again on its own (`refresh_mod_source`).
+- **Sources.** A source that shows no mods says why (`SourceStatus.noMods`: `noReleases`, `noModFiles`, `unreadable`, `noDigest`, `disagrees`, `invalid`). A damaged `sources.json` is never taken for an empty list or overwritten: it is renamed to `sources.damaged-<secs>.json` and reported (`ModSourcesDamaged`); adding a source then starts a new list. Icons come only from GitHub's hosts (INDEX_FORMAT, "icon").
+- **Errors** carry codes, never English sentences: `GameFolderNotFound` carries the folder; a server that answered with an error is `HttpStatus`, never "offline".
+- **In the UI:** one blocker at a time with all its fixes (a pager, and "Turn off all" when that is every blocker's fix), Play's reason next to Play, results as notices over the list, plans kept by content so a reload that brings the same plan doesn't flicker the button, and nothing that carries meaning cut off at the smallest window (960×565), which the UI tests check in every language.
+- **Working on the UI without Tauri:** `npm run dev:mock` (see the README).
+
+### Changed from the proposal
+
 - **Renamed tier.** "CI-built" became **Unreviewed**: a source's release proves nothing about CI until it carries an attestation, so the name only claims what is known.
 - **Provenance** counts as verified (`provenanceVerified`) only when the signed index records it; the index CI runs `gh attestation verify` when a version is added. A source's own `provenance` claim is passed on but never verified, and without either the UI says "No build record". The launcher doesn't verify attestations itself.
 - **Reviewed means reviewed.** An index version without a `reviewed` record is dropped.
-- **ABI matching compares published metadata.** The launcher compares the `abi` an entry declares with the version's ABI; it doesn't read the compiled library (that would mean loading it).
-- **Copying a mod set** ("Copy mods from…") has a preview (`preview_copy_mod_profile`) and merges into a set that already has mods, skipping the ones it has.
-- **Updates keep the on/off state.** A mod that is off stays off after an update.
-- **Matching is by ABI, not tag.** Builds made from untagged Weft commits fit every release with the same ABI.
-- **A new install turns on nothing the launcher knows would stop Play.** A mod that needs something no build provides, at any depth, is installed turned off (`turnsOn`, `installedOff`). A mod that is already on still blocks Play when what it needs goes away; the report tells a dependency that isn't installed (`depsNotInstalled`) from one that is off, and `blockingReasons` says why each blocker blocks. What it knows has limits: the mod interface a build declares is the publisher's word (the game has the last word when it loads the library), and a copy in the player's own mods folder loads in the launcher's place. That copy is shown, and blocks Play when it is revoked, but the launcher never deletes it.
-- **Revocations are remembered** in `mods.lock.json`, so they outlive the index.
-- **The index has an age**: `signedAt`, freshness `stale` after 30 days, and rollback refusal kept in its own state file.
-- **Installs are checked again before they are written** (`ModChangedMeanwhile`), and **Remove has Undo** (`restore_mod`).
-- **Round 4:** dependencies resolve transitively through installed mods; the reviewed plan is binding (`planToken`); operations have ids, per-file progress and `cancel_mod_operation` (`ModCancelled`); the player's folder is checked for shadowing; `fitsVersion` is `null` when the ABI is unknown; revocations fail closed and cached data is checked again on every read; versions' folders hold copies; nothing is rewritten while the game runs. New error codes: `ModCancelled`, `ModLockInvalid`, `ModUrlRefused`, `ModIconInvalid`.
-- **Round 5:**
-  - Consent at commit uses what the catalogue says *now*: the builds are looked up again, revocations and installability are checked again, and the token is recomputed from the current mod interface, so a build whose metadata changed under the same hash is refused (`ModChangedMeanwhile`).
-  - A save writes in a fixed order: the old Undo is cleared, then the lock, then the removal's Undo (a failure there only loses Undo), then the folder is reconciled.
-  - A damaged `sources.json` is never taken for an empty list or overwritten: it is renamed to `sources.damaged-<secs>.json` beside it and reported (`ModSourcesDamaged`, new) with that path. Adding a source then starts a new list, and the damaged copy stays where it was put; a file that couldn't be moved aside is left alone and Add is refused.
-  - A source that shows no mods says why (`SourceStatus.noMods`: `noReleases`, `noModFiles`, `unreadable`, `noDigest`, `disagrees`, `invalid`).
-  - A revocation without a reason carries `reason: null`, in the index, the lock and the IPC types; the UI says "No reason given" in the player's language.
-  - `GameFolderNotFound` carries the folder, not an English sentence.
-  - In the UI: one blocker at a time with all its fixes (a pager), results as toasts over the list, Play's reason next to Play, plans kept by content so a reload that brings the same plan doesn't flicker the button, and progress events held to a shared trace (`src/dev/fixtures/trace.json`) on both the backend and the mock.
-- **Deferred:** everything in Phase 3, and the open question above.
-- **Working on the UI without Tauri:** `npm run dev:mock` (see the README).
+- **Matching is by ABI, not tag**, and compares published metadata: the `abi` an entry declares against the version's. Builds from untagged Weft commits fit every release with the same ABI. The launcher doesn't read the compiled library (that would mean loading it), and `fitsVersion` is `null` when the version's ABI is unknown.
+- **Zip sizes are the declared ones.** The archive checks use the central directory's sizes; the launcher never inflates the library (INDEX_FORMAT, "Size limits").
+
+### Deferred
+
+- Everything in Phase 3, and the open question in §7.

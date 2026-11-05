@@ -8,7 +8,10 @@
 // - an error code the backend can send has no `errors.*` message, going by the generated
 //   ErrorCode union in src/mods/bindings/ErrorCode.ts;
 // - a message names a trust tier or a revocation in English but not with that language's term
-//   for it, or uses a word the glossary rules out (Russian «отзыв» reads as "review").
+//   for it, or uses a word the glossary rules out (Russian «отзыв» reads as "review");
+// - code puts two translated pieces side by side in one text, `{t(a)} {t(b)}` in JSX or
+//   `${t(a)} ${t(b)}` in a template: a sentence assembled from parts can't be put in another
+//   language's order. One message per sentence, with the parts as `{0}`, `{1}`.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -95,9 +98,18 @@ const known = (key) => key in en.plain || key in en.plural;
 const CALL = /\b(t|tn|tr)\(\s*["']([^"']+)["']/g;
 // Quoted only: backticks are comments' code spans here, not keys.
 const LITERAL = /["']((?:mods|errors|sizeUnits)\.[A-Za-z0-9_]+)["']/g;
+const PIECE = String.raw`\b(?:t|tn|tm)\((?:[^()]|\([^()]*\))*\)`;
+const SIDE_BY_SIDE = [
+  new RegExp(String.raw`\{\s*${PIECE}\s*\}(?:\s|\{" "\}|[,:;.—-])*\{\s*${PIECE}\s*\}`, "g"),
+  new RegExp(String.raw`\$\{\s*${PIECE}\s*\}[^\`$]{0,3}\$\{\s*${PIECE}\s*\}`, "g"),
+];
+function sideBySide(text) {
+  return SIDE_BY_SIDE.flatMap((re) => [...text.matchAll(re)].map((m) => ({ line: text.slice(0, m.index).split("\n").length, text: m[0].replace(/\s+/g, " ") })));
+}
 for (const file of sources(join(root, "src"))) {
   const text = readFileSync(file, "utf8");
   const rel = file.slice(root.length);
+  for (const m of sideBySide(text)) problems.push(`${rel}:${m.line}: two translated pieces side by side make one sentence: ${m.text}`);
   for (const m of text.matchAll(CALL)) {
     const [, fn, key] = m;
     if (fn === "tn" ? !(key in en.plural) : !(key in en.plain)) {
