@@ -513,7 +513,11 @@
     "copyIntro_other": "Copying adds {n} mods to {0}. Nothing {0} has now is removed or replaced.",
     "ckTierDrop": "Was {0}, this build is {1}",
     "ckTierDropSaid": "Lower tier",
-    "replaceFromFile": "Replace {0} from file…"
+    "replaceFromFile": "Replace {0} from file…",
+    "homeModsOwn_one": "Mods for {0}: {1}, and {n} file from your own folder",
+    "homeModsOwn_other": "Mods for {0}: {1}, and {n} files from your own folder",
+    "homeModsOnlyOwn_one": "No mods for {0}, but {n} file from your own folder loads",
+    "homeModsOnlyOwn_other": "No mods for {0}, but {n} files from your own folder load"
   },
   "sizeUnits": {
     "B": "B",

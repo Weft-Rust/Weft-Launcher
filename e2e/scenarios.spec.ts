@@ -172,8 +172,10 @@ const CHECKS: Record<string, Checks> = {
     },
   },
   shadowed: {
-    home: async (page) => {
+    home: async (page, en) => {
       await expect(page.locator(".btn-play")).toBeDisabled();
+      // What loads includes the player's own folder, which loads in every version.
+      if (en) await expect(page.locator(".mods-line")).toContainText(", and 1 file from your own folder");
     },
     installed: async (page, en) => {
       // The copy in the player's folder blocks, with a fix that shows that file: one page on.

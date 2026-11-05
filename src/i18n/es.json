@@ -545,7 +545,13 @@
     "copyIntro_other": "Copiar añade {n} mods a {0}. Nada de lo que {0} tiene ahora se quita ni se reemplaza.",
     "ckTierDrop": "Era {0}; esta versión es {1}",
     "ckTierDropSaid": "Nivel más bajo",
-    "replaceFromFile": "Reemplazar {0} con un archivo…"
+    "replaceFromFile": "Reemplazar {0} con un archivo…",
+    "homeModsOwn_one": "Mods para {0}: {1} y {n} archivo de tu carpeta",
+    "homeModsOwn_many": "Mods para {0}: {1} y {n} archivos de tu carpeta",
+    "homeModsOwn_other": "Mods para {0}: {1} y {n} archivos de tu carpeta",
+    "homeModsOnlyOwn_one": "Sin mods para {0}, pero se carga {n} archivo de tu carpeta",
+    "homeModsOnlyOwn_many": "Sin mods para {0}, pero se cargan {n} archivos de tu carpeta",
+    "homeModsOnlyOwn_other": "Sin mods para {0}, pero se cargan {n} archivos de tu carpeta"
   },
   "sizeUnits": {
     "B": "B",

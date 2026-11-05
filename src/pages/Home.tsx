@@ -35,7 +35,7 @@ const BADGE: Record<HeroState, MessageKey> = {
 };
 
 export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSelectTag }: HomeProps) {
-  const { t, locale, formatList } = useI18n();
+  const { t, tn, locale, formatList } = useI18n();
   const { installedVersions, loaded } = useInstall();
   const { anyRunning, isRunning, lastCrash } = useGameState();
   const { profile, profileError, isCopying, loadProfile } = useMods();
@@ -98,6 +98,13 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
   // With something to read under Play, the title steps back so the actions stay in view.
   const compact = blocked || !!crash || !!shownError || !!unreadRefusal || !!shownReadError;
   const names = enabledNames(report);
+  // What loads, said whole: the launcher's mods, and the files in the player's own folder, which
+  // load in every version.
+  const modsLine = (own: number) => {
+    if (!effectiveTag) return "";
+    if (!own) return names.length ? t("mods.homeMods", effectiveTag, formatList(names)) : t("mods.homeModsNone", effectiveTag);
+    return names.length ? tn("mods.homeModsOwn", own, effectiveTag, formatList(names)) : tn("mods.homeModsOnlyOwn", own, effectiveTag);
+  };
 
   return (
     <main className="page home-page">
@@ -147,7 +154,7 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
         )}
         {report && effectiveTag && (
           <p className="mods-line">
-            <Truncate focusable text={names.length ? t("mods.homeMods", effectiveTag, formatList(names)) : t("mods.homeModsNone", effectiveTag)} />
+            <Truncate focusable text={modsLine(report.unmanaged.length)} />
             <button className="link-btn" onClick={onGoToMods}>
               {names.length ? t("mods.homeChange") : t("mods.homeAdd")}
             </button>
