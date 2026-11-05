@@ -263,7 +263,8 @@ function DoneList({ rows, tag }: { rows: DoneRow[]; tag: string }) {
     <ul className="checks copy-list copy-done" data-testid="copy-done">
       {rows.map((r) => (
         <li key={r.id} className={`check check-${r.on ? "yes" : "unknown"}`} data-id={r.id}>
-          <CheckMark state={r.on ? "yes" : "unknown"} />
+          {/* The line itself says installed and on or off; the mark adds nothing to hear. */}
+          <CheckMark state={r.on ? "yes" : "unknown"} said={null} />
           <span className="copy-item">
             <span className="copy-item-head">
               <span className="copy-name whole" data-must-fit>
@@ -301,7 +302,7 @@ function CopyList({
         const p = progressFor && item.outcome === "install" ? progressFor(item.id) : undefined;
         return (
           <li key={item.id} className={`check check-${o.state}`}>
-            <CheckMark state={o.state} />
+            <CheckMark state={o.state} said={o.said} />
             <span className="copy-item">
               <span className="copy-item-head">
                 <Truncate className="copy-name" text={item.name} />

@@ -5,12 +5,13 @@ import type { MessageKey } from "../i18n";
 import type { CopyItem, CopyPreview, ProfileReport, Trust } from "./types";
 import type { CheckState } from "./checks";
 
-export const COPY_OUTCOME: Record<CopyItem["outcome"], { state: CheckState; key: MessageKey }> = {
+/** Each outcome's mark, its words, and what a screen reader says for the mark: staying behind isn't failing. */
+export const COPY_OUTCOME: Record<CopyItem["outcome"], { state: CheckState; key: MessageKey; said?: MessageKey }> = {
   install: { state: "yes", key: "mods.copyWillInstall" },
   alreadyThere: { state: "same", key: "mods.copyAlreadyThere" },
-  noBuild: { state: "no", key: "mods.copyNoBuild" },
-  localFile: { state: "no", key: "mods.copyLocalFile" },
-  revoked: { state: "no", key: "mods.copyRevoked" },
+  noBuild: { state: "no", key: "mods.copyNoBuild", said: "mods.ckNotCopied" },
+  localFile: { state: "no", key: "mods.copyLocalFile", said: "mods.ckNotCopied" },
+  revoked: { state: "no", key: "mods.copyRevoked", said: "mods.ckNotCopied" },
 };
 
 export interface CopyConsent {

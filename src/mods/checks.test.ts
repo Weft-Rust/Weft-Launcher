@@ -65,6 +65,9 @@ describe("review and pin", () => {
   it("says a Reviewed build is in the index, an Unreviewed one isn't", () => {
     expect(row(buildChecks(build("1.0.0")), "review")?.state).toBe("yes");
     expect(row(buildChecks(build("1.0.0", { trust: "unreviewed", reviewed: null })), "review")?.state).toBe("no");
+    // Not reviewed isn't a failure: the mark is heard as the tier's own word.
+    expect(row(buildChecks(build("1.0.0", { trust: "unreviewed", reviewed: null })), "review")?.said).toBe("mods.badgeUnreviewed");
+    expect(row(buildChecks(build("1.0.0")), "review")?.said).toBeUndefined();
   });
 
   it("only counts the index's pin as a check; GitHub's digest is unknown", () => {

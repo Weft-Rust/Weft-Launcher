@@ -270,6 +270,7 @@
     "planning": "Working out what this would change…",
     "ckPassed": "Passed",
     "ckFailed": "Failed",
+    "ckNotCopied": "Not copied",
     "ckUnknown": "Unknown",
     "ckWontInstall": "Can't install: {0}",
     "ckPinnedGithub": "Download pinned to GitHub's SHA-256 checksum {0}",

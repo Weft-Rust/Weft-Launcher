@@ -273,6 +273,7 @@
     "planning": "Calculando qué cambiaría…",
     "ckPassed": "Correcto",
     "ckFailed": "Fallido",
+    "ckNotCopied": "Sin copiar",
     "ckUnknown": "Desconocido",
     "ckWontInstall": "No se puede instalar: {0}",
     "ckPinnedGithub": "Descarga fijada por la suma de verificación SHA-256 de GitHub {0}",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { copyConsent } from "./copyPlan";
+import { COPY_OUTCOME, copyConsent } from "./copyPlan";
 import type { CopyPreview, ProfileReport } from "./types";
 
 const preview: CopyPreview = {
@@ -42,5 +42,12 @@ describe("copyConsent", () => {
 
   it("tracks progress for every download, copied mods first", () => {
     expect(c.shas).toEqual(["a".repeat(64), "b".repeat(64), "c".repeat(64)]);
+  });
+});
+
+describe("copy outcomes", () => {
+  it("say what stays behind as not copied, never as failed", () => {
+    for (const o of ["noBuild", "localFile", "revoked"] as const) expect(COPY_OUTCOME[o].said).toBe("mods.ckNotCopied");
+    expect(COPY_OUTCOME.install.said).toBeUndefined();
   });
 });

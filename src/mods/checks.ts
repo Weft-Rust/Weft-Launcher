@@ -31,6 +31,11 @@ export interface CheckRow {
   trust?: Trust;
   /** Something that couldn't be found out, which asking again may answer: the row offers Retry. */
   retry?: boolean;
+  /**
+   * What a screen reader says for the mark, when the state's own word would be wrong: a mod
+   * nobody reviewed hasn't failed anything, it is Unreviewed.
+   */
+  said?: MessageKey;
 }
 
 const sha = (s: string) => ({ code: s, short: shortSha(s) });
@@ -56,6 +61,7 @@ export function buildChecks(v: CatalogVersion, indexFrom: string | null = null):
     rows.push({
       id: "review",
       state: "no",
+      said: "mods.badgeUnreviewed",
       title: { key: "mods.ckNotIndex" },
       detail: { key: "mods.ckNotIndexDetail", args: [v.sourceRepo] },
     });

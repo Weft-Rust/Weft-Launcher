@@ -1,5 +1,5 @@
 import { t, type MessageKey } from './index';
-import type { ErrorCode } from '../mods/types';
+import type { ErrorCode, UiError } from '../mods/types';
 
 // Every code the backend can send, and the message for it. A Record over the closed union, so a
 // new code fails `tsc` until it has a message; `npm run check:i18n` checks every locale has it.
@@ -86,19 +86,37 @@ export interface Shown {
  */
 export function showError(err: unknown): Shown {
   if (err === null || err === undefined) return { message: '', detail: null };
-  if (typeof err === 'object' && !(err instanceof Error)) {
-    const { code, detail } = err as { code?: unknown; detail?: unknown };
-    const text = typeof detail === 'string' && detail.trim() ? detail : null;
-    if (isErrorCode(code)) {
-      const key = ERROR_KEY[code];
-      if (takesDetail(key)) return { message: t(key, text ?? ''), detail: null };
-      return { message: t(key), detail: text };
-    }
-    const raw = typeof code === 'string' && code !== 'Unknown' ? (text ? `${code}: ${text}` : code) : text;
-    return { message: t('errors.unknownBare'), detail: raw };
+  const e = asAppError(err);
+  if (e.code !== 'Unknown') {
+    const key = ERROR_KEY[e.code];
+    if (takesDetail(key)) return { message: t(key, e.detail ?? ''), detail: null };
+    return { message: t(key), detail: e.detail };
   }
-  const text = err instanceof Error ? err.message : String(err);
-  return { message: t('errors.unknownBare'), detail: text || null };
+  return { message: t('errors.unknownBare'), detail: e.detail };
+}
+
+/**
+ * Whatever a command rejected with. A payload with a code this build knows stays as it is;
+ * anything else (a code from a newer backend, a thrown Error, a plain string) is "Unknown" with
+ * what there is to say, never passed off as a known failure. In development, such a rejection is
+ * logged: a Tauri plugin's or a newer backend's errors drifting from `AppErrorPayload` show up.
+ */
+export function asAppError(err: unknown): UiError {
+  if (err && typeof err === 'object' && 'code' in err) {
+    const { code, detail } = err as { code: unknown; detail?: unknown };
+    const text = typeof detail === 'string' && detail.trim() ? detail : null;
+    if (isErrorCode(code)) return { code, detail: text };
+    if (code === 'Unknown') return { code: 'Unknown', detail: text };
+    drifted(err);
+    return { code: 'Unknown', detail: typeof code === 'string' ? (text ? `${code}: ${text}` : code) : text };
+  }
+  drifted(err);
+  const detail = err instanceof Error ? err.message : err == null ? null : String(err);
+  return { code: 'Unknown', detail: detail || null };
+}
+
+function drifted(err: unknown) {
+  if (import.meta.env.DEV && import.meta.env.MODE !== 'test') console.warn('A rejection that is not an AppErrorPayload:', err);
 }
 
 /** The sentence alone, where there is no room for Details (a check row, a banner line). */

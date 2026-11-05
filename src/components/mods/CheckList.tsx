@@ -11,14 +11,14 @@ const GLYPH: Record<CheckState, string[]> = { yes: CHECK, no: CROSS, unknown: QU
 const SPOKEN: Record<CheckState, MessageKey> = { yes: "mods.ckPassed", no: "mods.ckFailed", unknown: "mods.ckUnknown", same: "mods.ckSame" };
 
 /** A check's mark, and its result in words for a screen reader. */
-export function CheckMark({ state }: { state: CheckState }) {
+export function CheckMark({ state, said }: { state: CheckState; said?: MessageKey | null }) {
   const { t } = useI18n();
   return (
     <>
       <span className="check-mark" aria-hidden="true">
         <PixelIcon rows={GLYPH[state]} />
       </span>
-      <span className="sr-only">{t(SPOKEN[state])}: </span>
+      {said !== null && <span className="sr-only">{t(said ?? SPOKEN[state])}: </span>}
     </>
   );
 }
@@ -37,7 +37,7 @@ export function CheckList({ checks, label, onRetry, retrying = false }: { checks
             <PixelIcon rows={GLYPH[c.state]} />
           </span>
           <span>
-            <span className="sr-only">{t(SPOKEN[c.state])}: </span>
+            <span className="sr-only">{t(c.said ?? SPOKEN[c.state])}: </span>
             <RichText msg={c.title} />
             {c.trust && (
               <>

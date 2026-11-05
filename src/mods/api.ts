@@ -6,8 +6,6 @@ import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
 import { listen, type EventCallback, type UnlistenFn } from "@tauri-apps/api/event";
 import type { CommandSignatures, EventPayloads } from "./bindings/commands";
 import { COMMANDS } from "./ipc";
-import { isErrorCode } from "../i18n/errors";
-import type { UiError } from "./types";
 
 export type CommandArgs<K extends keyof CommandSignatures> = CommandSignatures[K]["args"];
 export type CommandResult<K extends keyof CommandSignatures> = CommandSignatures[K]["result"];
@@ -79,18 +77,5 @@ export const launcherApi = {
   openLog: (tag: string) => call(COMMANDS.openLog, { tag }),
 };
 
-/**
- * Whatever a command rejected with. A payload with a code this build knows stays as it is;
- * anything else (a code from a newer backend, a thrown Error, a plain string) is "Unknown" with
- * what there is to say, never passed off as a known failure.
- */
-export function asAppError(err: unknown): UiError {
-  if (err && typeof err === "object" && "code" in err) {
-    const { code, detail } = err as { code: unknown; detail?: unknown };
-    const text = typeof detail === "string" ? detail : null;
-    if (isErrorCode(code)) return { code, detail: text };
-    return { code: "Unknown", detail: typeof code === "string" ? (text ? `${code}: ${text}` : code) : text };
-  }
-  const detail = err instanceof Error ? err.message : err == null ? null : String(err);
-  return { code: "Unknown", detail };
-}
+/** Whatever a command rejected with, as a `UiError`: one parser, in `i18n/errors`. */
+export { asAppError } from "../i18n/errors";
