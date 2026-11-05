@@ -1,28 +1,29 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useI18n } from "../../i18n/useI18n";
-import { translateError } from "../../i18n/errors";
+import { showError, type Shown } from "../../i18n/errors";
+import { ErrorText } from "../ErrorText";
 import { useMods } from "../../hooks/useMods";
 import { modsApi } from "../../mods/api";
 import { parseRepo, sameRepo } from "../../mods/select";
 import { Dialog } from "../Dialog";
 import { Truncate } from "../Truncate";
 import { TrustBadge } from "./TrustBadge";
-import { sourceProblem } from "./catalogBanners";
+import { indexProblem, sourceProblem } from "./catalogBanners";
 
 const INDEX_REPO = "https://github.com/Zorro909/weft-mods-index";
 
 export function SourcesDialog({ onClose }: { onClose: () => void }) {
   const { t, tn, formatDay } = useI18n();
-  const { catalog, refreshCatalog } = useMods();
+  const { catalog, catalogError, catalogLoading, refreshCatalog } = useMods();
   const [repos, setRepos] = useState<string[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<Shown | null>(null);
   const [input, setInput] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Shown | null>(null);
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
-  const [rowError, setRowError] = useState<{ repo: string; message: string } | null>(null);
+  const [rowError, setRowError] = useState<{ repo: string; error: Shown } | null>(null);
   const [changed, setChanged] = useState(false);
   const busy = useRef(false);
   const inputId = useId();
@@ -32,7 +33,7 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
     modsApi
       .sources()
       .then(setRepos)
-      .catch((err) => setLoadError(translateError(err)));
+      .catch((err) => setLoadError(showError(err)));
   }, []);
   useEffect(load, [load]);
 
@@ -40,7 +41,7 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
     if (busy.current || !input.trim()) return;
     const repo = parseRepo(input);
     if (!repo) {
-      setError(translateError({ code: "ModSourceInvalid", detail: input.trim() }));
+      setError(showError({ code: "ModSourceInvalid", detail: input.trim() }));
       return;
     }
     busy.current = true;
@@ -51,7 +52,7 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
       setInput("");
       setChanged(true);
     } catch (err) {
-      setError(translateError(err));
+      setError(showError(err));
     } finally {
       busy.current = false;
       setAdding(false);
@@ -68,7 +69,7 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
       setConfirming(null);
       setChanged(true);
     } catch (err) {
-      setRowError({ repo, message: translateError(err) });
+      setRowError({ repo, error: showError(err) });
     } finally {
       busy.current = false;
       setRemoving(null);
@@ -83,6 +84,19 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
   const locked = adding || removing !== null;
   const status = (repo: string) => catalog?.sources.find((s) => sameRepo(s.repo, repo));
   const index = catalog?.index;
+  // The same words as the banner on the Mods tab: stale, cached and why, or never reached.
+  const indexMeta = !index
+    ? t("mods.sourcesIndexNone")
+    : index.freshness === "fresh" && !index.error
+      ? t("mods.sourcesIndexFresh", formatDay(index.generated))
+      : index.freshness === "stale" && !index.error
+        ? t("mods.sourcesIndexStale", formatDay(index.signedAt ?? index.generated))
+        : (indexProblem(index, t, formatDay) ?? t("mods.sourcesIndexNone"));
+  const retry = (
+    <button className="btn-secondary btn-small" onClick={refreshCatalog} disabled={catalogLoading || locked}>
+      {catalogLoading ? t("mods.retrying") : t("mods.sourcesRetry")}
+    </button>
+  );
 
   return (
     <Dialog
@@ -100,17 +114,26 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
         <li className="source-row">
           <TrustBadge trust="reviewed" />
           <span className="source-name">{t("mods.sourcesIndex")}</span>
-          <span className={`source-meta${index?.error ? " bad" : ""}`}>
-            {index?.freshness === "fresh"
-              ? t("mods.sourcesIndexFresh", formatDay(index.generated))
-              : index?.freshness === "cached"
-                ? t("mods.sourcesIndexCached", formatDay(index.generated))
-                : t("mods.sourcesIndexNone")}
+          <span className={`source-meta${index?.error || index?.freshness === "stale" ? " bad" : ""}`} data-testid="index-meta">
+            {indexMeta}
+            {index?.error && showError(index.error).detail && (
+              <> {/* The backend's words, apart from ours. */}
+                <code className="source-detail">{showError(index.error).detail}</code>
+              </>
+            )}
           </span>
-          <button className="link-btn" onClick={() => openUrl(INDEX_REPO)}>
-            {t("mods.viewSource")}
-          </button>
+          <span className="source-actions">
+            {(index?.error || index?.freshness === "stale") && retry}
+            <button className="link-btn" onClick={() => openUrl(INDEX_REPO)}>
+              {t("mods.viewSource")}
+            </button>
+          </span>
         </li>
+        {catalogError && catalog && (
+          <li className="source-row source-refresh">
+            <ErrorText error={showError(catalogError)} lead={t("mods.refreshFailed")} className="source-meta bad" speak={false} />
+          </li>
+        )}
         {repos?.map((repo) => {
           const s = status(repo);
           const asking = confirming !== null && sameRepo(confirming, repo);
@@ -128,6 +151,7 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
                         .join(" · ")
                     : t("mods.sourcesNotChecked")}
               </span>
+              {s?.error && !asking && <span className="source-row-retry">{retry}</span>}
               {asking ? (
                 <span className="source-confirm">
                   <span className="source-confirm-text">{t("mods.sourcesRemoveConfirm", repo)}</span>
@@ -154,9 +178,7 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
                 </button>
               )}
               {rowError && sameRepo(rowError.repo, repo) && (
-                <span className="inline-error source-error" role="alert">
-                  {rowError.message}
-                </span>
+                <ErrorText error={rowError.error} className="inline-error source-error" />
               )}
             </li>
           );
@@ -164,12 +186,11 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
       </ul>
       {repos === null &&
         (loadError ? (
-          <div className="inline-error with-action" role="alert">
-            <span>{t("mods.sourcesLoadFailed", loadError)}</span>
+          <ErrorText error={loadError} lead={t("mods.sourcesLoadFailedLead")}>
             <button className="btn-secondary btn-small" onClick={load}>
               {t("mods.retry")}
             </button>
-          </div>
+          </ErrorText>
         ) : (
           <p className="dialog-note" role="status">
             {t("loading")}
@@ -197,11 +218,7 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
         </button>
       </div>
       <p className="dialog-note">{t("mods.sourcesWarning")}</p>
-      {error && (
-        <div className="inline-error" role="alert">
-          {error}
-        </div>
-      )}
+      {error && <ErrorText error={error} />}
     </Dialog>
   );
 }

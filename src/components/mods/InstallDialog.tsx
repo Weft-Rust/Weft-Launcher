@@ -1,16 +1,29 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useI18n } from "../../i18n/useI18n";
-import { translateError } from "../../i18n/errors";
+import type { Shown } from "../../i18n/errors";
 import { useMods } from "../../hooks/useMods";
+import { useCheckContext } from "../../hooks/useCheckContext";
+import { usePlan } from "../../hooks/usePlan";
 import type { CatalogMod, InstallPlan } from "../../mods/types";
-import { fittingVersions, installedFor, sourceUrl } from "../../mods/select";
-import { activeStep, installChecks, installOutcome, replaceNotes, weakerDeps, type InstallCheckContext } from "../../mods/checks";
+import { fittingVersions, installedFor, networkDown, sourceUrl } from "../../mods/select";
+import {
+  activeStep,
+  consentChanges,
+  installChecks,
+  installOutcome,
+  planConsent,
+  replaceNotes,
+  weakerDeps,
+  type ConsentView,
+} from "../../mods/checks";
 import { Dialog } from "../Dialog";
+import { ErrorText } from "../ErrorText";
 import { VersionSelect } from "../VersionSelect";
 import { Truncate } from "../Truncate";
 import { CheckList } from "./CheckList";
 import { ModProgressBar } from "./ModProgressBar";
+import { PlanChanges, useOutcomeNote } from "./PlanChanges";
 import { RichText } from "./RichText";
 import { ChannelBadge, TrustBadge } from "./TrustBadge";
 
@@ -23,32 +36,16 @@ interface InstallDialogProps {
   onClose: () => void;
 }
 
-type PlanState = { sha: string; plan: InstallPlan | null; error: string | null };
-
-/** What the plan and checks need from the version's set. */
-export function useCheckContext(tag: string): InstallCheckContext {
-  const { profile, nameIn } = useMods();
-  const report = profile(tag);
-  return useMemo(() => {
-    const mods = report?.mods ?? [];
-    return {
-      tag,
-      name: nameIn(tag),
-      enabled: new Set(mods.filter((m) => m.enabled).map((m) => m.id)),
-      trustOf: (id: string) => mods.find((m) => m.id === id)?.trust,
-      versionAbi: report?.versionAbi ?? null,
-    };
-  }, [tag, report, nameIn]);
-}
-
 /**
  * Every install and update of a catalogue mod goes through here: the plain warning that a mod
- * is a program first, then what the launcher checked and what else changes.
+ * is a program first, then what the launcher checked and what else changes. The button installs
+ * exactly the plan on screen (contract R4 §2); when the backend says it changed meanwhile, the
+ * new plan shows with what changed, and the player confirms again.
  */
 export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, onClose }: InstallDialogProps) {
   const { t, tm, formatSize, formatList } = useI18n();
   const mods = useMods();
-  const { catalog, install, isBusy, progressOf } = mods;
+  const { catalog, catalogError, install, isBusy, progressOf, cancel, isCancelling, loadProfile, nameIn } = mods;
   const report = mods.profile(tag);
   const installed = report ? installedFor(mod, report.mods) : undefined;
   const ctx = useCheckContext(tag);
@@ -64,22 +61,14 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
   );
   const [sha, setSha] = useState(initialSha ?? installed?.update?.sha256 ?? versions[0]?.sha256 ?? "");
   const v = versions.find((x) => x.sha256 === sha) ?? versions[0];
-  const [planned, setPlanned] = useState<PlanState | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Shown | null>(null);
+  const [changedFrom, setChangedFrom] = useState<ConsentView | null>(null);
+  const outcomeNote = useOutcomeNote();
+  const op = { kind: "mod", tag, id: mod.id } as const;
   const working = isBusy(tag, mod.id);
 
-  useEffect(() => {
-    if (!v) return;
-    let live = true;
-    mods
-      .plan(tag, v.sha256)
-      .then((plan) => live && setPlanned({ sha: v.sha256, plan, error: null }))
-      .catch((err) => live && setPlanned({ sha: v.sha256, plan: null, error: translateError(err) }));
-    return () => {
-      live = false;
-    };
-    // Re-planned when the build or the set changes; `mods.plan` itself never changes.
-  }, [tag, v?.sha256, report]);
+  // Asked again whenever the set or the catalogue changes; the answer counts only for both.
+  const request = usePlan<InstallPlan>(v ? `${tag}|${v.sha256}` : null, [report, catalog], v ? () => mods.plan(tag, v.sha256) : null);
 
   if (!v) {
     return (
@@ -97,7 +86,7 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
     );
   }
 
-  const plan = planned?.sha === v.sha256 ? planned.plan : null;
+  const plan = request.value;
   const replacing = !!installed && installed.sha256 !== v.sha256;
   const authors = formatList(mod.authors) || v.sourceRepo;
   const link = mod.homepage ?? sourceUrl(v);
@@ -105,15 +94,33 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
   const notes = plan ? replaceNotes(plan) : [];
   const outcome = plan ? installOutcome(plan, replacing, mod.name, ctx) : null;
   const weaker = plan ? weakerDeps(plan, ctx) : [];
-  const blocked = !plan || !!plan.problem;
-  const step = activeStep(progressOf({ kind: "mod", tag, id: mod.id }), plan, mod.name);
+  const blocked = !request.ready || !plan || !!plan.problem;
+  const changes = changedFrom && plan && request.ready ? consentChanges(changedFrom, planConsent(plan), nameIn(tag)) : null;
+  const step = activeStep(progressOf(op));
+  const stepName = step ? (plan ? [plan.target, ...plan.install].find((i) => i.sha256 === step.sha256)?.name : undefined) ?? nameIn(tag)(step.modId) : mod.name;
+  const offline = networkDown(catalog, catalogError);
+  const label = t(outcome?.button ?? (replacing ? "mods.updateButton" : "mods.install"));
 
   const confirm = async () => {
-    if (working || blocked) return;
+    if (working || blocked || !plan) return;
     setError(null);
-    const result = await install(tag, v.sha256, mod.id, plan?.install.map((i) => i.sha256));
+    outcomeNote.clear();
+    const result = await install(tag, plan);
     if (result.status === "done") onClose();
-    else if (result.status === "failed") setError(result.message);
+    else if (result.status === "cancelled") outcomeNote.cancelled();
+    else if (result.status === "failed") {
+      if (result.error.code === "ModChangedMeanwhile") {
+        // Show the new plan, and what is different from the one the player agreed to.
+        setChangedFrom(planConsent(plan));
+        request.reload();
+      }
+      setError(result.shown);
+    }
+  };
+
+  const retry = async () => {
+    await loadProfile(tag);
+    request.reload();
   };
 
   return (
@@ -132,11 +139,11 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
       footer={
         <>
           {working ? (
-            <ModProgressBar progress={step.progress} name={step.name} />
+            <ModProgressBar progress={step} name={stepName} onCancel={() => cancel(op)} cancelling={isCancelling(op)} />
           ) : (
             <>
               <button className="btn-primary" onClick={confirm} disabled={blocked}>
-                {t(outcome?.button ?? (replacing ? "mods.updateButton" : "mods.install"))}
+                {offline ? t("mods.needsNetworkButton", label) : label}
               </button>
               <button className="btn-secondary" onClick={onClose} data-autofocus>
                 {t("mods.cancel")}
@@ -166,7 +173,11 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
                   ? x.version
                   : `${x.version} · ${t(x.channel === "experimental" ? "mods.badgeExperimental" : "mods.badgePrerelease")}`,
             }))}
-            onChange={setSha}
+            onChange={(s) => {
+              setSha(s);
+              setChangedFrom(null);
+              setError(null);
+            }}
             disabled={working}
             labelledBy={versionLabelId}
             compact
@@ -177,13 +188,13 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
         {v.trust === "reviewed" ? t("mods.warnNative", mod.name) : t("mods.warnUnreviewed", mod.name, v.sourceRepo)}
         {weaker.length > 0 && <> {t("mods.warnDepsUnreviewed", formatList(weaker.map((w) => w.name)))}</>}
       </p>
+      {changes && <PlanChanges changes={changes} />}
+      {offline && <p className="dialog-note trust-change">{t("mods.needsNetworkNote")}</p>}
       {outcome?.explain && <p className="dialog-note trust-change">{tm(outcome.explain)}</p>}
-      {planned?.error ? (
-        <div className="inline-error" role="alert">
-          {planned.error}
-        </div>
+      {request.error ? (
+        <ErrorText error={request.error} />
       ) : plan ? (
-        <CheckList label={t("mods.checksLabel")} checks={checks} />
+        <CheckList label={t("mods.checksLabel")} checks={checks} onRetry={retry} />
       ) : (
         <p className="dialog-note" role="status">
           {t("mods.planning")}
@@ -194,11 +205,8 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
           <RichText msg={n} />
         </p>
       ))}
-      {error && (
-        <div className="inline-error" role="alert">
-          {error}
-        </div>
-      )}
+      {outcomeNote.node}
+      {error && !changes && <ErrorText error={error} />}
     </Dialog>
   );
 }

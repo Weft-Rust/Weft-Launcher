@@ -4,6 +4,8 @@ import { useGameState } from "../hooks/useGameState";
 import { useMods } from "../hooks/useMods";
 import { useI18n } from "../i18n/useI18n";
 import { StableLabel } from "./StableLabel";
+import { ErrorText } from "./ErrorText";
+import type { Shown } from "../i18n/errors";
 
 interface VersionActionsProps {
   release: {
@@ -16,9 +18,11 @@ interface VersionActionsProps {
     };
   };
   installedVersion: InstalledVersion | null;
+  /** Opens the Mods tab on this version, where what blocks it can be fixed. */
+  onFixMods?: (tag: string) => void;
 }
 
-export function VersionActions({ release, installedVersion }: VersionActionsProps) {
+export function VersionActions({ release, installedVersion, onFixMods }: VersionActionsProps) {
   const { t, tn } = useI18n();
   const { progress, busy: busyTags, errors, install, remove } = useInstall();
   const { profile } = useMods();
@@ -28,7 +32,7 @@ export function VersionActions({ release, installedVersion }: VersionActionsProp
   const { anyRunning, isRunning, launch, runningTags } = useGameState();
 
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [launchError, setLaunchError] = useState<string | null>(null);
+  const [launchError, setLaunchError] = useState<Shown | null>(null);
 
   const busy = !!busyTags[release.tag];
   const currentProgress = busy ? progress[release.tag] : undefined;
@@ -61,7 +65,7 @@ export function VersionActions({ release, installedVersion }: VersionActionsProp
   const handleLaunch = async () => {
     setLaunchError(null);
     const r = await launch(release.tag);
-    if (r.status === "failed") setLaunchError(r.message);
+    if (r.status === "failed") setLaunchError(r.shown);
   };
 
   const getProgressLabel = (current: InstallProgress): string => {
@@ -115,26 +119,23 @@ export function VersionActions({ release, installedVersion }: VersionActionsProp
           <StableLabel text={confirmDelete ? confirmText : t("deleteButton")} widest={[confirmText, t("deleteButton")]} />
         </button>
         {blocked && !thisVersionRunning && (
-          <span className="version-note bad" id={blockedId}>
-            {t("versionModsBlocked")}
+          <span className="version-note bad">
+            <span id={blockedId}>{t("versionModsBlocked")}</span>
+            {onFixMods && (
+              <button className="btn-secondary btn-small" onClick={() => onFixMods(release.tag)}>
+                {t("mods.homeFixInMods")}
+              </button>
+            )}
           </span>
         )}
-        {(launchError || error) && (
-          <div className="install-error" role="alert">
-            {launchError || error}
-          </div>
-        )}
+        {(launchError || error) && <ErrorText error={(launchError || error)!} className="install-error" />}
       </div>
     );
   }
 
   return (
     <div className="version-actions">
-      {error && (
-        <div className="install-error" role="alert">
-          {error}
-        </div>
-      )}
+      {error && <ErrorText error={error} className="install-error" />}
 
       {/* In the button's place and no taller than it, so the list doesn't jump during an install. */}
       {currentProgress ? (

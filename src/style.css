@@ -189,6 +189,7 @@ button:disabled { cursor: not-allowed; }
 
 /* Pages sit over the voxel field. A long page's scrollbar must not shift it against a short one. */
 .page-container { grid-area: page; min-height: 0; overflow: hidden auto; scrollbar-gutter: stable; }
+.page-container:has(> .mods-page) { overflow: hidden; }
 .page { max-width: 960px; padding: 24px 32px 32px; }
 .page-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 24px; margin-bottom: 24px; }
 .page h1 { font-size: 32px; line-height: 44px; text-shadow: 2px 2px 0 var(--ink); }
@@ -297,9 +298,20 @@ button:disabled { cursor: not-allowed; }
 .switch { display: flex; }
 .mods-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 8px; }
 .toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.page.mods-page { padding-top: 12px; }
-.mods-page .page-header { margin-bottom: 8px; }
-.switch button { height: 32px; padding: 2px 16px; background: var(--g2); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g1); }
+/* The Mods page fills the window: its header, version picker, switch, toolbar and notes stay put,
+   and only the list under them scrolls. */
+.page.mods-page { display: flex; flex-direction: column; height: 100%; padding-top: 8px; padding-bottom: 0; }
+.mods-page > * { flex: none; }
+.mods-page .page-header { margin-bottom: 4px; }
+.mods-page .page-header h1 { line-height: 40px; }
+.mods-page .header-actions .btn-refresh { --top: 2px; --side: 10px; }
+.mods-page .version-select.compact .version-select-btn { --top: 2px; }
+.mods-page .version-select.compact .version-select-menu { top: 44px; }
+.mods-panel { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 16px; scrollbar-gutter: stable; margin-right: -8px; padding-right: 8px; }
+.mods-panel:focus { outline: none; }
+/* Browse's search and filters stay above its cards. */
+.mods-panel .filters { position: sticky; top: 0; z-index: 2; padding-bottom: 8px; margin-bottom: 0; background: linear-gradient(var(--seam) 0 calc(100% - 8px), transparent 0); }
+.switch button { height: 32px; padding: 2px 12px; background: var(--g2); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g1); }
 .switch button:hover:not(.on) { background: var(--g3); }
 .switch button.on { background: var(--pale); color: var(--ink); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g5); }
 .switch .count { margin-left: 8px; color: var(--a2); }
@@ -321,8 +333,12 @@ button:disabled { cursor: not-allowed; }
 .banner-group[hidden] { display: none; }
 .banner-fold.open .banner-toggle { justify-self: start; }
 .banner-detail { color: var(--g5); }
+.banner .blocker { gap: 4px 12px; }
+.banner .blocker-text { flex-basis: 100%; }
 .blockers.in-banner { width: 100%; gap: 4px; }
-.blockers.in-banner .blocker-list { gap: 4px; }
+/* However many mods block, the panel stays a few lines tall: its title stays, the list scrolls. */
+/* At the smallest window that is one blocker and its fixes, so three rows of mods stay in view below. */
+.blockers.in-banner .blocker-list { gap: 4px; max-height: clamp(64px, calc(100vh - 472px), 240px); overflow-y: auto; overscroll-behavior: contain; }
 .banner-line { display: block; }
 .banner .btn-secondary { flex: none; }
 .banner.info { color: var(--pale); box-shadow: inset var(--px) 0 0 var(--g4); }
@@ -331,7 +347,7 @@ button:disabled { cursor: not-allowed; }
 .banner.bad { color: var(--r3); box-shadow: inset var(--px) 0 0 var(--r2); }
 
 .text-input { height: 40px; padding: 6px 12px; background: var(--ink); color: var(--pale); border: 0; border-radius: 0; font: inherit; box-shadow: inset 0 var(--px) 0 #07080c; -webkit-user-select: text; user-select: text; min-width: 0; }
-.text-input::placeholder { color: var(--g4); }
+.text-input::placeholder { color: var(--g5); }
 .text-input:focus-visible { outline: var(--px) solid var(--a2); outline-offset: 0; }
 .text-input::-webkit-search-cancel-button { display: none; }
 
@@ -346,40 +362,57 @@ button:disabled { cursor: not-allowed; }
 
 .mod-list, .mod-grid, .checks, .source-list { margin: 0; padding: 0; list-style: none; }
 .mod-list { display: grid; gap: 8px; }
-.mod-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 12px 16px 12px 16px; }
+.mod-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 4px 12px 4px 16px; }
 .mod-row.is-off { background: #20252f; }
 .mod-row.is-off :is(.mod-name, .mod-icon) { opacity: .55; }
 .mod-row.has-problem { box-shadow: inset var(--px) 0 0 var(--r2); }
 .mod-icon { width: 48px; height: 48px; display: grid; place-items: center; background: var(--ink); flex: none; }
 .mod-icon img { image-rendering: pixelated; }
 .mod-main { min-width: 0; }
-.mod-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+/* One line: the name gives way first (with its full text a hover or Tab away), never the row height. */
+.mod-title { display: flex; align-items: center; gap: 12px; min-width: 0; overflow: hidden; }
+.mod-title > :not(.mod-name) { flex: none; }
 .mod-name { font-size: 24px; line-height: 32px; color: var(--a3); }
 .mod-version { color: var(--g5); }
-.mod-meta { display: -webkit-box; margin-top: 2px; color: var(--g5); line-height: 24px; }
-.mod-meta.bad { color: var(--r3); }
-.mod-title .mod-name { max-width: 100%; }
+.mod-meta { margin-top: 0; color: var(--g5); line-height: 24px; }
+.mod-meta.lines-1 { display: block; }
+.mod-update-why { display: block; color: var(--a3); line-height: 24px; }
+.update-btn-row { display: inline-flex; align-items: center; gap: 8px; }
+.update-btn-row .pixel-icon { margin-top: 0; }
+.mod-meta.bad .mod-meta-text { color: var(--r3); }
+.mod-title .mod-name { flex: 0 1 auto; max-width: 100%; }
 .mod-actions { display: flex; align-items: center; gap: 8px; }
-.mod-update { margin-top: 8px; }
-.mod-actions .progress-container, .mod-card-foot .progress-container { width: 200px; }
+.mod-actions .progress-container { width: 200px; }
+.mod-card-foot .progress-container { width: 160px; }
+.progress-container.compact .progress-label { margin-top: 0; }
 
 .badge { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; line-height: 24px; white-space: nowrap; cursor: default; }
 .trust-reviewed { background: var(--v2); color: var(--ink); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--v1); }
 .trust-unreviewed { background: var(--g3); color: var(--pale); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g2); }
 .trust-unverified { background: var(--r3); color: var(--ink); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--r2); }
-.badge.channel { background: var(--g2); color: var(--g5); }
-.badge.revoked { background: var(--r2); color: var(--ink); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--r1); }
+/* Small text at 4.5:1 or more: #b9c1d3 on --g2 is 6.6:1, ink on #e0705a 5.2:1. */
+.badge.channel { background: var(--g2); color: #b9c1d3; }
+.badge.revoked { background: #e0705a; color: var(--ink); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--r1); }
 
 .mod-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
-.mod-card { display: grid; grid-template-columns: 48px minmax(0, 1fr); grid-template-areas: "icon title" "icon summary" "foot foot"; gap: 4px 12px; padding: 8px 12px; }
+/* The name has the card's whole width: the tier and where it is from sit on the line under it,
+   and the button beside the summary. */
+.mod-card { display: grid; align-content: start; grid-template-columns: 48px minmax(0, 1fr) auto; grid-template-areas: "icon title title" "icon badges badges" "summary summary foot"; gap: 0 12px; padding: 8px 12px; }
 .mod-card-head { display: contents; }
 .mod-card-head .mod-icon { grid-area: icon; align-self: start; }
-.mod-card-title { grid-area: title; display: flex; align-items: center; gap: 8px; min-width: 0; }
-.mod-card-title .mod-name { display: block; flex: 0 1 auto; min-width: 0; }
-.mod-badges { display: flex; gap: 8px; flex: none; }
-.mod-summary { grid-area: summary; color: #b9c1d3; line-height: 24px; height: 48px; align-self: start; }
-.mod-card-foot { grid-area: foot; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 4px; }
-.mod-source { color: var(--g5); line-height: 24px; min-width: 0; }
+.mod-card-title { grid-area: title; min-width: 0; }
+.mod-card-title .mod-name { display: block; }
+.mod-badges { grid-area: badges; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mod-badges > .badge { flex: none; }
+.mod-summary { grid-area: summary; color: #b9c1d3; line-height: 24px; height: 48px; margin-top: 4px; align-self: start; }
+.mod-card-foot { grid-area: foot; display: flex; flex-direction: column; align-items: flex-end; justify-content: flex-end; gap: 0; margin-top: 4px; }
+.mod-card-foot .needs-net { color: var(--a3); font-size: 16px; line-height: 24px; white-space: nowrap; }
+/* Offline, the note goes beside the button on a line of its own, so the summary keeps its width. */
+.mod-card.needs-net-card { grid-template-areas: "icon title title" "icon badges badges" "summary summary summary" "foot foot foot"; }
+.needs-net-card .mod-card-foot { flex-direction: row; align-items: center; justify-content: flex-end; gap: 12px; }
+.needs-net-card .needs-net { order: -1; }
+.needs-net-card .mod-summary { height: 24px; }
+.mod-source { color: var(--g5); line-height: 24px; min-width: 0; flex: 0 1 auto; }
 .installed-mark { color: var(--v3); line-height: 24px; white-space: nowrap; }
 
 .empty-state p + p { margin-top: 8px; }
@@ -426,14 +459,19 @@ button:disabled { cursor: not-allowed; }
 .typed-confirm strong { color: var(--a3); }
 .typed-confirm .text-input { flex: 1 1 160px; height: 36px; }
 .source-list { display: grid; gap: 4px; margin-top: 16px; }
-.source-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "badge name action" "badge meta action"; gap: 0 12px; align-items: center; padding: 8px 12px; background: var(--ink); }
+.source-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "badge name retry action" "meta meta meta meta"; gap: 0 12px; align-items: center; padding: 8px 12px; background: var(--ink); }
+.source-row-retry { grid-area: retry; }
+.source-actions { grid-area: action; display: flex; align-items: center; gap: 12px; }
+.source-detail { color: var(--g5); overflow-wrap: anywhere; }
+.source-refresh { display: block; }
 .source-row .badge { grid-area: badge; }
 .source-name { grid-area: name; overflow-wrap: anywhere; }
-.source-meta { grid-area: meta; color: var(--g5); line-height: 24px; }
+/* Under the name and the buttons, across the row: a cause in Russian has room to say itself. */
+.source-meta { grid-area: meta; color: var(--g5); line-height: 24px; margin-top: 4px; }
 .source-meta.bad { color: var(--r3); }
 .source-row > button { grid-area: action; }
 .source-name.truncate { display: block; }
-.source-row.confirming { grid-template-areas: "badge name name" "badge meta meta" "confirm confirm confirm"; }
+.source-row.confirming { grid-template-areas: "badge name name name" "meta meta meta meta" "confirm confirm confirm confirm"; }
 .source-confirm { grid-area: confirm; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-top: 8px; color: var(--a3); line-height: 24px; }
 .source-confirm-actions { display: flex; gap: 8px; }
 .source-error { grid-column: 1 / -1; margin-top: 8px; }
@@ -486,3 +524,29 @@ button:disabled { cursor: not-allowed; }
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
+
+/* Errors: the sentence, and the backend's own words behind Details. */
+.error-text { display: block; }
+.error-text.with-action { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.error-details { display: inline; margin-left: 8px; }
+.error-details summary { display: inline; cursor: pointer; color: var(--g5); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
+.error-details summary::-webkit-details-marker { display: none; }
+.error-details[open] code { display: block; margin-top: 4px; color: var(--pale); overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+
+/* Progress: which file of how many, and Cancel beside the bar. */
+.progress-row { display: flex; align-items: center; gap: 12px; }
+.progress-row .progress-bar { flex: 1 1 auto; }
+.progress-label { overflow: hidden; text-overflow: ellipsis; }
+.dialog-actions .progress-container { width: auto; flex: 1 1 360px; min-width: 0; }
+.progress-container.compact .progress-row { gap: 8px; }
+
+/* A plan that changed since the player looked. */
+.plan-changes { margin-top: 12px; padding: 8px 16px; background: var(--ink); color: var(--a3); box-shadow: inset var(--px) 0 0 var(--a2); line-height: 24px; }
+.plan-changes ul { margin: 4px 0 0; padding-left: 24px; }
+.dialog-note.calm-note { color: var(--pale); }
+.check-retry { margin-left: 4px; }
+.check-same .check-mark { background: var(--g2); color: var(--pale); }
+.version-note { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px 12px; }
+.filters { padding-right: 4px; }
+.mod-meta .badge { vertical-align: top; margin-right: 4px; }
+.mod-meta .mod-version { margin-right: 4px; }

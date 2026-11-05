@@ -1,10 +1,11 @@
 // Every mock scenario, in every language: it renders without errors, nothing overflows the
-// 960×565 window, Browse keeps two rows of cards under its banners, and the state the scenario
-// exists for is on screen. Text is checked in English; the other languages check the same state
+// 960×565 window, Installed keeps three whole rows under its banners and Browse two rows of
+// cards, names aren't cut, small text is readable, and the state the scenario exists for is on
+// screen. Text is checked in English; the other languages check the same state
 // by structure, since their words differ.
 import { expect, test, type Page } from "@playwright/test";
 import { SCENARIOS } from "../src/dev/scenarios";
-import { LOCALES, MODS_TAB, browse, expectFits, expectTwoCardRows, goToTab, open } from "./helpers";
+import { LOCALES, MODS_TAB, browse, expectFits, expectTwoCardRows, fullRows, goToTab, lowContrast, open, tops } from "./helpers";
 
 type Check = (page: Page, en: boolean) => Promise<void>;
 interface Checks {
@@ -49,16 +50,27 @@ const CHECKS: Record<string, Checks> = {
   },
   offline: {
     browse: async (page, en) => {
+      // Offline leads the folded row, also with a blocker among the notes.
+      if (en) await expect(page.locator(".banner.compact")).toContainText(/^Offline: mod index from Nov 2/);
       const notes = await openNotes(page);
       const texts = await notes.allInnerTexts();
       const at = (s: RegExp) => texts.findIndex((x) => s.test(x));
       if (en) {
-        // The catalogue's problems come before the player's own folder.
-        expect(at(/Showing the mod index from Nov 2, 2026/)).toBeGreaterThan(-1);
-        expect(at(/Showing its mods from/)).toBeGreaterThan(at(/mod index/));
-        expect(at(/own Weft mods folder/)).toBeGreaterThan(at(/Showing its mods/));
+        // The player's own folder is last.
+        expect(at(/Showing the mod index from Nov 2/)).toBe(0);
+        expect(at(/won't start/)).toBe(1);
+        expect(at(/Showing its mods from/)).toBe(2);
+        expect(at(/own Weft mods folder/)).toBe(3);
       }
       expect(texts.length).toBe(4);
+      // Every install button says it needs the network, and is described by that.
+      const buttons = page.locator(".mod-card .btn-primary");
+      expect(await buttons.count()).toBeGreaterThan(0);
+      for (const b of await buttons.all()) {
+        const why = await b.getAttribute("aria-describedby");
+        await expect(page.locator(`[id="${why}"]`)).toHaveClass(/needs-net/);
+      }
+      if (en) await expect(page.locator(".needs-net").first()).toHaveText("needs internet");
     },
   },
   crash: {
@@ -81,7 +93,8 @@ const CHECKS: Record<string, Checks> = {
       await expect(cogwork.locator(".toggle")).toBeDisabled();
       if (en) {
         await expect(cogwork.locator(".mod-meta")).toContainText("Pulled from the index and turned off. Reason: Corrupts worlds");
-        await expect(cogwork.locator(".mod-update button")).toHaveText("Update to 0.2.1…");
+        await expect(cogwork.locator(".update-btn-row")).toHaveText("0.2.1");
+        await expect(cogwork.locator(".update-btn-row")).toHaveAttribute("aria-label", "Update Cogwork to 0.2.1…");
       }
     },
   },
@@ -103,7 +116,7 @@ const CHECKS: Record<string, Checks> = {
   },
   stale: {
     installed: async (page, en) => {
-      if (en) await expect(page.locator(".banner.compact")).toContainText("The mod index was last signed on Sep 21, 2026");
+      if (en) await expect(page.locator(".banner.compact")).toContainText(/^Mod index signed Sep 21/);
     },
   },
   missingdep: {
@@ -123,12 +136,40 @@ const CHECKS: Record<string, Checks> = {
       }
     },
   },
+  shadowed: {
+    home: async (page) => {
+      await expect(page.locator(".btn-play")).toBeDisabled();
+    },
+    installed: async (page, en) => {
+      // The copy in the player's folder blocks, with a fix that shows that file.
+      const blocker = page.locator(".blockers.in-banner .blocker", { has: page.locator("strong", { hasText: "Cogwork" }) });
+      await expect(blocker.locator("button")).toHaveCount(2);
+      await expect(page.locator(".mod-row[data-mod=cogwork]")).toHaveAttribute("data-shadowed", "true");
+      if (en) {
+        await expect(blocker).toContainText("a copy in your own mods folder (cogwork-old.zip) would load in its place");
+        await expect(blocker.locator("button").nth(1)).toHaveText("Show cogwork-old.zip");
+      }
+    },
+  },
+  chain: {
+    browse: async (page) => {
+      await expect(page.locator(".mod-card[data-key*=chimneys], .mod-card[data-key*=junctions]")).toHaveCount(2);
+    },
+  },
   lateblock: {
     home: async (page) => {
       await expect(page.locator(".btn-play")).toBeEnabled();
       await expect(page.locator(".blocker")).toHaveCount(0);
     },
   },
+};
+
+// One verb for copying a set, in every language: a copy, never a move («Перенести»).
+const COPY_FROM: Record<(typeof LOCALES)[number], string> = {
+  en: "Copy mods from…",
+  "pt-BR": "Copiar mods de…",
+  es: "Copiar mods de…",
+  ru: "Скопировать моды из…",
 };
 
 for (const locale of LOCALES) {
@@ -144,23 +185,57 @@ for (const locale of LOCALES) {
       await expectFits(page);
       if (await page.locator(".switch [role=tab]").count()) {
         await expect(page.locator(".mod-row, .framed-empty").first()).toBeVisible();
+        // However many banners, three whole rows stay in view (or all of them, if fewer).
+        const rows = await page.locator(".mod-row").count();
+        expect(await fullRows(page), "whole rows in view").toBeGreaterThanOrEqual(Math.min(3, rows));
         await checks.installed?.(page, en);
+        expect(await lowContrast(page), "small text under 4.5:1").toEqual([]);
         await browse(page);
         await expect(page.locator(".mod-card").first()).toBeVisible();
         await expectFits(page);
         await expectTwoCardRows(page);
+        if (scenario.name !== "long") {
+          // Names have the card's width: the tier and source sit on the line below.
+          await expect(page.locator(".mod-card .mod-name[tabindex='0']"), "cut names").toHaveCount(0);
+        }
         await checks.browse?.(page, en);
+        expect(await lowContrast(page), "small text under 4.5:1").toEqual([]);
       }
       expect(errors).toEqual([]);
     });
   }
+
+  test(`the Mods header stays put and blockers stay bounded in ${locale}`, async ({ page }) => {
+    await open(page, "scenario=missingdep", locale);
+    await goToTab(page, MODS_TAB);
+    await expect(page.locator(".mod-row").first()).toBeVisible();
+    // The switch and the toolbar share one line, in every language.
+    const [sw, actions] = await tops(page, [".switch", ".toolbar-actions"]);
+    expect(Math.abs(sw - actions), "toolbar wrapped").toBeLessThanOrEqual(8);
+    // Three blockers: their list scrolls in a box of its own, and three rows still show below it.
+    const list = await page.locator(".blockers.in-banner .blocker-list").evaluate((e) => ({ shown: e.clientHeight, all: e.scrollHeight }));
+    expect(list.shown).toBeLessThan(list.all);
+    expect(list.shown).toBeLessThanOrEqual(100);
+    expect(await fullRows(page)).toBeGreaterThanOrEqual(3);
+    // Only the list scrolls: the header, version picker, switch, toolbar and banners stay put.
+    const fixed = [".page-header", ".mods-page .version-select", ".switch", ".toolbar-actions", ".banners"];
+    const before = await tops(page, fixed);
+    const scrolled = await page.locator(".mods-panel").evaluate((e) => {
+      e.scrollTop = e.scrollHeight;
+      return e.scrollTop;
+    });
+    expect(scrolled, "the list scrolls").toBeGreaterThan(0);
+    expect(await tops(page, fixed)).toEqual(before);
+    expect(await page.evaluate(() => document.querySelector(".page-container")?.scrollTop ?? 0)).toBe(0);
+    await expect(page.locator(".toolbar-actions button").last()).toHaveText(COPY_FROM[locale]);
+  });
 
   test(`dialogs fit in ${locale}`, async ({ page }) => {
     await open(page, "scenario=mods&long=1", locale);
     await goToTab(page, MODS_TAB);
 
     // Install dialog for an update: the warning is above the checks, in view.
-    await page.locator(".mod-row .mod-update button").first().click();
+    await page.locator(".mod-row .update-btn-row").first().click();
     await expect(page.locator("[role=dialog] .checks")).toBeVisible();
     await expectFits(page);
     const warning = await page.locator("[role=dialog] .dialog-warning").boundingBox();

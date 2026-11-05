@@ -1,7 +1,8 @@
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import type { UiError } from "../mods/types";
 import { useI18n } from "../i18n/useI18n";
-import { translateError } from "../i18n/errors";
+import { showError, type Shown } from "../i18n/errors";
+import { ErrorText } from "../components/ErrorText";
 import { useInstall } from "../hooks/useInstall";
 import { useGameState } from "../hooks/useGameState";
 import { useMods } from "../hooks/useMods";
@@ -34,7 +35,7 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
   const { installedVersions, loaded } = useInstall();
   const { anyRunning, isRunning, launch, lastCrash } = useGameState();
   const { profile, isCopying, loadProfile } = useMods();
-  const [launchError, setLaunchError] = useState<{ tag: string; error: UiError; message: string } | null>(null);
+  const [launchError, setLaunchError] = useState<{ tag: string; error: UiError; shown: Shown } | null>(null);
   const [launching, setLaunching] = useState(false);
   const blockersId = useId();
 
@@ -65,7 +66,7 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
       // The backend found a blocker the shown set doesn't have (a revocation Play applied, a
       // change from elsewhere): read the set again, so the panel can say what and offer fixes.
       if (r.error.code === "ModsBlocked") await loadProfile(tag);
-      setLaunchError({ tag, error: r.error, message: r.message });
+      setLaunchError({ tag, error: r.error, shown: r.shown });
     }
     setLaunching(false);
   };
@@ -76,9 +77,16 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
     try {
       await launcherApi.openGameFolder(effectiveTag);
     } catch (err) {
-      setLaunchError({ tag: effectiveTag, error: { code: "Unknown", detail: null }, message: translateError(err) });
+      setLaunchError({ tag: effectiveTag, error: { code: "Unknown", detail: null }, shown: showError(err) });
     }
   };
+
+  // A refusal because mods blocked is about that set: once a newer report of it has nothing
+  // blocking (the player fixed it, here or on Mods), the refusal no longer holds.
+  const reportBlocks = (report?.blocking.length ?? 0) > 0;
+  useEffect(() => {
+    if (launchError?.error.code === "ModsBlocked" && launchError.tag === effectiveTag && report && !reportBlocks) setLaunchError(null);
+  }, [launchError, effectiveTag, report, reportBlocks]);
 
   if (!loaded) {
     return <main className="page home-page" />;
@@ -100,7 +108,7 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
 
   // A refused launch says why, unless the blocker panel below already says it with its fixes.
   const shownError =
-    launchError && launchError.tag === effectiveTag && !(launchError.error.code === "ModsBlocked" && blocked) ? launchError.message : null;
+    launchError && launchError.tag === effectiveTag && launchError.error.code !== "ModsBlocked" ? launchError.shown : null;
   // With something to read under Play, the title steps back so the actions stay in view.
   const compact = blocked || !!crash || !!shownError;
   const names = enabledNames(report);
@@ -137,11 +145,7 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
             />
           </button>
         </div>
-        {shownError && (
-          <div className="launch-error" role="alert">
-            {shownError}
-          </div>
-        )}
+        {shownError && <ErrorText error={shownError} className="launch-error" />}
         {report && effectiveTag && (
           <p className="mods-line">
             <Truncate text={names.length ? t("mods.homeMods", effectiveTag, formatList(names)) : t("mods.homeModsNone", effectiveTag)} />

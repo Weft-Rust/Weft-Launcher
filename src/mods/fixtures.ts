@@ -93,7 +93,11 @@ export function report(mods: InstalledMod[], extra: Partial<ProfileReport> = {})
     abiError: null,
     mods,
     blocking: mods.filter((m) => m.status === "wrongVersion" || m.status === "missingDeps").map((m) => m.id),
+    blockingReasons: Object.fromEntries(
+      mods.filter((m) => m.status === "wrongVersion" || m.status === "missingDeps").map((m) => [m.id, m.status as "wrongVersion" | "missingDeps"])
+    ),
     unmanaged: [],
+    shadowed: [],
     ...extra,
   };
 }

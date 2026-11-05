@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
-import { modsApi, asAppError, listenTo } from "../mods/api";
-import { EVENTS } from "../mods/ipc";
+import { asAppError } from "../mods/api";
+import { listenToModProgress, modsApi, newOperationId } from "../mods/api.pending";
 import { modName } from "../mods/select";
 import {
   crashResolved,
@@ -8,13 +8,26 @@ import {
   describeCopy,
   describeRemove,
   describeRestore,
+  describeToggle,
   snapshotFor,
   type CrashSnapshot,
   type NameOf,
   type NoticeText,
 } from "../mods/status";
-import type { Catalog, ChangeResult, CopyResult, InstallPlan, CopyPreview, ModProgress, ProfileReport, UiError } from "../mods/types";
-import { translateError } from "../i18n/errors";
+import type {
+  Catalog,
+  ChangeResult,
+  CopyPreview,
+  CopyResult,
+  FileInspection,
+  InstallPlan,
+  ModProgress,
+  ProfileReport,
+  UiError,
+} from "../mods/types";
+import { showError, type Shown } from "../i18n/errors";
+import { tm } from "../i18n";
+import { announce } from "../components/LiveRegion";
 import { useInstall } from "./useInstall";
 import { useGameState } from "./useGameState";
 import { failed, type ActionResult } from "./result";
@@ -26,20 +39,20 @@ export interface Notice extends NoticeText {
   undo?: { id: string; name: string };
 }
 
-/** What a running change is, so the busy state and its progress have one owner each. */
+/** What a running change is about, so the busy state has one owner. */
 export type Operation = { kind: "mod"; tag: string; id: string } | { kind: "copy"; tag: string };
 
-const keyOf = (op: Operation) => (op.kind === "mod" ? `mod:${op.tag}:${op.id}` : `copy:${op.tag}`);
+export const keyOf = (op: Operation) => (op.kind === "mod" ? `mod:${op.tag}:${op.id}` : `copy:${op.tag}`);
 
 interface ModsContextValue {
   catalog: Catalog | null;
   catalogLoading: boolean;
-  /** Why the last catalogue load failed; kept until one succeeds. */
+  /** Why the last catalogue load failed; kept until one succeeds, also while an older catalogue shows. */
   catalogError: UiError | null;
   refreshCatalog: () => Promise<void>;
 
   profile: (tag: string | null | undefined) => ProfileReport | undefined;
-  profileError: (tag: string) => string | null;
+  profileError: (tag: string) => Shown | null;
   loadProfile: (tag: string) => Promise<ProfileReport | undefined>;
   /** A mod's display name in a version's set, falling back to the catalogue and then the id. */
   nameIn: (tag: string) => NameOf;
@@ -47,21 +60,25 @@ interface ModsContextValue {
   /** Whether this mod is being changed, or the whole set is (a copy into it). */
   isBusy: (tag: string, modId: string) => boolean;
   isCopying: (tag: string) => boolean;
-  progressFor: (sha256: string) => ModProgress | undefined;
-  /** The progress events of one running operation, oldest first. */
+  /** The progress events of a running operation, in the order they came (contract R4 §3). */
   progressOf: (op: Operation) => ModProgress[];
+  /** Asks the backend to stop a running operation; it then ends as "cancelled". */
+  cancel: (op: Operation) => Promise<void>;
+  isCancelling: (op: Operation) => boolean;
 
   notices: (tag: string) => Notice[];
   dismissNotice: (id: number) => void;
 
   plan: (tag: string, sha256: string) => Promise<InstallPlan>;
   previewCopy: (from: string, to: string) => Promise<CopyPreview>;
-  install: (tag: string, sha256: string, modId: string, expected?: string[]) => Promise<ActionResult<ChangeResult>>;
-  installFile: (tag: string, path: string, sha256: string, modId: string, expected?: string[]) => Promise<ActionResult<ChangeResult>>;
+  inspectFile: (tag: string, path: string) => Promise<FileInspection>;
+  /** Installs what the player reviewed: the plan's token goes with it (contract R4 §2). */
+  install: (tag: string, plan: InstallPlan) => Promise<ActionResult<ChangeResult>>;
+  installFile: (tag: string, path: string, inspection: FileInspection, plan: InstallPlan | null) => Promise<ActionResult<ChangeResult>>;
   setEnabled: (tag: string, id: string, enabled: boolean) => Promise<ActionResult<ChangeResult>>;
   remove: (tag: string, id: string) => Promise<ActionResult<ChangeResult>>;
   restore: (tag: string, id: string) => Promise<ActionResult<ChangeResult>>;
-  copyProfile: (from: string, to: string, expected?: string[]) => Promise<ActionResult<CopyResult>>;
+  copyProfile: (preview: CopyPreview) => Promise<ActionResult<CopyResult>>;
 }
 
 const ModsContext = createContext<ModsContextValue | null>(null);
@@ -118,30 +135,34 @@ function useProfileCoordinator(setProfiles: (fn: (p: Record<string, ProfileRepor
   return { read, changed };
 }
 
-interface Owned extends ModProgress {
-  /** The operation the event belongs to. */
-  owner: string;
+/** The first file an operation will work on, so its progress shows at once, before any event. */
+export interface FirstFile {
+  sha256: string;
+  modId: string;
+  count: number;
 }
 
 /**
- * Progress, owned by operations. An operation names the hashes it expects; an event for another
- * hash goes to the newest running operation (a dependency the plan didn't list). When the
- * operation ends, however it ends, every hash it owns is cleared.
+ * Running operations and their progress. The client names each operation (contract R4 §3) and
+ * every event carries that id, so progress always belongs to the operation that caused it; an
+ * event for an operation that isn't running is dropped. When one ends, however it ends, its
+ * progress goes with it.
  */
 function useOperations() {
-  const [progress, setProgress] = useState<Record<string, Owned>>({});
-  const [running, setRunning] = useState<Record<string, Operation>>({});
-  const live = useRef<Map<string, { op: Operation; expected: Set<string> }>>(new Map());
+  const [progress, setProgress] = useState<Record<string, ModProgress[]>>({});
+  const [running, setRunning] = useState<Record<string, { op: Operation; operationId: string; cancelling: boolean }>>({});
+  const live = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    listenTo(EVENTS.modProgress, (e) => {
-      const ops = [...live.current.entries()];
-      const owner = ops.find(([, o]) => o.expected.has(e.payload.sha256))?.[0] ?? ops[ops.length - 1]?.[0];
-      // Nothing running: a late event of an operation that has ended.
-      if (!owner) return;
-      setProgress((p) => ({ ...p, [e.payload.sha256]: { ...e.payload, owner } }));
+    listenToModProgress((e) => {
+      const id = e.payload.operationId;
+      if (![...live.current.values()].includes(id)) return;
+      setProgress((p) => {
+        const list = (p[id] ?? []).filter((x) => x.sha256 !== e.payload.sha256 && x.sha256 !== "");
+        return { ...p, [id]: [...list, e.payload] };
+      });
     }).then((fn) => {
       if (cancelled) fn();
       else unlisten = fn;
@@ -152,38 +173,42 @@ function useOperations() {
     };
   }, []);
 
-  const clearOwner = useCallback((key: string) => {
-    setProgress((p) => Object.fromEntries(Object.entries(p).filter(([, v]) => v.owner !== key)));
+  /** Starts an operation and says its id, or null when the same one is already running. */
+  const begin = useCallback((op: Operation, first: FirstFile | null): string | null => {
+    const key = keyOf(op);
+    if (live.current.has(key)) return null;
+    const operationId = newOperationId();
+    live.current.set(key, operationId);
+    setRunning((r) => ({ ...r, [key]: { op, operationId, cancelling: false } }));
+    // The first file shows as waiting at once, before its first event.
+    const waiting: ModProgress = {
+      operationId,
+      sha256: first?.sha256 ?? "",
+      modId: first?.modId ?? (op.kind === "mod" ? op.id : ""),
+      stage: "downloading",
+      percent: 0,
+      index: 1,
+      count: Math.max(1, first?.count ?? 1),
+    };
+    setProgress((p) => ({ ...p, [operationId]: [waiting] }));
+    return operationId;
   }, []);
 
-  /** Starts an operation, or says it is already running. */
-  const begin = useCallback(
-    (op: Operation, expected: string[]): boolean => {
-      const key = keyOf(op);
-      if (live.current.has(key)) return false;
-      live.current.set(key, { op, expected: new Set(expected) });
-      clearOwner(key);
-      setRunning((r) => ({ ...r, [key]: op }));
-      // The first file shows as waiting at once, before its first event.
-      if (expected[0]) {
-        setProgress((p) => ({ ...p, [expected[0]]: { sha256: expected[0], modId: op.kind === "mod" ? op.id : "", stage: "downloading", percent: 0, owner: key } }));
-      }
-      return true;
-    },
-    [clearOwner]
-  );
+  const end = useCallback((op: Operation) => {
+    const key = keyOf(op);
+    const operationId = live.current.get(key);
+    live.current.delete(key);
+    setRunning((r) => without(r, key));
+    if (operationId) setProgress((p) => without(p, operationId));
+  }, []);
 
-  const end = useCallback(
-    (op: Operation) => {
-      const key = keyOf(op);
-      live.current.delete(key);
-      clearOwner(key);
-      setRunning((r) => without(r, key));
-    },
-    [clearOwner]
-  );
+  const markCancelling = useCallback((op: Operation) => {
+    const key = keyOf(op);
+    setRunning((r) => (r[key] ? { ...r, [key]: { ...r[key], cancelling: true } } : r));
+    return live.current.get(key) ?? null;
+  }, []);
 
-  return { progress, running, begin, end };
+  return { progress, running, begin, end, markCancelling };
 }
 
 export function ModsProvider({ children }: { children: ReactNode }) {
@@ -193,11 +218,11 @@ export function ModsProvider({ children }: { children: ReactNode }) {
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<UiError | null>(null);
   const [profiles, setProfiles] = useState<Record<string, ProfileReport>>({});
-  const [profileErrors, setProfileErrors] = useState<Record<string, string>>({});
+  const [profileErrors, setProfileErrors] = useState<Record<string, Shown>>({});
   const [notices, setNotices] = useState<Notice[]>([]);
   const noticeId = useRef(0);
   const { read, changed } = useProfileCoordinator(setProfiles);
-  const { progress, running, begin, end } = useOperations();
+  const { progress, running, begin, end, markCancelling } = useOperations();
 
   const loadProfile = useCallback(
     async (tag: string) => {
@@ -206,7 +231,7 @@ export function ModsProvider({ children }: { children: ReactNode }) {
         setProfileErrors((e) => without(e, tag));
         return report;
       } catch (err) {
-        setProfileErrors((e) => ({ ...e, [tag]: translateError(err) }));
+        setProfileErrors((e) => ({ ...e, [tag]: showError(err) }));
         return undefined;
       }
     },
@@ -228,6 +253,7 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       setCatalog(await modsApi.catalog(true));
       setCatalogError(null);
     } catch (err) {
+      // The catalogue shown so far stays; the banner says it couldn't be refreshed, and why.
       setCatalogError(asAppError(err));
     } finally {
       setCatalogLoading(false);
@@ -245,7 +271,8 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       .finally(() => refreshCatalog());
   }, [refreshCatalog]);
 
-  // A crash notice stays until its problem is fixed: the blamed mod is off, gone or replaced.
+  // A crash notice stays until its problem is fixed: the blamed mod is off, gone or replaced, or
+  // the dependency it lacked is on and usable.
   const crashSnapshot = useRef<{ crash: unknown; snapshot: CrashSnapshot | null } | null>(null);
   useEffect(() => {
     if (!lastCrash) {
@@ -263,13 +290,15 @@ export function ModsProvider({ children }: { children: ReactNode }) {
 
   /**
    * The answer to a version's last change. One per version: a newer change replaces it, and with
-   * it any Undo, which the backend forgets at the next change anyway.
+   * it any Undo, which the backend forgets at the next change anyway. Said once, politely.
    */
   const pushNotice = useCallback((tag: string, text: NoticeText | null, undo?: Notice["undo"]) => {
+    const id = ++noticeId.current;
+    if (text) announce(`notice:${id}`, text.lines.map(tm).join(" "));
     setNotices((all) => {
       const others = all.filter((n) => n.tag !== tag);
       if (!text) return others;
-      return [...others, { ...text, id: ++noticeId.current, tag, undo }];
+      return [...others, { ...text, id, tag, undo }];
     });
   }, []);
 
@@ -277,10 +306,16 @@ export function ModsProvider({ children }: { children: ReactNode }) {
 
   /** Runs one change. The same change while it runs is refused, not sent twice. */
   const run = useCallback(
-    async <R extends ChangeResult>(op: Operation, expected: string[], work: () => Promise<R>, after: (r: R) => void): Promise<ActionResult<R>> => {
-      if (!begin(op, expected)) return { status: "skipped" };
+    async <R extends ChangeResult>(
+      op: Operation,
+      first: FirstFile | null,
+      work: (operationId: string) => Promise<R>,
+      after: (r: R) => void
+    ): Promise<ActionResult<R>> => {
+      const operationId = begin(op, first);
+      if (!operationId) return { status: "skipped" };
       try {
-        const result = await work();
+        const result = await work(operationId);
         changed(op.tag, result.report);
         after(result);
         return { status: "done", result };
@@ -299,52 +334,76 @@ export function ModsProvider({ children }: { children: ReactNode }) {
     modName(id, r.report.mods.some((m) => m.id === id) ? r.report : before, catalog), [catalog]);
 
   const install = useCallback(
-    (tag: string, sha256: string, modId: string, expected: string[] = []) =>
-      run({ kind: "mod", tag, id: modId }, [sha256, ...expected], () => modsApi.install(tag, sha256), (r) =>
-        pushNotice(tag, describeChange(r, modId, tag, namer(r)))
-      ),
+    (tag: string, plan: InstallPlan) => {
+      const modId = plan.target.id;
+      // Dependencies are fetched first.
+      const first = plan.install[0] ?? plan.target;
+      return run(
+        { kind: "mod", tag, id: modId },
+        { sha256: first.sha256, modId: first.id, count: plan.install.length + 1 },
+        (operationId) => modsApi.install(tag, plan.target.sha256, plan.planToken, operationId),
+        (r) => pushNotice(tag, describeChange(r, modId, tag, namer(r)))
+      );
+    },
     [run, pushNotice, namer]
   );
 
   const installFile = useCallback(
-    (tag: string, path: string, sha256: string, modId: string, expected: string[] = []) =>
-      run({ kind: "mod", tag, id: modId }, [sha256, ...expected], () => modsApi.installFile(tag, path, sha256), (r) =>
-        pushNotice(tag, describeChange(r, modId, tag, namer(r)))
-      ),
+    (tag: string, path: string, inspection: FileInspection, plan: InstallPlan | null) => {
+      const modId = inspection.archive?.id ?? "";
+      return run(
+        { kind: "mod", tag, id: modId },
+        { sha256: plan?.install[0]?.sha256 ?? inspection.sha256, modId: plan?.install[0]?.id ?? modId, count: (plan?.install.length ?? 0) + 1 },
+        (operationId) => modsApi.installFile(tag, path, inspection.sha256, inspection.planToken, operationId),
+        (r) => pushNotice(tag, describeChange(r, modId, tag, namer(r)))
+      );
+    },
     [run, pushNotice, namer]
   );
 
   const setEnabled = useCallback(
     (tag: string, id: string, enabled: boolean) =>
-      run({ kind: "mod", tag, id }, [], () => modsApi.setEnabled(tag, id, enabled), (r) =>
-        pushNotice(tag, describeChange(r, null, tag, namer(r)))
+      run({ kind: "mod", tag, id }, null, () => modsApi.setEnabled(tag, id, enabled), (r) =>
+        pushNotice(tag, describeToggle(r, id, enabled, tag, namer(r)))
       ),
     [run, pushNotice, namer]
   );
 
+  const profilesRef = useRef(profiles);
+  profilesRef.current = profiles;
+
   const remove = useCallback(
     (tag: string, id: string) => {
-      const before = profiles[tag];
-      return run({ kind: "mod", tag, id }, [], () => modsApi.remove(tag, id), (r) => {
+      const before = profilesRef.current[tag];
+      return run({ kind: "mod", tag, id }, null, () => modsApi.remove(tag, id), (r) => {
         // The removed mod is no longer in the new report; name it from the old one.
         const name = namer(r, before);
         pushNotice(tag, describeRemove(r, id, tag, name), r.undo ? { id: r.undo, name: name(r.undo) } : undefined);
       });
     },
-    [run, pushNotice, namer, profiles]
+    [run, pushNotice, namer]
   );
 
   const restore = useCallback(
     (tag: string, id: string) =>
-      run({ kind: "mod", tag, id }, [], () => modsApi.restore(tag, id), (r) => pushNotice(tag, describeRestore(r, id, tag, namer(r)))),
+      run({ kind: "mod", tag, id }, null, (operationId) => modsApi.restore(tag, id, operationId), (r) =>
+        pushNotice(tag, describeRestore(r, id, tag, namer(r)))
+      ),
     [run, pushNotice, namer]
   );
 
   const copyProfile = useCallback(
-    (from: string, to: string, expected: string[] = []) =>
-      run({ kind: "copy", tag: to }, expected, () => modsApi.copyProfile(from, to), (r) =>
-        pushNotice(to, describeCopy(r, from, to, namer(r)))
-      ),
+    (preview: CopyPreview) => {
+      const { from, to } = preview;
+      const items = preview.items.filter((i) => i.outcome === "install");
+      const first = preview.deps[0] ?? items[0];
+      return run(
+        { kind: "copy", tag: to },
+        first ? { sha256: first.sha256 ?? "", modId: first.id, count: items.length + preview.deps.length } : null,
+        (operationId) => modsApi.copyProfile(from, to, preview.planToken, operationId),
+        (r) => pushNotice(to, describeCopy(r, from, to, namer(r)))
+      );
+    },
     [run, pushNotice, namer]
   );
 
@@ -353,14 +412,24 @@ export function ModsProvider({ children }: { children: ReactNode }) {
     (tag: string, id: string) => !!running[keyOf({ kind: "mod", tag, id })] || isCopying(tag),
     [running, isCopying]
   );
-  const progressFor = useCallback((sha: string) => progress[sha], [progress]);
   const progressOf = useCallback(
     (op: Operation) => {
-      const key = keyOf(op);
-      return Object.values(progress).filter((p) => p.owner === key);
+      const r = running[keyOf(op)];
+      return r ? (progress[r.operationId] ?? []) : [];
     },
-    [progress]
+    [running, progress]
   );
+  const cancel = useCallback(
+    async (op: Operation) => {
+      const operationId = markCancelling(op);
+      if (!operationId) return;
+      // False: it had already ended, or got past the point where it can stop. Either way its
+      // own answer says what happened.
+      await modsApi.cancel(operationId).catch(() => false);
+    },
+    [markCancelling]
+  );
+  const isCancelling = useCallback((op: Operation) => !!running[keyOf(op)]?.cancelling, [running]);
   const noticesFor = useCallback((tag: string) => notices.filter((n) => n.tag === tag), [notices]);
   const profile = useCallback((tag: string | null | undefined) => (tag ? profiles[tag] : undefined), [profiles]);
   const profileError = useCallback((tag: string) => profileErrors[tag] ?? null, [profileErrors]);
@@ -377,12 +446,14 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       nameIn,
       isBusy,
       isCopying,
-      progressFor,
       progressOf,
+      cancel,
+      isCancelling,
       notices: noticesFor,
       dismissNotice,
       plan: modsApi.plan,
       previewCopy: modsApi.previewCopy,
+      inspectFile: modsApi.inspectFile,
       install,
       installFile,
       setEnabled,
@@ -401,8 +472,9 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       nameIn,
       isBusy,
       isCopying,
-      progressFor,
       progressOf,
+      cancel,
+      isCancelling,
       noticesFor,
       dismissNotice,
       install,

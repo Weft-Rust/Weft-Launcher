@@ -1,49 +1,56 @@
 import { useI18n } from "../../i18n/useI18n";
 import type { ModProgress, ProgressStage } from "../../mods/types";
+import type { MessageKey } from "../../i18n";
 
-function stageKey(stage: ProgressStage) {
-  switch (stage) {
-    case "downloading":
-      return "mods.stageDownloading" as const;
-    case "verifying":
-      return "mods.stageVerifying" as const;
-    case "installing":
-      return "mods.stageInstalling" as const;
-    default: {
-      const never: never = stage;
-      return never;
-    }
-  }
+const STEP: Record<ProgressStage, MessageKey> = {
+  downloading: "mods.stepDownloading",
+  verifying: "mods.stepVerifying",
+  installing: "mods.stepInstalling",
+};
+
+interface ModProgressBarProps {
+  progress: ModProgress | undefined;
+  /** The name of the mod `progress` is about. */
+  name: string;
+  /** Offered while the operation can still stop: until its files are being installed. */
+  onCancel?: () => void;
+  cancelling?: boolean;
+  /** Where there is no room for the words, e.g. a Browse card: the bar and the step only. */
+  compact?: boolean;
 }
 
 /**
- * Download, check, install: the bar and the step it's on. Only the step is announced, once per
- * change; the percentage stays on screen.
+ * Which file of the operation is being worked on, what is happening to it, and a way to stop:
+ * "File 2 of 3: Glowmoss, downloading 40%". The step is said once per change, not each percent.
  */
-export function ModProgressBar({ progress, name }: { progress: ModProgress | undefined; name?: string }) {
+export function ModProgressBar({ progress, name, onCancel, cancelling = false, compact = false }: ModProgressBarProps) {
   const { t } = useI18n();
   const stage = progress?.stage ?? "downloading";
   const percent = stage === "downloading" ? (progress?.percent ?? 0) : 100;
-  const step = t(stageKey(stage));
-  const label = stage === "downloading" ? t("mods.progressDownloading", String(percent)) : step;
-  const spoken = name ? t("mods.progressSpoken", name, step) : step;
+  const count = progress?.count ?? 1;
+  const index = progress?.index ?? 1;
+  const step = t(STEP[stage], String(percent));
+  const label = count > 1 ? t("mods.progressOf", String(index), String(count), name, step) : t("mods.progressOne", name, step);
+  // Said on each new file and step, not on each percent.
+  const spoken = count > 1 ? t("mods.progressOf", String(index), String(count), name, t(STEP[stage], "")) : t("mods.progressOne", name, t(STEP[stage], ""));
+  const canCancel = !!onCancel && stage !== "installing";
   return (
-    <div className="progress-container">
-      <div
-        className="progress-bar"
-        role="progressbar"
-        aria-valuenow={percent}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label={spoken}
-      >
-        <div className="progress-fill" style={{ width: `round(down, ${percent}%, 4px)` }} />
+    <div className={`progress-container${compact ? " compact" : ""}`} data-stage={stage}>
+      <div className="progress-row">
+        <div className="progress-bar" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
+          <div className="progress-fill" style={{ width: `round(down, ${percent}%, 4px)` }} />
+        </div>
+        {onCancel && (
+          <button className="btn-secondary btn-small progress-cancel" onClick={onCancel} disabled={!canCancel || cancelling}>
+            {cancelling ? t("mods.cancelling") : t("mods.cancelOperation")}
+          </button>
+        )}
       </div>
       <span className="progress-label" aria-hidden="true">
-        {label}
+        {compact ? step : label}
       </span>
       <span className="sr-only" aria-live="polite">
-        {spoken}
+        {spoken.replace(/[\s,:]+$/, "")}
       </span>
     </div>
   );

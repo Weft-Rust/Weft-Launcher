@@ -6,6 +6,7 @@ import {
   describeChange,
   describeCopy,
   describeRemove,
+  describeToggle,
   failureTitle,
   heroState,
   modMeta,
@@ -218,3 +219,65 @@ describe("result notices", () => {
     expect(describeChange(change(), null, T, name)).toBeNull();
   });
 });
+
+describe("contract R4: shadowing, reasons and recovery", () => {
+  it("a revoked mod with a copy in the player's folder blocks, and the fix is that folder", () => {
+    const r = report([installed("cogwork", { status: "revoked", enabled: false, revokedReason: "Corrupts worlds." })], {
+      blocking: ["cogwork"],
+      blockingReasons: { cogwork: "shadowedRevoked" },
+      shadowed: [{ id: "cogwork", file: "cogwork-old.zip", managed: "revoked" }],
+    });
+    const [b] = blockers(r, name);
+    expect(b.reasons).toEqual([{ key: "mods.blockShadowedRevoked", args: ["cogwork-old.zip", "Cogwork", "Corrupts worlds."] }]);
+    expect(b.fixes.map((f) => f.kind)).toEqual(["showFolder"]);
+    // Turning it off can't help: it is off already.
+    expect(b.fixes.some((f) => f.kind === "turnOff")).toBe(false);
+  });
+
+  it("the row says a copy in the player's folder loads instead", () => {
+    const m = installed("showcase", { status: "off", enabled: false });
+    const meta = modMeta(m, "v26.11.1", name, undefined, { id: "showcase", file: "tweak.zip", managed: "off" });
+    expect(meta.shadowed).toBe(true);
+    expect(meta.parts[meta.parts.length - 1]).toEqual({ key: "mods.shadowOffRow", args: ["tweak.zip"] });
+    expect(meta.bad).toBe(false);
+    const on = modMeta(installed("fine"), "v26.11.1", name, undefined, { id: "fine", file: "f.zip", managed: "on" });
+    expect(on.shadowed).toBe(false);
+  });
+
+  it("uses the backend's reason for the wording", () => {
+    const r = report([installed("old", { status: "wrongVersion", weftTag: "v26.10.4" })], { blockingReasons: { old: "wrongVersion" } });
+    expect(blockers(r, name)[0].reasons[0]).toEqual({ key: "mods.statusWrongVersionTag", args: ["v26.10.4"] });
+  });
+
+  it("a missing-dependency crash clears once that dependency is on and usable", () => {
+    const failure = { kind: "missingDep" as const, modId: "hearth", other: "cogwork", line: "x" };
+    const before = report([installed("hearth"), installed("cogwork", { enabled: false, status: "off" })]);
+    const snap = snapshotFor(failure, before);
+    expect(crashResolved(snap, before)).toBe(false);
+    expect(crashResolved(snap, report([installed("hearth"), installed("cogwork", { status: "revoked", revokedReason: "x" })]))).toBe(false);
+    expect(crashResolved(snap, report([installed("hearth"), installed("cogwork")]))).toBe(true);
+  });
+
+  it("a toggle with side effects names what the player did first", () => {
+    const r: ChangeResult = { report: report([]), installed: [], alsoEnabled: [], alsoDisabled: ["hearth"], missing: [], installedOff: [], undo: null };
+    expect(describeToggle(r, "cogwork", false, "v", name)?.lines).toEqual([
+      { key: "mods.noticeTurnedOff", args: ["COGWORK"] },
+      { key: "mods.noticeAlsoDisabled", args: ["HEARTH"] },
+    ]);
+    expect(describeToggle({ ...r, alsoDisabled: [] }, "cogwork", false, "v", name)).toBeNull();
+  });
+
+  it("turning off a mod with a copy in the player's folder says that copy loads instead", () => {
+    const shadowed = { ...report([]), shadowed: [{ id: "cogwork", file: "cogwork-old.zip", managed: "off" as const }] };
+    const r: ChangeResult = { report: shadowed, installed: [], alsoEnabled: [], alsoDisabled: [], missing: [], installedOff: [], undo: null };
+    expect(describeToggle(r, "cogwork", false, "v", name)).toEqual({
+      tone: "warn",
+      lines: [
+        { key: "mods.noticeTurnedOff", args: ["COGWORK"] },
+        { key: "mods.noticeShadowLoads", args: ["COGWORK", "cogwork-old.zip"] },
+      ],
+    });
+    expect(describeToggle(r, "cogwork", true, "v", name)).toBeNull();
+  });
+});
+

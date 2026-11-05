@@ -54,7 +54,8 @@ export function sameRepo(a: string | null | undefined, b: string | null | undefi
 }
 
 export function revocation(catalog: Catalog | null, sha256: string): string | null {
-  return catalog?.revoked.find((r) => r.sha256 === sha256)?.reason ?? null;
+  const s = sha256.toLowerCase();
+  return catalog?.revoked.find((r) => r.sha256.toLowerCase() === s)?.reason ?? null;
 }
 
 export function isRevoked(catalog: Catalog | null, sha256: string): boolean {
@@ -163,4 +164,15 @@ export function parseRepo(input: string): string | null {
   const halves = s.split("/");
   const part = (p: string) => p.length > 0 && p.length <= 100 && p !== "." && p !== ".." && /^[A-Za-z0-9._-]+$/.test(p);
   return halves.length === 2 && part(halves[0]) && part(halves[1]) ? s : null;
+}
+
+/**
+ * Whether the network was down at the last look: the catalogue couldn't be refreshed for want of
+ * a connection, or the index or a source showed its saved copy for that reason. A download needs
+ * it, so install buttons say so.
+ */
+export function networkDown(catalog: Catalog | null, catalogError: { code: string } | null): boolean {
+  if (catalogError?.code === "Network") return true;
+  if (!catalog) return false;
+  return catalog.index.error?.code === "Network" || catalog.sources.some((s) => s.error?.code === "Network");
 }

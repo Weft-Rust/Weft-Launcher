@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   activeStep,
   buildChecks,
+  consentChanges,
+  copyConsentView,
+  fileReplaceNotes,
+  planConsent,
   fileChecks,
   fileVerdict,
   installChecks,
@@ -25,6 +29,8 @@ function plan(extra: Partial<InstallPlan> = {}): InstallPlan {
     missing: [],
     problem: null,
     turnsOn: true,
+    fitsVersion: true,
+    planToken: "plan-x",
     ...extra,
   };
 }
@@ -93,7 +99,7 @@ describe("installChecks", () => {
   });
 
   it("leads with the problem when the install would fail", () => {
-    const rows = installChecks(plan({ problem: { code: "ModIncompatible", detail: "Hearth" } }), build("0.4.0"), ctx);
+    const rows = installChecks(plan({ problem: { code: "ModIncompatible", detail: "Hearth" }, fitsVersion: false }), build("0.4.0"), ctx);
     expect(rows[0]).toMatchObject({ id: "problem", state: "no" });
     expect(row(rows, "abi")?.state).toBe("no");
   });
@@ -102,11 +108,11 @@ describe("installChecks", () => {
 describe("fit with the version", () => {
   it("is yes only when both mod interfaces are known and equal", () => {
     expect(row(installChecks(plan(), build("0.4.0"), ctx), "abi")?.state).toBe("yes");
-    expect(row(installChecks(plan(), build("0.4.0", { abi: OLD_ABI }), ctx), "abi")?.state).toBe("no");
+    expect(row(installChecks(plan({ fitsVersion: false }), build("0.4.0", { abi: OLD_ABI }), ctx), "abi")?.state).toBe("no");
   });
 
   it("is unknown, never a green check, when the version's interface couldn't be found out", () => {
-    const rows = installChecks(plan({ problem: { code: "AbiUnavailable", detail: "v" } }), build("0.4.0"), { ...ctx, versionAbi: null });
+    const rows = installChecks(plan({ problem: { code: "AbiUnavailable", detail: "v" }, fitsVersion: null }), build("0.4.0"), { ...ctx, versionAbi: null });
     expect(row(rows, "abi")).toMatchObject({ state: "unknown", title: { key: "mods.ckFitUnchecked" } });
   });
 });
@@ -142,15 +148,100 @@ describe("weakerDeps", () => {
 });
 
 describe("activeStep", () => {
-  it("shows the dependency still downloading before the mod that waits for it", () => {
-    const p = plan({ install: [{ id: "cogwork", name: "Cogwork", version: "1", sha256: "c".repeat(64), trust: "reviewed", channel: "release", size: 1 }] });
-    const entries = [
-      { sha256: "c".repeat(64), modId: "cogwork", stage: "downloading" as const, percent: 40 },
-      { sha256: "h".repeat(64), modId: "hearth", stage: "installing" as const, percent: 100 },
-    ];
-    expect(activeStep(entries, p, "Hearth")).toMatchObject({ name: "Cogwork", progress: { percent: 40 } });
-    expect(activeStep([entries[1]], p, "Hearth")).toMatchObject({ name: "Hearth" });
-    expect(activeStep([], p, "Hearth")).toEqual({ progress: undefined, name: "Hearth" });
+  const ev = (sha: string, modId: string, stage: "downloading" | "verifying" | "installing", percent: number, index: number) => ({
+    operationId: "op",
+    sha256: sha.repeat(64),
+    modId,
+    stage,
+    percent,
+    index,
+    count: 3,
+  });
+
+  it("follows the newest event: a file that finished checking never hides the next download", () => {
+    // The sequence from review sol-r3 §4: A checked at 100%, then B downloading at 25%.
+    const entries = [ev("a", "cogwork", "verifying", 100, 1), ev("b", "glowmoss", "downloading", 25, 2)];
+    expect(activeStep(entries)).toMatchObject({ modId: "glowmoss", percent: 25, index: 2, count: 3 });
+  });
+
+  it("shows the install step at the end, and nothing before the first event", () => {
+    expect(activeStep([ev("a", "cogwork", "installing", 100, 3)])).toMatchObject({ stage: "installing", index: 3 });
+    expect(activeStep([])).toBeUndefined();
+  });
+});
+
+describe("fit (contract R4 §5)", () => {
+  it("is unknown with Retry when the backend can't tell, never 'no'", () => {
+    const rows = installChecks(plan({ fitsVersion: null, problem: { code: "AbiUnavailable", detail: "v26.11.1" } }), build("1.0.0"), { ...ctx, versionAbi: null });
+    expect(row(rows, "abi")).toMatchObject({ state: "unknown", retry: true, title: { key: "mods.ckFitUnchecked" } });
+    // The fit row says why the button is off; no red "can't install" says it again as a "no".
+    expect(rows[0].id).toBe("abi");
+    expect(rows.filter((r) => r.state === "no")).toEqual([]);
+  });
+
+  it("puts any other problem first, as a no", () => {
+    const rows = installChecks(plan({ problem: { code: "GameRunning", detail: "v26.11.1" } }), build("1.0.0"), ctx);
+    expect(rows[0]).toMatchObject({ id: "problem", state: "no" });
+  });
+
+  it("says no only when it is no", () => {
+    expect(row(installChecks(plan({ fitsVersion: false }), build("1.0.0", { abi: OLD_ABI }), ctx), "abi")?.state).toBe("no");
+    expect(row(installChecks(plan({ fitsVersion: true }), build("1.0.0"), ctx), "abi")?.state).toBe("yes");
+  });
+
+  it("dates a review from an index that isn't fresh", () => {
+    const rows = installChecks(plan(), build("1.0.0"), { ...ctx, indexFrom: "Sep 21, 2026" });
+    expect(row(rows, "review")?.detail).toMatchObject({ key: "mods.ckIndexDetailDated" });
+  });
+});
+
+describe("consentChanges", () => {
+  const glow = (version: string, trust: "reviewed" | "unreviewed" = "unreviewed") => ({
+    id: "glowmoss",
+    name: "Glowmoss",
+    version,
+    sha256: version.repeat(8).slice(0, 64),
+    trust,
+    channel: "release" as const,
+    size: 1,
+  });
+
+  it("names a dependency that got a newer build, and one that turns on now", () => {
+    const before = planConsent(plan({ install: [glow("0.3.0")] }));
+    const after = planConsent(plan({ install: [glow("0.3.1")], enable: ["cogwork"] }));
+    expect(consentChanges(before, after, ctx.name)).toEqual([
+      { key: "mods.changedVersion", args: ["Glowmoss", "0.3.1", "0.3.0"] },
+      { key: "mods.changedEnables", args: ["COGWORK"] },
+    ]);
+  });
+
+  it("names a tier change, an added and a dropped build, and a mod now installed off", () => {
+    const before = planConsent(plan({ install: [glow("0.3.0")] }));
+    const after = planConsent(
+      plan({ install: [glow("0.3.0", "reviewed"), { ...glow("1.0.0"), id: "moss", name: "Moss" }], turnsOn: false, missing: ["x"] })
+    );
+    const keys = consentChanges(before, after, ctx.name).map((c) => c.key);
+    expect(keys).toEqual(["mods.changedTrust", "mods.changedAdded", "mods.changedOff"]);
+    expect(consentChanges(after, before, ctx.name).map((c) => c.key)).toEqual(["mods.changedTrust", "mods.changedDropped", "mods.changedOn"]);
+  });
+
+  it("says the plan changed when nothing visible did", () => {
+    const same = planConsent(plan());
+    expect(consentChanges(same, same, ctx.name)).toEqual([{ key: "mods.changedOther" }]);
+  });
+
+  it("reads a copy preview the same way", () => {
+    const v = copyConsentView({
+      from: "a",
+      to: "b",
+      items: [{ id: "c", name: "C", outcome: "install", version: "1", trust: "reviewed", sha256: "c".repeat(64) }],
+      deps: [],
+      enable: ["e"],
+      installedOff: [],
+      missing: [],
+      planToken: "t",
+    });
+    expect(v).toEqual({ builds: [{ id: "c", name: "C", version: "1", trust: "reviewed" }], enable: ["e"], off: [] });
   });
 });
 
@@ -185,6 +276,7 @@ describe("fileChecks", () => {
     catalogMatch: null,
     revokedReason: null,
     replaces: null,
+    planToken: "plan-f",
     ...extra,
   });
 
@@ -213,5 +305,38 @@ describe("fileChecks", () => {
     expect(fileVerdict(inspection({ fitsSystem: false })).usable).toBe(false);
     expect(fileVerdict(inspection({ revokedReason: "bad" })).usable).toBe(false);
     expect(row(fileChecks(inspection({ revokedReason: "bad" }), "v"), "revoked")?.state).toBe("no");
+  });
+});
+
+describe("file fit and replacing (contract R4 §5)", () => {
+  const inspection = (extra: Partial<FileInspection> = {}): FileInspection => ({
+    fileName: "x.zip",
+    size: 1,
+    sha256: "f".repeat(64),
+    archive: { id: "x", libraries: ["libx.so"], platforms: ["linux-x64"], hasAssets: false, entries: 2 },
+    problem: null,
+    name: "X",
+    summary: null,
+    fitsSystem: true,
+    catalogMatch: null,
+    revokedReason: null,
+    replaces: null,
+    planToken: "plan-f",
+    ...extra,
+  });
+
+  it("an unknown fit of a known file is unknown with Retry, and doesn't make it unusable", () => {
+    const i = inspection({ catalogMatch: { key: "k", name: "X", fitsVersion: null, build: build("1.0.0") } });
+    expect(row(fileChecks(i, "v26.11.1"), "abi")).toMatchObject({ state: "unknown", retry: true });
+    expect(fileVerdict(i).usable).toBe(true);
+    expect(fileVerdict(inspection({ catalogMatch: { key: "k", name: "X", fitsVersion: false, build: build("1.0.0") } })).usable).toBe(false);
+  });
+
+  it("states a change of tier when a file replaces an installed mod", () => {
+    expect(fileReplaceNotes(inspection({ replaces: "X" }), "reviewed")).toEqual([
+      { key: "mods.fileReplacesTrust", args: ["X", { trust: "reviewed" }, { trust: "unverified" }] },
+    ]);
+    expect(fileReplaceNotes(inspection({ replaces: "X" }), "unverified")).toEqual([{ key: "mods.fileReplaces", args: ["X"] }]);
+    expect(fileReplaceNotes(inspection(), "reviewed")).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
 {
-  "_about": "Input/output cases for the mod-set rules, written from the Rust table tests in src-tauri/src/mods/plan.rs and profile.rs (the test each block follows is named in `rust`). mockRules.test.ts runs them against src/dev/mockRules.ts. Builds are [version, abi, channel, deps]; an entry is the Rust test helper `entry(id, deps, abi)` (version 0.1.0, on, Reviewed, from the index, abi ABI) with the fields given changed. A sha is `<id>@<version>`.",
+  "_about": "Input/output cases for the mod-set rules, written from the Rust table tests in src-tauri/src/mods/plan.rs and profile.rs (the test each block follows is named in `rust`). mockRules.test.ts runs them against src/dev/mockRules.ts. Builds are [version, abi, channel, deps]; an entry is the Rust test helper `entry(id, deps, abi)` (version 0.1.0, on, Reviewed, from the index, abi ABI) with the fields given changed. A sha is `<id>@<version>`. Contract R4 adds transitive cases (§1) to plans and commits, and the blocks `shadowing` (§4) and `revocations` (§6).",
   "abi": { "ABI": "f470b1cbb1f9ad91", "OLD": "5f0569a6bea71b81" },
   "catalogs": {
     "world": {
@@ -13,18 +13,19 @@
         { "id": "rcdep", "origin": "index", "builds": [["0.1.0-rc.1", "ABI", "prerelease", []]] },
         { "id": "bad", "origin": "index", "builds": [["1.0.0", "ABI", "release", ["pulled"]]] },
         { "id": "pulled", "origin": "index", "builds": [["1.0.0", "ABI", "release", []]] },
-        { "id": "base", "origin": "index", "builds": [["1.0.0", "ABI", "release", []]] }
+        { "id": "base", "origin": "index", "builds": [["1.0.0", "ABI", "release", []]] },
+        { "id": "top", "origin": "index", "builds": [["1.0.0", "ABI", "release", ["mid"]]] },
+        { "id": "mid", "origin": "index", "builds": [["1.0.0", "ABI", "release", ["leaf"]]] },
+        { "id": "leaf", "origin": "index", "builds": [["1.0.0", "ABI", "release", []]] },
+        { "id": "top2", "origin": "index", "builds": [["1.0.0", "ABI", "release", ["mid2"]]] },
+        { "id": "top3", "origin": "index", "builds": [["1.0.0", "ABI", "release", ["mid3"]]] }
       ],
       "revoked": ["pulled@1.0.0"]
     },
     "updates": {
       "rust": "profile.rs tests::update_offers",
       "mods": [
-        {
-          "id": "cogwork",
-          "origin": "index",
-          "builds": [["0.3.0-rc.1", "ABI", "prerelease", []], ["0.2.0", "ABI", "release", []], ["0.1.0", "ABI", "release", []], ["0.0.9", "OLD", "release", []]]
-        },
+        { "id": "cogwork", "origin": "index", "builds": [["0.3.0-rc.1", "ABI", "prerelease", []], ["0.2.0", "ABI", "release", []], ["0.1.0", "ABI", "release", []], ["0.0.9", "OLD", "release", []]] },
         { "id": "lanterns", "origin": "Someone/Lanterns", "builds": [["1.1.0", "ABI", "release", []]] },
         { "id": "pulled", "origin": "index", "builds": [["0.2.0", "ABI", "release", []]] }
       ],
@@ -34,7 +35,7 @@
     "statuses": { "rust": "profile.rs tests::statuses_and_blocking", "mods": [], "revoked": ["pulled@0.1.0"] }
   },
   "plans": {
-    "rust": "plan.rs tests::plans, plan_problems_and_replacement; contract R3 §1 for turnsOn",
+    "rust": "plan.rs tests::plans, plan_problems_and_replacement; contract R3 §1 for turnsOn; contract R4 §1 for the transitive cases",
     "catalog": "world",
     "cases": [
       { "what": "dependency from the index is installed", "target": "cogwork@0.2.0", "lock": [], "install": ["showcase"], "enable": [], "missing": [], "problem": null, "turnsOn": true },
@@ -59,11 +60,71 @@
         "problem": null,
         "turnsOn": false,
         "replaces": { "enabled": false, "trust": "unreviewed" }
+      },
+      {
+        "what": "R4: an installed dependency that is off turns on with everything it needs",
+        "target": "top@1.0.0",
+        "lock": [{ "id": "mid", "deps": ["leaf"], "enabled": false }, { "id": "leaf", "enabled": false }],
+        "install": [],
+        "enable": ["mid", "leaf"],
+        "missing": [],
+        "problem": null,
+        "turnsOn": true
+      },
+      {
+        "what": "R4: what an installed dependency needs is installed too",
+        "target": "top@1.0.0",
+        "lock": [{ "id": "mid", "deps": ["leaf"], "enabled": false }],
+        "install": ["leaf"],
+        "enable": ["mid"],
+        "missing": [],
+        "problem": null,
+        "turnsOn": true
+      },
+      {
+        "what": "R4: an installed dependency that is on still gets what it lacks",
+        "target": "top@1.0.0",
+        "lock": [{ "id": "mid", "deps": ["leaf"] }, { "id": "leaf", "enabled": false }],
+        "install": [],
+        "enable": ["leaf"],
+        "missing": [],
+        "problem": null,
+        "turnsOn": true
+      },
+      {
+        "what": "R4: a dependency's dependency with no build installs the mod off",
+        "target": "top2@1.0.0",
+        "lock": [{ "id": "mid2", "deps": ["gone"], "enabled": false }],
+        "install": [],
+        "enable": [],
+        "missing": ["gone"],
+        "problem": null,
+        "turnsOn": false
+      },
+      {
+        "what": "R4: a dependency's revoked dependency installs the mod off",
+        "target": "top3@1.0.0",
+        "lock": [{ "id": "mid3", "deps": ["pulled"], "enabled": false }, { "id": "pulled", "version": "1.0.0", "enabled": false }],
+        "install": [],
+        "enable": [],
+        "missing": ["pulled"],
+        "problem": null,
+        "turnsOn": false
+      },
+      {
+        "what": "R4: a dependency's dependency built for another version is replaced by a fitting build",
+        "target": "top@1.0.0",
+        "lock": [{ "id": "mid", "deps": ["leaf"], "enabled": false }, { "id": "leaf", "abi": "OLD", "enabled": false }],
+        "install": ["leaf"],
+        "enable": ["mid"],
+        "missing": [],
+        "problem": null,
+        "turnsOn": true
       }
     ]
   },
   "commits": {
-    "rust": "plan.rs tests::an_update_keeps_the_on_off_state; contract R3 §1 for installedOff",
+    "rust": "plan.rs tests::an_update_keeps_the_on_off_state; contract R3 §1 for installedOff; contract R4 §1 for the transitive cases",
     "catalog": "world",
     "cases": [
       {
@@ -93,15 +154,7 @@
         "installedOff": [],
         "after": { "cogwork": true, "showcase": true }
       },
-      {
-        "what": "a missing dependency installs the mod turned off",
-        "wanted": ["shiny@1.0.0"],
-        "lock": [],
-        "installed": ["shiny"],
-        "alsoEnabled": [],
-        "installedOff": ["shiny"],
-        "after": { "shiny": false }
-      },
+      { "what": "a missing dependency installs the mod turned off", "wanted": ["shiny@1.0.0"], "lock": [], "installed": ["shiny"], "alsoEnabled": [], "installedOff": ["shiny"], "after": { "shiny": false } },
       {
         "what": "copying two mods: only the one missing a dependency stays off",
         "wanted": ["cogwork@0.2.0", "bad@1.0.0"],
@@ -110,6 +163,24 @@
         "alsoEnabled": [],
         "installedOff": ["bad"],
         "after": { "cogwork": true, "bad": false, "showcase": true }
+      },
+      {
+        "what": "R4: a new install turns on its whole chain",
+        "wanted": ["top@1.0.0"],
+        "lock": [{ "id": "mid", "deps": ["leaf"], "enabled": false }, { "id": "leaf", "enabled": false }],
+        "installed": ["top"],
+        "alsoEnabled": ["mid", "leaf"],
+        "installedOff": [],
+        "after": { "top": true, "mid": true, "leaf": true }
+      },
+      {
+        "what": "R4: a chain with a missing end installs the mod off and turns nothing on",
+        "wanted": ["top2@1.0.0"],
+        "lock": [{ "id": "mid2", "deps": ["gone"], "enabled": false }],
+        "installed": ["top2"],
+        "alsoEnabled": [],
+        "installedOff": ["top2"],
+        "after": { "top2": false, "mid2": false }
       }
     ]
   },
@@ -124,21 +195,10 @@
         "alsoEnabled": ["c", "d"],
         "alsoDisabled": []
       },
-      {
-        "what": "turning d off turns off everything that needs it",
-        "lock": [{ "id": "a", "deps": ["c"] }, { "id": "c", "deps": ["d"] }, { "id": "d" }],
-        "action": ["off", "d"],
-        "alsoEnabled": [],
-        "alsoDisabled": ["a", "c"]
-      },
+      { "what": "turning d off turns off everything that needs it", "lock": [{ "id": "a", "deps": ["c"] }, { "id": "c", "deps": ["d"] }, { "id": "d" }], "action": ["off", "d"], "alsoEnabled": [], "alsoDisabled": ["a", "c"] },
       { "what": "a revoked dependency refuses the cascade", "lock": [{ "id": "e", "deps": ["b"], "enabled": false }, { "id": "b", "enabled": false }], "action": ["on", "e"], "error": "ModRevoked" },
       { "what": "a revoked mod can't be turned on", "lock": [{ "id": "b", "enabled": false }], "action": ["on", "b"], "error": "ModRevoked" },
-      {
-        "what": "a revocation remembered in the lock refuses too",
-        "lock": [{ "id": "kept", "enabled": false, "revoked": { "reason": "broken", "at": "2026-11-04T00:00:00Z" } }],
-        "action": ["on", "kept"],
-        "error": "ModRevoked"
-      },
+      { "what": "a revocation remembered in the lock refuses too", "lock": [{ "id": "kept", "enabled": false, "revoked": { "reason": "broken", "at": "2026-11-04T00:00:00Z" } }], "action": ["on", "kept"], "error": "ModRevoked" },
       { "what": "not installed", "lock": [], "action": ["on", "zzz"], "error": "ModNotInstalled" },
       { "what": "removing turns off what needed it", "lock": [{ "id": "a", "deps": ["b"] }, { "id": "b" }], "action": ["remove", "b"], "alsoEnabled": [], "alsoDisabled": ["a"], "after": { "a": false } },
       { "what": "removing what isn't there", "lock": [], "action": ["remove", "b"], "error": "ModNotInstalled" }
@@ -157,15 +217,7 @@
       { "id": "shiny", "abi": "OLD", "enabled": false }
     ],
     "to": [{ "id": "showcase" }],
-    "outcomes": {
-      "cogwork": ["install", "0.2.0"],
-      "showcase": ["alreadyThere", null],
-      "nobuild": ["noBuild", null],
-      "mytweak": ["localFile", null],
-      "pulled": ["revoked", null],
-      "lanterns": ["install", "1.0.0"],
-      "shiny": null
-    },
+    "outcomes": { "cogwork": ["install", "0.2.0"], "showcase": ["alreadyThere", null], "nobuild": ["noBuild", null], "mytweak": ["localFile", null], "pulled": ["revoked", null], "lanterns": ["install", "1.0.0"], "shiny": null },
     "picks": ["cogwork", "lanterns"]
   },
   "statuses": {
@@ -208,6 +260,38 @@
       { "what": "source, repo case differs", "entry": { "id": "lanterns", "version": "1.0.0", "origin": { "kind": "source", "repo": "someone/lanterns" } }, "want": "1.1.0" },
       { "what": "revoked build is never offered", "entry": { "id": "pulled", "version": "0.1.0" }, "want": null },
       { "what": "local file has no updates", "entry": { "id": "cogwork", "version": "0.1.0", "origin": { "kind": "file", "name": "c.zip" } }, "want": null }
+    ]
+  },
+  "shadowing": {
+    "rust": "contract R4 §4: profile::report with files in the player's own mods folder",
+    "catalog": "statuses",
+    "lock": [{ "id": "fine" }, { "id": "kept", "enabled": false, "revoked": { "reason": "remembered", "at": "2026-11-04T00:00:00Z" } }, { "id": "old", "abi": "OLD" }, { "id": "showcase", "enabled": false }],
+    "playerFolder": [{ "file": "fine-copy.zip", "id": "fine" }, { "file": "kept-old.zip", "id": "kept" }, { "file": "tweak.zip", "id": "showcase" }, { "file": "notes.zip", "id": null }],
+    "unmanaged": ["fine-copy.zip", "kept-old.zip", "tweak.zip", "notes.zip"],
+    "shadowed": [{ "id": "fine", "file": "fine-copy.zip", "managed": "on" }, { "id": "kept", "file": "kept-old.zip", "managed": "revoked" }, { "id": "showcase", "file": "tweak.zip", "managed": "off" }],
+    "blocking": ["kept", "old"],
+    "blockingReasons": { "kept": "shadowedRevoked", "old": "wrongVersion" }
+  },
+  "revocations": {
+    "rust": "contract R4 §6: index::format revoked[] entries fail closed",
+    "entries": [
+      { "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "reason": null, "at": null },
+      { "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "reason": "Corrupts worlds", "at": "2026-11-03T00:00:00Z" },
+      { "sha256": " cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc " },
+      { "sha256": "not-a-hash", "reason": "dropped", "at": null },
+      { "sha256": "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "reason": "too short" },
+      { "sha256": null }
+    ],
+    "kept": [
+      { "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "reason": "No reason given", "at": null },
+      { "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "reason": "Corrupts worlds", "at": "2026-11-03T00:00:00Z" },
+      { "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "reason": "No reason given", "at": null }
+    ],
+    "dropped": 3,
+    "matches": [
+      ["AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", true],
+      ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", true],
+      ["eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", false]
     ]
   }
 }

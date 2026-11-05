@@ -40,6 +40,18 @@ export const SCENARIOS: Scenario[] = [
     flags: { prelaunch: "revoke" },
   },
   { name: "long", description: "Very long mod names, ids and repos, for overflow checks.", flags: { long: "1" } },
+  {
+    name: "shadowed",
+    description:
+      "Cogwork is revoked, and the player's own mods folder has a copy of it, which would load in its place: Play is blocked until that file goes.",
+    flags: { revoked: "cogwork", shadow: "cogwork" },
+  },
+  {
+    name: "chain",
+    description:
+      "Mods that need mods that need others: Chimneys needs Hearth, which needs Cogwork, both installed and off; Junctions needs Railways, which needs Signals, which has no build.",
+    flags: { chain: "1" },
+  },
 ];
 
 export interface Flag {
@@ -57,9 +69,20 @@ export const FLAGS: Flag[] = [
     name: "fail",
     values: ["install", "network", "toolarge", "dep", "meanwhile", "catalog", "sources"],
     description:
-      "Comma-separated. Installs fail at the hash check, mid-download, before it, while downloading a dependency, or because the set changed meanwhile; the catalogue or the source list fails to load.",
+      "Comma-separated. Installs fail at the hash check, mid-download, before it, or while downloading a dependency; `meanwhile` publishes a newer Glowmoss after the first plan, so a plan with Glowmoss in it is refused as changed and planned again; the catalogue or the source list fails to load.",
   },
-  { name: "file", values: ["unverified", "known", "notamod", "revoked", "wrongplatform"], description: "What From file picks." },
+  {
+    name: "file",
+    values: ["unverified", "known", "notamod", "revoked", "revokedlate", "wrongplatform"],
+    description: "What From file picks; `revokedlate` is revoked by the index while it is being installed.",
+  },
+  { name: "shadow", values: ["<mod id>"], description: "The player's own mods folder has a copy of that mod, which loads when the launcher's is off or revoked. Showing the folder stands for the player deleting it." },
+  {
+    name: "revocations",
+    values: ["messy"],
+    description: "Revocations come with uppercase hashes, no reason or time, and one entry that isn't a hash: they still revoke, and only that one is dropped.",
+  },
+  { name: "chain", values: ["1"], description: "Adds Chimneys and Junctions, which need mods that need others." },
   {
     name: "crash",
     values: ["wrongVersion", "loadFailed", "notAMod", "wrongName", "missingDep", "initPanicked", "exit"],
@@ -67,5 +90,5 @@ export const FLAGS: Flag[] = [
   },
   { name: "prelaunch", values: ["revoke"], description: "Play finds Cogwork revoked, as a fresh index would, before it starts the game." },
   { name: "long", values: ["1"], description: "Adds very long names, ids and repos." },
-  { name: "slow", values: ["1"], description: "Everything takes four times as long." },
+  { name: "slow", values: ["1"], description: "Everything takes four times as long: time enough to press Cancel." },
 ];

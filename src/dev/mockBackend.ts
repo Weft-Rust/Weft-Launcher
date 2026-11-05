@@ -11,12 +11,13 @@
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 import { COMMANDS, EVENTS } from "../mods/ipc";
+import { CANCEL_MOD_OPERATION } from "../mods/api.pending";
 import { parseRepo, sameRepo } from "../mods/select";
 import { SCENARIOS } from "./scenarios";
 import { CRASH_LOGS } from "./crashes";
 import { findFailure } from "./diagnose";
 import * as R from "./mockRules";
-import type { Entry, Fit } from "./mockRules";
+import type { Entry, Fit, PlayerFile } from "./mockRules";
 import type {
   AppErrorPayload,
   Catalog,
@@ -27,6 +28,7 @@ import type {
   ErrorCode,
   FailureKind,
   FileInspection,
+  ModProgress,
   ProgressStage,
 } from "../mods/types";
 
@@ -176,6 +178,13 @@ const allMods: CatalogMod[] = [
     version("glowmoss", "0.3.0", NEW, fromSource("1f2e3d4c5b6a79881726354a5b6c7d8e9f012345", true)),
   ]),
 ];
+// `chain=1`: mods that need mods that need others (contract R4 §1).
+if (flag("chain") === "1") {
+  allMods.push(
+    indexMod("chimneys", "Chimneys", "Tall brick chimneys for Hearth's stoves.", [version("chimneys", "0.1.0", NEW, { deps: ["base", "hearth"] })]),
+    indexMod("junctions", "Junctions", "Switches and crossings for Railways.", [version("junctions", "0.1.0", NEW, { deps: ["base", "railways"] })])
+  );
+}
 if (LONG) {
   allMods.push(
     indexMod(
@@ -266,7 +275,7 @@ const fileEntry: Entry = {
 };
 
 /** Which mods each scenario starts with. */
-const SETS: Record<string, "full" | "quiet" | "donor" | "needs" | "late" | "none"> = {
+const SETS: Record<string, "full" | "quiet" | "donor" | "needs" | "late" | "chain" | "none"> = {
   mods: "full",
   revoked: "full",
   ratelimited: "full",
@@ -279,6 +288,8 @@ const SETS: Record<string, "full" | "quiet" | "donor" | "needs" | "late" | "none
   empty: "donor",
   missingdep: "needs",
   lateblock: "late",
+  shadowed: "late",
+  chain: "chain",
   fresh: "none",
 };
 
@@ -304,15 +315,33 @@ if (set === "full") {
   locks[OLD] = [pick("cogwork", "0.1.2")];
 } else if (set === "late") {
   locks[NEW] = [pick("cogwork", "0.2.0"), pick("hearth", "0.4.0"), pick("structures", "0.1.3")];
+} else if (set === "chain") {
+  // Hearth needs Cogwork, both off; Railways needs Signals, which has no build for this version.
+  locks[NEW] = [pick("cogwork", "0.2.0", false), pick("hearth", "0.4.0", false), pick("railways", "0.2.0", false), pick("structures", "0.1.3")];
 }
 if (LONG) locks[NEW].push(pick(LONG_ID, "12.34.55"));
 for (const l of Object.values(locks)) l.sort((a, b) => (a.id < b.id ? -1 : 1));
-const unmanaged = set === "full" ? ["oldtweak.zip"] : [];
+/** The player's own mods folder. `shadow=<id>` puts a copy of that managed mod there (contract R4 §4). */
+const playerFolder: PlayerFile[] = set === "full" ? [{ file: "oldtweak.zip", id: "oldtweak" }] : [];
+const shadowId = flag("shadow");
+if (shadowId) playerFolder.push({ file: `${shadowId}-old.zip`, id: shadowId });
 
 const REASON = "Corrupts worlds that use its tubes. Get 0.2.1 or later.";
+/**
+ * Revokes the installed builds of `id`. The entries go through the index's own reading of
+ * `revoked[]` (contract R4 §6); with `revocations=messy` they come uppercased, without a reason or
+ * time, next to one that isn't a hash at all, and still revoke.
+ */
 function revoke(id: string) {
   const shas = new Set(Object.values(locks).flatMap((l) => l.filter((e) => e.id === id).map((e) => e.sha256)));
-  catalog.revoked.push(...[...shas].map((s) => ({ sha256: s, reason: REASON })));
+  const messy = flag("revocations") === "messy";
+  const raw: R.RawRevocation[] = [...shas].map((s) =>
+    messy ? { sha256: s.toUpperCase(), reason: null, at: null } : { sha256: s, reason: REASON, at: "2026-11-03T00:00:00Z" }
+  );
+  if (messy) raw.push({ sha256: "not-a-hash", reason: "a typo in the index", at: null });
+  const { kept, dropped } = R.readRevocations(raw);
+  if (dropped.length) console.warn("mock backend: dropped revocations that aren't SHA-256s", dropped);
+  catalog.revoked.push(...kept.map(({ sha256, reason }) => ({ sha256, reason })));
   // The backend turns a revoked mod off and remembers why in the lock.
   Object.values(locks).forEach((l) => R.applyRevocations(l, catalog, NOW));
 }
@@ -343,28 +372,67 @@ function lockOf(tag: string): Entry[] {
   return locks[tag] ?? fail("NotInstalled", tag);
 }
 
-const report = (tag: string) => R.report(tag, lockOf(tag), abiOf(tag), ABI_ERROR ? err("AbiUnavailable", tag) : null, catalog, unmanaged);
+const report = (tag: string) => R.report(tag, lockOf(tag), abiOf(tag), ABI_ERROR ? err("AbiUnavailable", tag) : null, catalog, playerFolder);
 
 function findBuild(sha256: string) {
   return R.findBuild(catalog, sha256) ?? fail("ModNotInCatalog", sha256);
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms * SLOW));
-const progress = (sha256: string, modId: string, stage: ProgressStage, percent: number) =>
-  emit(EVENTS.modProgress, { sha256, modId, stage, percent });
+
+// ---------------------------------------------------------------------------------------------
+// Operations (contract R4 §3): each has the client's id; its progress says which file of how many,
+// and `cancel_mod_operation` aborts its downloads, leaving nothing behind.
+
+const operations = new Map<string, { cancelled: boolean }>();
+
+/** Runs `work` as operation `id`; a cancel makes it fail with `ModCancelled` at its next step. */
+async function operation<T>(id: string, work: (op: Op) => Promise<T>): Promise<T> {
+  const state = { cancelled: false };
+  operations.set(id, state);
+  try {
+    return await work({
+      id,
+      check: () => {
+        if (state.cancelled) fail("ModCancelled", id);
+      },
+    });
+  } finally {
+    operations.delete(id);
+  }
+}
+
+interface Op {
+  id: string;
+  /** Throws `ModCancelled` once the operation has been cancelled. */
+  check: () => void;
+}
+
+const progress = (op: Op, file: { sha256: string; id: string; index: number; count: number }, stage: ProgressStage, percent: number) =>
+  emit(EVENTS.modProgress, {
+    operationId: op.id,
+    sha256: file.sha256,
+    modId: file.id,
+    stage,
+    percent,
+    index: file.index,
+    count: file.count,
+  } satisfies ModProgress);
 
 /** Download and check one file, with the backend's stages and failures. */
-async function fetchBuild(item: { sha256: string; id: string }, isDep: boolean) {
-  if (failures.has("toolarge")) fail("ModTooLarge", `${item.id}.zip is over 64 MB`);
+async function fetchBuild(op: Op, file: { sha256: string; id: string; index: number; count: number }, isDep: boolean) {
+  if (failures.has("toolarge")) fail("ModTooLarge", `${file.id}.zip is over 64 MB`);
   for (let p = 0; p <= 100; p += 10) {
-    await progress(item.sha256, item.id, "downloading", p);
+    op.check();
+    await progress(op, file, "downloading", p);
     if (p === 40 && failures.has("network")) fail("Network", "connection reset by peer");
-    if (p === 60 && isDep && failures.has("dep")) fail("ModDownloadNotFound", `${item.id}.zip`);
+    if (p === 60 && isDep && failures.has("dep")) fail("ModDownloadNotFound", `${file.id}.zip`);
     await sleep(140);
   }
-  await progress(item.sha256, item.id, "verifying", 100);
+  op.check();
+  await progress(op, file, "verifying", 100);
   await sleep(450);
-  if (failures.has("install")) fail("Sha256Mismatch", `expected ${item.sha256.slice(0, 12)}…, got 0b5e1c9d2a77…`);
+  if (failures.has("install")) fail("Sha256Mismatch", `expected ${file.sha256.slice(0, 12)}…, got 0b5e1c9d2a77…`);
 }
 
 /** Every change but a restore forgets the last removal: its file may go at the next clean-up. */
@@ -376,18 +444,44 @@ function result(tag: string, parts: Partial<Omit<ChangeResult, "report">> = {}):
   return { report: report(tag), installed: [], alsoEnabled: [], alsoDisabled: [], missing: [], installedOff: [], undo: null, ...parts };
 }
 
-/** `service::run_install`: download what the wanted builds need, re-check, then write the set. */
-async function runInstall(tag: string, wanted: { mod: CatalogMod; v: CatalogVersion }[], skipFetch: string[] = []): Promise<ChangeResult> {
+/**
+ * `fail=meanwhile`: the first install, copy or file install finds that a newer Glowmoss was
+ * published after the dialog planned it, so any plan with Glowmoss in it has changed.
+ */
+let meanwhileDone = false;
+function somethingChangesMeanwhile() {
+  if (!failures.has("meanwhile") || meanwhileDone) return;
+  meanwhileDone = true;
+  const glowmoss = catalog.mods.find((m) => m.id === "glowmoss");
+  glowmoss?.versions.unshift(version("glowmoss", "0.3.1", NEW, fromSource("2f3e4d5c6b7a89901827364a5b6c7d8e9f012346", true)));
+}
+
+/**
+ * `service::run_install`: re-plan, refuse a plan that isn't the one the player saw (contract R4
+ * §2), download what is needed, check the plan again under the lock, then write the set.
+ */
+async function runInstall(
+  op: Op,
+  tag: string,
+  wanted: { mod: CatalogMod; v: CatalogVersion }[],
+  token: () => string,
+  expected: string,
+  skipFetch: string[] = []
+): Promise<ChangeResult> {
   const fit = fitOf(tag) ?? fail("AbiUnavailable", tag);
+  if (token() !== expected) fail("ModChangedMeanwhile", tag);
   const res = R.resolve(catalog, lockOf(tag), wanted, fit);
-  for (const p of res.picks) {
-    if (!skipFetch.includes(p.v.sha256)) await fetchBuild({ sha256: p.v.sha256, id: p.mod.id }, !res.wanted.includes(p.mod.id));
+  // Dependencies first, then what was asked for.
+  const order = [...res.picks.filter((p) => !res.wanted.includes(p.mod.id)), ...res.picks.filter((p) => res.wanted.includes(p.mod.id))];
+  const files = order.map((p, i) => ({ sha256: p.v.sha256, id: p.mod.id, index: i + 1, count: order.length }));
+  for (const [i, p] of order.entries()) {
+    if (!skipFetch.includes(p.v.sha256)) await fetchBuild(op, files[i], !res.wanted.includes(p.mod.id));
   }
-  // `installing` comes before the set is rewritten.
-  for (const p of res.picks) await progress(p.v.sha256, p.mod.id, "installing", 100);
+  op.check();
+  // `installing` comes before the set is rewritten; past this, a cancel is too late.
+  for (const f of files) await progress(op, f, "installing", 100);
   await sleep(350);
-  // Contract R3 §5: what changed during the download makes the plan wrong.
-  if (!locks[tag] || failures.has("meanwhile")) fail("ModChangedMeanwhile", tag);
+  if (!locks[tag] || token() !== expected) fail("ModChangedMeanwhile", tag);
   if (running.has(tag)) fail("GameRunning", tag);
   for (const p of res.picks) if (R.revocation(catalog, p.v.sha256)) fail("ModChangedMeanwhile", p.mod.name);
   const lock = lockOf(tag);
@@ -396,10 +490,13 @@ async function runInstall(tag: string, wanted: { mod: CatalogMod; v: CatalogVers
   return result(tag, { installed: done.installed, alsoEnabled: done.alsoEnabled, installedOff: done.installedOff, missing: res.missing });
 }
 
-async function installMod(tag: string, sha256: string): Promise<ChangeResult> {
-  const plan = R.planInstall(catalog, lockOf(tag), tag, sha256, fitOf(tag), running.has(tag));
+const planOf = (tag: string, sha256: string) => R.planInstall(catalog, lockOf(tag), tag, sha256, fitOf(tag), running.has(tag));
+
+async function installMod(tag: string, sha256: string, planToken: string, operationId: string): Promise<ChangeResult> {
+  somethingChangesMeanwhile();
+  const plan = planOf(tag, sha256);
   if (plan.problem) throw plan.problem;
-  return runInstall(tag, [findBuild(sha256)]);
+  return operation(operationId, (op) => runInstall(op, tag, [findBuild(sha256)], () => planOf(tag, sha256).planToken, planToken));
 }
 
 function previewCopy(from: string, to: string) {
@@ -407,11 +504,15 @@ function previewCopy(from: string, to: string) {
   return R.copyPreview(catalog, [from, lockOf(from)], [to, lockOf(to)], fit);
 }
 
-async function copyProfile(from: string, to: string): Promise<CopyResult> {
+async function copyProfile(from: string, to: string, planToken: string, operationId: string): Promise<CopyResult> {
   if (running.has(to)) fail("GameRunning", to);
+  somethingChangesMeanwhile();
   const { preview, picks } = previewCopy(from, to);
+  if (preview.planToken !== planToken) fail("ModChangedMeanwhile", to);
   const leftBehind = preview.items.filter((i) => i.outcome === "noBuild" || i.outcome === "localFile" || i.outcome === "revoked");
-  const change = picks.length ? await runInstall(to, picks) : result(to);
+  const change = picks.length
+    ? await operation(operationId, (op) => runInstall(op, to, picks, () => previewCopy(from, to).preview.planToken, planToken))
+    : result(to);
   return { ...change, leftBehind };
 }
 
@@ -446,11 +547,23 @@ function restoreMod(tag: string, id: string): ChangeResult {
 /** The `known` file is Cogwork 0.2.0: same id, hash and libraries as the catalogue build. */
 const knownBuild = () => findBuild(modById("cogwork").versions.find((v) => v.version === "0.2.0")!.sha256);
 
+/** What a file asks the player to agree to: its own hash and tier, or a catalogued build's plan. */
+function fileToken(tag: string, info: Omit<FileInspection, "planToken">): string {
+  if (info.catalogMatch) return planOf(tag, info.catalogMatch.build.sha256).planToken;
+  return R.planToken({ builds: [{ sha256: info.sha256, trust: "unverified" }], on: info.archive ? [info.archive.id] : [], turnsOn: true, installedOff: [], abi: abiOf(tag) });
+}
+
 function inspect(tag: string): FileInspection {
+  const info = inspectBare(tag);
+  return { ...info, planToken: fileToken(tag, info) };
+}
+
+function inspectBare(tag: string): Omit<FileInspection, "planToken"> {
   const kind = flag("file") ?? "unverified";
   const lock = lockOf(tag);
   if (kind === "known") {
     const { mod, v } = knownBuild();
+    const abi = abiOf(tag);
     return {
       fileName: "cogwork.zip",
       size: v.size,
@@ -460,12 +573,13 @@ function inspect(tag: string): FileInspection {
       name: mod.name,
       summary: mod.summary,
       fitsSystem: true,
-      catalogMatch: { key: mod.key, name: mod.name, fitsVersion: v.abi === abiOf(tag), build: v },
+      // Contract R4 §5: unknown when the version's interface is.
+      catalogMatch: { key: mod.key, name: mod.name, fitsVersion: abi === null ? null : v.abi === abi, build: v },
       revokedReason: R.revocation(catalog, v.sha256),
       replaces: lock.find((e) => e.id === "cogwork")?.name ?? null,
     };
   }
-  const base: FileInspection = {
+  const base: Omit<FileInspection, "planToken"> = {
     fileName: "mytweak.zip",
     size: 1_153_433,
     sha256: sha("mytweak"),
@@ -497,24 +611,39 @@ function inspect(tag: string): FileInspection {
   return base;
 }
 
-async function installFile(tag: string, sha256: string): Promise<ChangeResult> {
+/** `file=revokedlate`: the index revokes the file's hash while it is being copied in. */
+const REVOKED_LATE = "Steals saved logins. Revoked while you were installing it.";
+
+async function installFile(tag: string, sha256: string, planToken: string, operationId: string): Promise<ChangeResult> {
+  somethingChangesMeanwhile();
   const info = inspect(tag);
   if (info.sha256 !== sha256) fail("ModFileChanged");
   if (!info.archive) throw info.problem;
   if (info.revokedReason) fail("ModRevoked", info.revokedReason);
   if (running.has(tag)) fail("GameRunning", tag);
-  await progress(sha256, info.archive.id, "verifying", 100);
-  await sleep(300);
-  // A catalogued file installs from these bytes, recorded with the catalogue's metadata and
-  // tier, and brings what it needs like any install.
-  if (info.catalogMatch) return runInstall(tag, [knownBuild()], [sha256]);
-  await progress(sha256, info.archive.id, "installing", 100);
-  await sleep(300);
-  const lock = lockOf(tag);
-  const existing = lock.find((e) => e.id === fileEntry.id);
-  R.put(lock, { ...fileEntry, enabled: existing?.enabled ?? true, installedAt: new Date().toISOString() });
-  changed(tag);
-  return result(tag, { installed: [fileEntry.id] });
+  if (info.planToken !== planToken) fail("ModChangedMeanwhile", tag);
+  return operation(operationId, async (op) => {
+    const self = { sha256, id: info.archive!.id, index: 1, count: 1 };
+    await progress(op, self, "verifying", 100);
+    await sleep(300);
+    op.check();
+    // A catalogued file installs from these bytes, recorded with the catalogue's metadata and
+    // tier, and brings what it needs like any install.
+    if (info.catalogMatch) {
+      return runInstall(op, tag, [knownBuild()], () => inspect(tag).planToken, planToken, [sha256]);
+    }
+    if (flag("file") === "revokedlate") catalog.revoked.push({ sha256, reason: REVOKED_LATE });
+    await progress(op, self, "installing", 100);
+    await sleep(300);
+    // Contract R4 §2: revocation is checked again at commit, for an unknown file by its hash.
+    const late = R.revocation(catalog, sha256);
+    if (late) fail("ModRevoked", late);
+    const lock = lockOf(tag);
+    const existing = lock.find((e) => e.id === fileEntry.id);
+    R.put(lock, { ...fileEntry, enabled: existing?.enabled ?? true, installedAt: new Date().toISOString() });
+    changed(tag);
+    return result(tag, { installed: [fileEntry.id] });
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -608,9 +737,14 @@ export function installMockBackend() {
         case COMMANDS.launchVersion:
           await launch(args.tag);
           return null;
+        case COMMANDS.openPlayerModsFolder: {
+          // The player, shown their folder, deletes the stray copy: the next profile is without it.
+          const at = playerFolder.findIndex((f) => f.id === shadowId);
+          if (at >= 0) playerFolder.splice(at, 1);
+          return null;
+        }
         case COMMANDS.openLog:
         case COMMANDS.openGameFolder:
-        case COMMANDS.openPlayerModsFolder:
           return null;
         case COMMANDS.listModCatalog:
           await sleep(args.forceRefresh ? 400 : 0);
@@ -644,12 +778,12 @@ export function installMockBackend() {
           await sleep(120);
           return R.planInstall(catalog, lockOf(args.tag), args.tag, args.sha256, fitOf(args.tag), running.has(args.tag));
         case COMMANDS.installMod:
-          return installMod(args.tag, args.sha256);
+          return installMod(args.tag, args.sha256, args.planToken, args.operationId);
         case COMMANDS.inspectModFile:
           await sleep(300);
           return inspect(args.tag);
         case COMMANDS.installModFile:
-          return installFile(args.tag, args.sha256);
+          return installFile(args.tag, args.sha256, args.planToken, args.operationId);
         case COMMANDS.setModEnabled:
           await sleep(150);
           return setEnabled(args.tag, args.id, !!args.enabled);
@@ -663,7 +797,12 @@ export function installMockBackend() {
           await sleep(200);
           return previewCopy(args.from, args.to).preview;
         case COMMANDS.copyModProfile:
-          return copyProfile(args.from, args.to);
+          return copyProfile(args.from, args.to, args.planToken, args.operationId);
+        case CANCEL_MOD_OPERATION: {
+          const op = operations.get(String(args.operationId));
+          if (op) op.cancelled = true;
+          return !!op;
+        }
         default:
           console.warn("mock backend: unhandled", cmd, args);
           return null;

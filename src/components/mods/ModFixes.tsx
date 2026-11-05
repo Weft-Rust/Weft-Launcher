@@ -1,13 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useI18n } from "../../i18n/useI18n";
-import { translateError } from "../../i18n/errors";
+import { showError, type Shown } from "../../i18n/errors";
 import { useMods } from "../../hooks/useMods";
 import { useGameState, type GameCrash } from "../../hooks/useGameState";
 import { modsApi } from "../../mods/api";
 import { catalogModFor } from "../../mods/select";
-import { blockers, crashFixes, failureTitle, type Fix } from "../../mods/status";
+import { blockers, crashFixes, failureTitle, shadowOf, type Fix } from "../../mods/status";
 import type { CatalogMod, InstalledMod } from "../../mods/types";
 import { Announce } from "../Announce";
+import { announce } from "../LiveRegion";
+import { ErrorText } from "../ErrorText";
 import { InstallDialog } from "./InstallDialog";
 
 /** A build to review in the install dialog, opened from a fix button. */
@@ -39,8 +41,8 @@ export function useReviewDialog(tag: string | null) {
 export type Review = ReturnType<typeof useReviewDialog>;
 
 function useFix(tag: string, review: Review) {
-  const { setEnabled, profile } = useMods();
-  const [error, setError] = useState<string | null>(null);
+  const { setEnabled, profile, loadProfile } = useMods();
+  const [error, setError] = useState<Shown | null>(null);
   const apply = async (fix: Fix) => {
     setError(null);
     if (fix.kind === "install") return review.openInstall(fix.mod, fix.sha256);
@@ -48,8 +50,18 @@ function useFix(tag: string, review: Review) {
       const mod = profile(tag)?.mods.find((m) => m.id === fix.id);
       return mod && review.openUpdate(mod, fix.sha256);
     }
+    if (fix.kind === "showFolder") {
+      // Only the player can remove their own file; the launcher looks again once they're back.
+      try {
+        await modsApi.openPlayerModsFolder();
+      } catch (err) {
+        setError(showError(err));
+      }
+      window.addEventListener("focus", () => loadProfile(tag), { once: true });
+      return;
+    }
     const r = await setEnabled(tag, fix.id, fix.kind === "turnOn");
-    if (r.status === "failed") setError(r.message);
+    if (r.status === "failed") setError(r.shown);
   };
   return { apply, error };
 }
@@ -68,6 +80,8 @@ function FixButtons({ tag, fixes, locked, review, apply }: { tag: string; fixes:
         return t("mods.installDep", fix.name);
       case "update":
         return t("mods.update", fix.version);
+      case "showFolder":
+        return t("mods.showFolderFix", fix.file);
     }
   };
   const disabled = (fix: Fix) => {
@@ -81,7 +95,7 @@ function FixButtons({ tag, fixes, locked, review, apply }: { tag: string; fixes:
       {fixes.map((fix) => (
         <button
           key={`${fix.kind}:${fix.id}`}
-          className={`btn-small ${fix.kind === "update" || fix.kind === "install" ? "btn-primary" : "btn-secondary"}`}
+          className={`btn-small ${fix.kind === "update" || fix.kind === "install" || fix.kind === "showFolder" ? "btn-primary" : "btn-secondary"}`}
           disabled={disabled(fix)}
           onClick={() => apply(fix)}
         >
@@ -106,19 +120,20 @@ interface BlockerPanelProps {
  * Mods tab. Rendered also while nothing blocks, so a problem that comes back is said again.
  */
 export function BlockerPanel({ tag, locked, review, id, inBanner = false }: BlockerPanelProps) {
-  const { t, tn, tm, formatList } = useI18n();
+  const { t, tn, tm } = useI18n();
   const { profile, nameIn, catalog } = useMods();
   const { apply, error } = useFix(tag, review);
   const list = blockers(profile(tag), nameIn(tag), catalog);
   const title = tn("mods.homeBlocked", list.length, tag);
-  const spoken = `${title} ${formatList(list.map((b) => b.mod.name))}`;
-  const announce = <Announce channel={`blockers:${tag}`} id={list.map((b) => b.mod.id).join(",")} text={spoken} />;
-  if (!list.length) return announce;
+  // Assertive, and only for blockers that weren't there a moment ago.
+  const said = <Announce channel={`blockers:${tag}`} items={list.map((b) => ({ id: b.mod.id, text: b.mod.name }))} prefix={title} />;
+  if (!list.length) return said;
 
   return (
     <section className={`blockers${inBanner ? " in-banner" : " launch-error"}`} id={id} aria-label={title}>
-      {announce}
-      <span className="blockers-title">{title}</span>
+      {said}
+      {/* In a banner on the Mods tab, one blocker's own line says it all; the title stays for a screen reader. */}
+      <span className={`blockers-title${inBanner && list.length === 1 ? " sr-only" : ""}`}>{title}</span>
       <ul className="blocker-list">
         {list.map(({ mod, reasons, fixes }) => (
           <li key={mod.id} className="blocker">
@@ -131,11 +146,7 @@ export function BlockerPanel({ tag, locked, review, id, inBanner = false }: Bloc
           </li>
         ))}
       </ul>
-      {error && (
-        <span className="blockers-error" role="alert">
-          {error}
-        </span>
-      )}
+      {error && <ErrorText error={error} className="blockers-error" />}
     </section>
   );
 }
@@ -163,18 +174,21 @@ export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNotice
   const { profile, nameIn, catalog } = useMods();
   const { clearCrash } = useGameState();
   const { apply, error } = useFix(crash.tag, review);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<Shown | null>(null);
   const failure = crash.modFailure;
   const report = profile(crash.tag);
   const managed = failure?.modId ? report?.mods.find((m) => m.id === failure.modId) : undefined;
   const fixes = crashFixes(failure, report, catalog);
+  // A copy in the player's own folder may be what the game loaded, so turning this one off may not help.
+  const shadow = failure?.modId ? shadowOf(report, failure.modId) : undefined;
+  const outside = !!failure?.modId && (!managed || !!shadow);
 
   const attempt = async (work: () => Promise<void>) => {
     setActionError(null);
     try {
       await work();
     } catch (err) {
-      setActionError(translateError(err));
+      setActionError(showError(err));
     }
   };
 
@@ -184,10 +198,11 @@ export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNotice
 
   return (
     <section className="launch-error mod-failure" aria-label={title}>
-      <Announce channel="crash" id={crashId(crash)} text={title} />
+      <CrashSaid id={crashId(crash)} text={title} />
       <span className="mod-failure-title">{title}</span>
       {failure && <span className="mod-failure-line">{failure.line}</span>}
       {failure && !managed && failure.modId && <span className="mod-failure-why">{t("mods.failureOutside")}</span>}
+      {shadow && <span className="mod-failure-why">{t("mods.failureShadowed", shadow.file)}</span>}
       <span className="mod-failure-actions">
         <FixButtons tag={crash.tag} fixes={fixes} locked={false} review={review} apply={apply} />
         {managed && onGoToMods && (
@@ -195,7 +210,7 @@ export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNotice
             {t("mods.homeFixInMods")}
           </button>
         )}
-        {failure && !managed && failure.modId && (
+        {outside && (
           <button className="btn-secondary btn-small" onClick={() => attempt(modsApi.openPlayerModsFolder)}>
             {t("mods.openModsFolder")}
           </button>
@@ -207,11 +222,13 @@ export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNotice
           {t("mods.dismiss")}
         </button>
       </span>
-      {(error || actionError) && (
-        <span className="blockers-error" role="alert">
-          {error ?? actionError}
-        </span>
-      )}
+      {(error || actionError) && <ErrorText error={(error ?? actionError)!} className="blockers-error" />}
     </section>
   );
+}
+
+/** A crash is a result of Play: said once, politely. */
+function CrashSaid({ id, text }: { id: string; text: string }) {
+  useEffect(() => announce(`crash:${id}`, text), [id, text]);
+  return null;
 }

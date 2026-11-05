@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useI18n } from "./i18n/useI18n";
-import { translateError } from "./i18n/errors";
+import { showError, type Shown } from "./i18n/errors";
+import { LiveRegion } from "./components/LiveRegion";
 import { useInstall } from "./hooks/useInstall";
 import { Sidebar } from "./components/Sidebar";
 import { Tabs, TabId, useMainTabs } from "./components/Tabs";
@@ -45,7 +46,7 @@ function App() {
   const { profile } = useMods();
   const [releases, setReleases] = useState<Release[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Shown | null>(null);
   const [fromCache, setFromCache] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("home");
   const [selectedTag, setSelectedTag] = useState<string | null>(lastPlayed);
@@ -69,7 +70,7 @@ function App() {
       setFromCache(cached);
       return cached;
     } catch (err) {
-      setError(translateError(err));
+      setError(showError(err));
       return false;
     } finally {
       setLoading(false);
@@ -108,6 +109,10 @@ function App() {
             fromCache={fromCache}
             onRefresh={fetchReleases}
             newTag={newTag}
+            onFixMods={(tag) => {
+              setSelectedTag(tag);
+              setActiveTab("mods");
+            }}
           />
         );
       case "mods":
@@ -127,6 +132,7 @@ function App() {
 
   return (
     <div className="app-layout">
+      <LiveRegion />
       <VoxelField />
       <Sidebar />
       <div className="main-content">

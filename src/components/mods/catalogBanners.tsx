@@ -3,6 +3,8 @@ import { useI18n } from "../../i18n/useI18n";
 import { useMods } from "../../hooks/useMods";
 import type { Catalog, ErrorCode, SourceStatus } from "../../mods/types";
 import type { BannerItem } from "./BannerStack";
+import { showError } from "../../i18n/errors";
+import { ErrorDetails } from "../ErrorText";
 
 type T = (key: MessageKey, ...args: string[]) => string;
 
@@ -46,7 +48,6 @@ export function sourceProblem(s: SourceStatus, t: T, formatDay: (iso: string | n
 export function indexProblem(index: Catalog["index"], t: T, formatDay: (iso: string | null) => string): string | null {
   if (index.freshness === "fresh" && !index.error) return null;
   if (index.freshness === "stale" && !index.error) return t("mods.indexStale", formatDay(index.signedAt ?? index.generated));
-  if (index.freshness === "unavailable" || !index.generated) return t("mods.indexUnavailable");
   const code = index.error?.code;
   const why =
     code === "IndexSignatureInvalid" || code === "IndexInvalid"
@@ -56,53 +57,74 @@ export function indexProblem(index: Catalog["index"], t: T, formatDay: (iso: str
         : cause(code) === "disk"
           ? t("mods.indexDisk")
           : t("mods.indexUnreachable");
+  // Say why, also when there is nothing saved to show instead.
+  if (index.freshness === "unavailable" || !index.generated) return `${t("mods.indexUnavailable")} ${why}`;
   return `${t("mods.indexShowingFrom", formatDay(index.generated))} ${why}`;
 }
 
+/** The index's state in a few words, for the folded row. */
+export function indexSummary(index: Catalog["index"], t: T, formatDay: (iso: string | null) => string): string | null {
+  if (index.freshness === "fresh" && !index.error) return null;
+  if (index.freshness === "unavailable" || !index.generated) return t("mods.indexUnavailableShort");
+  const day = formatDay(index.signedAt ?? index.generated);
+  if (index.freshness === "stale" && !index.error) return t("mods.indexStaleShort", day);
+  return cause(index.error?.code) === "network" ? t("mods.indexOfflineShort", day) : t("mods.indexCachedShort", day);
+}
+
 /**
- * The catalogue's notices: the index's state and sources that failed, each with a way forward.
- * Ranked before the player's own mods folder. "Reviewed mods are unavailable" is `full`: it
- * explains why the list has no Reviewed mods, so it never folds away.
+ * The catalogue's notes, by the ids `bannerPlan` places: a refresh that failed while an older
+ * catalogue still shows, the index's state, and sources that failed, each with its cause in
+ * words, the backend's own words behind Details, and a way forward.
  */
-export function useCatalogBanners(onManageSources: () => void): { full: BannerItem[]; quiet: BannerItem[] } {
+export function useCatalogBanners(onManageSources: () => void): Record<string, BannerItem> {
   const { t, formatDay } = useI18n();
-  const { catalog, catalogLoading, refreshCatalog } = useMods();
-  if (!catalog) return { full: [], quiet: [] };
+  const { catalog, catalogLoading, catalogError, refreshCatalog } = useMods();
+  if (!catalog) return {};
   const retry = (
     <button className="btn-secondary btn-small" onClick={refreshCatalog} disabled={catalogLoading}>
       {catalogLoading ? t("mods.retrying") : t("mods.retry")}
     </button>
   );
-  const full: BannerItem[] = [];
-  const quiet: BannerItem[] = [];
+  const out: Record<string, BannerItem> = {};
+  if (catalogError) {
+    const shown = showError(catalogError);
+    out.refresh = {
+      id: "refresh",
+      tone: "warn",
+      text: (
+        <>
+          {t("mods.refreshFailed")} {shown.message}
+          {shown.detail && <ErrorDetails detail={shown.detail} label={t("errors.details")} />}
+        </>
+      ),
+      summary: t("mods.refreshFailedShort"),
+      actions: retry,
+    };
+  }
   const index = indexProblem(catalog.index, t, formatDay);
   if (index) {
-    // What the backend said, where it adds to the sentence: which key, which file.
     const e = catalog.index.error;
-    const detail = e?.detail && cause(e.code) !== "network" ? e.detail : undefined;
-    const item: BannerItem = {
+    const detail = e ? showError(e).detail : null;
+    out.index = {
       id: "index",
       tone: catalog.index.freshness === "cached" ? "info" : "warn",
       text: (
         <>
           {index}
-          {detail && <span className="banner-detail"> ({detail})</span>}
+          {detail && <ErrorDetails detail={detail} label={t("errors.details")} />}
         </>
       ),
-      summary: catalog.index.freshness === "unavailable" ? t("mods.indexUnavailableShort") : index,
+      summary: indexSummary(catalog.index, t, formatDay) ?? index,
       actions: retry,
-      rank: 1,
     };
-    (catalog.index.freshness === "unavailable" ? full : quiet).push(item);
   }
   for (const s of catalog.sources.filter((x) => x.error)) {
     const text = sourceProblem(s, t, formatDay);
-    quiet.push({
+    out[`source:${s.repo}`] = {
       id: `source:${s.repo}`,
       tone: "warn",
       text,
-      summary: text,
-      rank: 2,
+      summary: t("mods.sourceShort", s.repo),
       actions: (
         <>
           {retry}
@@ -111,7 +133,7 @@ export function useCatalogBanners(onManageSources: () => void): { full: BannerIt
           </button>
         </>
       ),
-    });
+    };
   }
-  return { full, quiet };
+  return out;
 }

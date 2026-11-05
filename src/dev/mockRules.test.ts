@@ -193,4 +193,59 @@ describe("mock rules follow the backend's", () => {
     const r = R.report("v1", lock, rules.abi.ABI, null, { ...cat, revoked: [] }, []);
     expect(r.mods[0]).toMatchObject({ status: "revoked", revokedReason: "broken" });
   });
+
+  it("shadowing: a player-folder copy of a managed mod, and a revoked one blocks", () => {
+    const s = rules.shadowing;
+    const cat = catalog(s.catalog as "statuses");
+    const r = R.report("v1", (s.lock as EntrySpec[]).map(entry), rules.abi.ABI, null, cat, s.playerFolder);
+    expect(r.unmanaged).toEqual(s.unmanaged);
+    expect(r.shadowed).toEqual(s.shadowed);
+    expect(r.blocking).toEqual(s.blocking);
+    expect(r.blockingReasons).toEqual(s.blockingReasons);
+  });
+
+  it("revocations fail closed", () => {
+    const v = rules.revocations;
+    const { kept, dropped } = R.readRevocations(v.entries as R.RawRevocation[]);
+    expect(kept).toEqual(v.kept);
+    expect(dropped).toHaveLength(v.dropped);
+    const cat = { ...catalog("empty"), revoked: kept.map(({ sha256, reason }) => ({ sha256, reason })) };
+    for (const [sha, revoked] of v.matches) expect(R.revocation(cat, sha as string) !== null, String(sha)).toBe(revoked);
+  });
+
+  it("every blocking id has a reason", () => {
+    const s = rules.statuses;
+    const r = R.report("v1", (s.lock as EntrySpec[]).map(entry), rules.abi.ABI, null, catalog(s.catalog as "statuses"), []);
+    expect(Object.keys(r.blockingReasons).sort()).toEqual([...r.blocking].sort());
+    expect(r.blockingReasons).toEqual({ cogwork: "missingDeps", old: "wrongVersion" });
+  });
+});
+
+describe("plan tokens and fit (contract R4 §2, §5)", () => {
+  const cat = catalog("world");
+  it("the same plan gives the same token; a changed consent another", () => {
+    const lock = [entry({ id: "mid", deps: ["leaf"], enabled: false }), entry({ id: "leaf", enabled: false })];
+    const a = R.planInstall(cat, lock, "v1", "top@1.0.0", FIT, false);
+    const b = R.planInstall(cat, lock.map((e) => ({ ...e })), "v1", "top@1.0.0", FIT, false);
+    expect(a.planToken).toBe(b.planToken);
+    // Leaf is on now: one fewer mod turns on, so the player agreed to something else.
+    const c = R.planInstall(cat, [lock[0], { ...lock[1], enabled: true }], "v1", "top@1.0.0", FIT, false);
+    expect(c.planToken).not.toBe(a.planToken);
+    // A dependency's tier changes.
+    const swapped = { ...cat, mods: cat.mods.map((m) => (m.id === "leaf" ? { ...m, versions: m.versions.map((v) => ({ ...v, trust: "unreviewed" as Trust })) } : m)) };
+    const d = R.planInstall(swapped, [lock[0]], "v1", "top@1.0.0", FIT, false);
+    const e = R.planInstall(cat, [lock[0]], "v1", "top@1.0.0", FIT, false);
+    expect(d.planToken).not.toBe(e.planToken);
+  });
+
+  it("fitsVersion is unknown, never false, without the version's interface", () => {
+    expect(R.planInstall(cat, [], "v1", "cogwork@0.2.0", null, false).fitsVersion).toBeNull();
+    expect(R.planInstall(cat, [], "v1", "cogwork@0.2.0", FIT, false).fitsVersion).toBe(true);
+    expect(R.planInstall(cat, [], "v1", "cogwork@0.1.0", FIT, false).fitsVersion).toBe(false);
+  });
+
+  it("a copy preview carries a token", () => {
+    const { preview } = R.copyPreview(cat, ["v1", [entry({ id: "cogwork", deps: ["showcase"], abi: "OLD" })]], ["v2", []], FIT);
+    expect(preview.planToken).toMatch(/^plan-/);
+  });
 });
