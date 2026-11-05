@@ -19,7 +19,7 @@ use crate::error::AppError;
 pub struct CatalogMatch {
     pub key: String,
     pub name: String,
-    /// Whether the build is for the version's mod interface; `None` when that is unknown.
+    /// Whether the build is for the version's mod interface; null when that is unknown.
     pub fits_version: Option<bool>,
     /// The catalogue entry: trust, review, provenance and whether it was verified.
     pub build: CatalogVersion,

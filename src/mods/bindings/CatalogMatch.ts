@@ -3,7 +3,7 @@ import type { CatalogVersion } from "./CatalogVersion";
 
 export type CatalogMatch = { key: string, name: string, 
 /**
- * Whether the build is for the version's mod interface; `None` when that is unknown.
+ * Whether the build is for the version's mod interface; null when that is unknown.
  */
 fitsVersion: boolean | null, 
 /**

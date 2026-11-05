@@ -26,7 +26,7 @@ missing: Array<string>,
  */
 turnsOn: boolean, 
 /**
- * Whether the target is built for the version's mod interface; `None` when that is unknown.
+ * Whether the target is built for the version's mod interface; null when that is unknown.
  */
 fitsVersion: boolean | null, 
 /**

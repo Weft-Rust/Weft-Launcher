@@ -72,7 +72,7 @@ pub struct InstallPlan {
     /// at any depth, is missing. With something missing it is installed turned off. False when
     /// the version's mod interface is unknown: then nothing can be resolved.
     pub turns_on: bool,
-    /// Whether the target is built for the version's mod interface; `None` when that is unknown.
+    /// Whether the target is built for the version's mod interface; null when that is unknown.
     pub fits_version: Option<bool>,
     /// Why the install would fail, if it would.
     pub problem: Option<AppError>,

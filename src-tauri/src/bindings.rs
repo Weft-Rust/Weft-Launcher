@@ -124,16 +124,32 @@ fn injected(rust_type: &str) -> bool {
         .any(|t| rust_type.contains(t))
 }
 
-/// Reads `pub async fn <name>(…) -> Result<T, AppError>` from Rust source.
+/// Reads a command's signature from Rust source. The shapes it supports, and the only ones a
+/// command may have:
+///
+/// - `pub async fn name(` or `pub fn name(`, with no generics and no `where` clause;
+/// - arguments `name: Type`, without attributes or patterns, where `Type` is `String`, `&str`,
+///   `PathBuf`, `bool`, a number, `Option<…>`, `Vec<…>`, or a type exported to the bindings;
+///   `AppHandle`, `State<…>`, `Window` and `Webview` are filled in by Tauri and skipped;
+/// - the result `-> Result<T, AppError>`, `-> T`, or none.
+///
+/// Anything else (a `#[tauri::command(rename_all = …)]`, an attribute on an argument, `impl`,
+/// `&mut`, `dyn`, a lifetime) fails here with the command's name, rather than being read
+/// wrongly.
 fn signature_in(
     source: &str,
     name: &str,
     named: &mut std::collections::BTreeSet<String>,
 ) -> Signature {
-    let start = [format!("pub async fn {name}("), format!("pub fn {name}(")]
+    let (decl, start) = [format!("pub async fn {name}("), format!("pub fn {name}(")]
         .iter()
-        .find_map(|p| source.find(p.as_str()).map(|at| at + p.len()))
-        .unwrap_or_else(|| panic!("no declaration of command {name}"));
+        .find_map(|p| source.find(p.as_str()).map(|at| (at, at + p.len())))
+        .unwrap_or_else(|| panic!("no declaration of command {name} (generics aren't supported)"));
+    let attribute = source[..decl].trim_end().lines().last().unwrap_or("");
+    assert!(
+        !attribute.contains("tauri::command("),
+        "command {name}: options on #[tauri::command] aren't supported"
+    );
     let rest = &source[start..];
     let mut depth = 1;
     let close = rest
@@ -148,19 +164,35 @@ fn signature_in(
         })
         .map(|(i, _)| i)
         .expect("end of the argument list");
-    let args = split_top(&rest[..close])
+    let params = &rest[..close];
+    for bad in ["#[", "impl ", "&mut", "dyn ", "'"] {
+        assert!(
+            !params.contains(bad),
+            "command {name}: {bad:?} in its arguments isn't supported"
+        );
+    }
+    let args = split_top(params)
         .into_iter()
         .filter_map(|param| {
-            let (arg, ty) = param.split_once(':').expect("name: Type");
+            let (arg, ty) = param
+                .split_once(':')
+                .unwrap_or_else(|| panic!("command {name}: {param:?} is not name: Type"));
+            assert!(
+                arg.trim()
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_'),
+                "command {name}: argument {arg:?} isn't a plain name"
+            );
             (!injected(ty)).then(|| (camel(arg.trim()), ts_type(ty, named)))
         })
         .collect();
     let after = &rest[close + 1..];
-    let ret = after[..after.find('{').expect("function body")]
-        .trim()
-        .strip_prefix("->")
-        .map(str::trim)
-        .unwrap_or("()");
+    let head = after[..after.find('{').expect("function body")].trim();
+    assert!(
+        !head.contains("where") && !head.contains("impl "),
+        "command {name}: `where` and `impl` results aren't supported"
+    );
+    let ret = head.strip_prefix("->").map(str::trim).unwrap_or("()");
     let ok = ret
         .strip_prefix("Result<")
         .and_then(|r| r.strip_suffix('>'))
@@ -418,6 +450,32 @@ fn signatures_are_read_from_the_declarations() {
     assert_eq!(sig.args, [("tag".to_string(), "string".to_string())]);
     assert_eq!(sig.result, "void");
     assert_eq!(named.into_iter().collect::<Vec<_>>(), ["InstalledVersion"]);
+
+    // Shapes it can't read are refused, by name.
+    for (bad, why) in [
+        (
+            "#[tauri::command(rename_all = \"snake_case\")]\npub async fn a(x: String) {}",
+            "options",
+        ),
+        ("pub async fn a(#[allow(x)] x: String) {}", "#["),
+        ("pub async fn a(x: impl Into<String>) {}", "impl"),
+        ("pub async fn a<T>(x: T) {}", "generics"),
+        (
+            "pub fn a(x: String) -> Result<T, E> where T: Clone {}",
+            "where",
+        ),
+        ("pub fn a((x, y): (u8, u8)) {}", "plain name"),
+    ] {
+        let got = std::panic::catch_unwind(|| {
+            signature_in(bad, "a", &mut std::collections::BTreeSet::new())
+        });
+        let message = got
+            .err()
+            .and_then(|e| e.downcast::<String>().ok())
+            .map(|m| *m)
+            .unwrap_or_else(|| panic!("{bad:?} was read"));
+        assert!(message.contains(why), "{bad:?}: {message}");
+    }
 
     // Every registered command has one.
     let mut named = std::collections::BTreeSet::new();
