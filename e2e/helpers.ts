@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 export const LOCALES = ["en", "pt-BR", "es", "ru"] as const;
 
@@ -175,3 +175,14 @@ export const lowContrast = (page: Page, min = 4.5) =>
     }
     return [...new Set(bad)];
   }, min);
+
+/**
+ * Remove, then confirm: two presses, the second after the double-click gap (a press closer than
+ * that to the first doesn't confirm, so a double-click can't remove a mod).
+ */
+export async function confirmRemove(page: Page, button: Locator) {
+  await button.click();
+  await expect(button).toHaveClass(/confirming/);
+  await page.waitForTimeout(450);
+  await button.click();
+}

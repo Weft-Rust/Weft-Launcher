@@ -1,7 +1,7 @@
 // The flows the mod manager's safety depends on, and keyboard use, against the mock backend.
 import { expect, test, type Page } from "@playwright/test";
 import trace from "../src/dev/fixtures/trace.json" with { type: "json" };
-import { LOCALES, MODS_TAB, browse, cutButtons, focused, fullRows, goToTab, open, spoken, tops } from "./helpers";
+import { LOCALES, MODS_TAB, browse, confirmRemove, cutButtons, focused, fullRows, goToTab, open, spoken, tops } from "./helpers";
 
 const dialog = "[role=dialog]";
 
@@ -263,7 +263,7 @@ test.describe("every install shows what it does", () => {
     await expect(button).toBeEnabled();
     await page.waitForTimeout(1500);
     // A refresh from the header brings the same plan again: nothing changes either.
-    await page.evaluate(() => (document.querySelector(".btn-refresh") as HTMLButtonElement | null)?.click());
+    await page.evaluate(() => (document.querySelector(".mods-refresh") as HTMLButtonElement | null)?.click());
     await page.waitForTimeout(800);
     const seq = await page.evaluate(() => (window as unknown as { seq: string[] }).seq.join(""));
     // Off until the first plan, then on for good.
@@ -376,8 +376,7 @@ test.describe("announcements", () => {
     const said = await alerts.allTextContents();
     // A plain toggle is said by the switch itself; a result with more to it goes to the live region.
     const remove = page.locator(".mod-row[data-mod=showcase] .delete-btn");
-    await remove.click();
-    await remove.click();
+    await confirmRemove(page, remove);
     await expect(spoken(page)).toContainText("Removed Showcase from v26.11.1.");
     // The blockers didn't change, so nothing is said about them again.
     expect(await alerts.allTextContents()).toEqual(said);
@@ -389,8 +388,7 @@ test.describe("remove and undo", () => {
     await open(page, "scenario=mods");
     await goToTab(page, MODS_TAB);
     const remove = page.locator(".mod-row", { hasText: "Showcase" }).locator(".delete-btn");
-    await remove.click();
-    await remove.click();
+    await confirmRemove(page, remove);
     const notice = page.locator(".banner", { hasText: "Removed Showcase from v26.11.1." });
     await expect(notice).toHaveCount(1);
     await expect(page.locator(".mod-row", { hasText: "Showcase" })).toHaveCount(0);
@@ -710,8 +708,7 @@ test.describe("results never move the list", () => {
       await expect(page.locator(".mod-row").first()).toBeVisible();
       const before = await tops(page, FIXED);
       const remove = page.locator(".mod-row[data-mod=structures] .delete-btn");
-      await remove.click();
-      await remove.click();
+      await confirmRemove(page, remove);
       const toast = page.locator(".toasts .toast");
       await expect(toast).toHaveCount(1);
       // Nothing above the list moved, nor its first row.

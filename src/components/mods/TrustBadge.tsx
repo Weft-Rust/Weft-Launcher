@@ -1,7 +1,9 @@
+import { useId } from "react";
 import { useI18n } from "../../i18n/useI18n";
 import type { MessageKey } from "../../i18n";
 import type { Channel, Trust } from "../../mods/types";
 import { PixelIcon } from "../PixelIcon";
+import { useTip } from "../Truncate";
 import { BANG, CHECK, CROSS, HAMMER } from "./glyphs";
 
 const GLYPH: Record<Trust, string[]> = { reviewed: CHECK, unreviewed: HAMMER, unverified: BANG };
@@ -16,36 +18,48 @@ const HINT: Record<Trust, MessageKey> = {
   unverified: "mods.badgeUnverifiedHint",
 };
 
-/** The tier, as a word and a glyph, never colour alone. The hint is a hover; the word says enough. */
+/**
+ * A badge whose word is always shown whole, with what it means a hover or a Tab away: the
+ * tooltip shows on focus too, and a screen reader hears the word and then the explanation.
+ */
+function ExplainedBadge({ className, glyph, word, hint }: { className: string; glyph?: string[]; word: string; hint: string }) {
+  const { handlers, tip } = useTip(hint, true);
+  const hintId = useId();
+  return (
+    <>
+      <span className={`badge ${className}`} tabIndex={0} aria-describedby={hintId} data-must-fit {...handlers}>
+        {glyph && <PixelIcon rows={glyph} />}
+        <span className="badge-text">{word}</span>
+        <span className="sr-only" id={hintId}>
+          {hint}
+        </span>
+      </span>
+      {tip}
+    </>
+  );
+}
+
+/** The tier, as a word and a glyph, never colour alone. */
 export function TrustBadge({ trust }: { trust: Trust }) {
   const { t } = useI18n();
-  return (
-    <span className={`badge trust-${trust}`} title={t(HINT[trust])}>
-      <PixelIcon rows={GLYPH[trust]} />
-      <span className="badge-text">{t(TRUST_LABEL[trust])}</span>
-    </span>
-  );
+  return <ExplainedBadge className={`trust-${trust}`} glyph={GLYPH[trust]} word={t(TRUST_LABEL[trust])} hint={t(HINT[trust])} />;
 }
 
 /**
  * In place of the tier on a mod pulled from the index: whatever it was, it isn't usable now. The
- * reason is a hover; the row's own line says it in full.
+ * index's reason is quoted, in the words (and language) the index gave it; the row says it too.
  */
 export function RevokedBadge({ reason }: { reason: string | null }) {
   const { t } = useI18n();
-  return (
-    <span className="badge revoked" title={t("mods.badgeRevokedHint", (reason ?? "").trim() || t("mods.noReason"))}>
-      <PixelIcon rows={CROSS} />
-      <span className="badge-text">{t("mods.badgeRevoked")}</span>
-    </span>
-  );
+  const why = (reason ?? "").trim();
+  return <ExplainedBadge className="revoked" glyph={CROSS} word={t("mods.badgeRevoked")} hint={why ? t("mods.badgeRevokedHint", why) : t("mods.badgeRevokedHintNoReason")} />;
 }
 
 export function ChannelBadge({ channel }: { channel: Channel | null }) {
   const { t } = useI18n();
   if (!channel || channel === "release") return null;
   return (
-    <span className="badge channel">
+    <span className="badge channel" data-must-fit>
       <span className="badge-text">{t(channel === "experimental" ? "mods.badgeExperimental" : "mods.badgePrerelease")}</span>
     </span>
   );

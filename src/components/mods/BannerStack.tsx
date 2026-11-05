@@ -8,9 +8,15 @@ export interface BannerItem {
   id: string;
   tone: Tone;
   text: ReactNode;
-  /** Plain text of `text`, for the collapsed row. */
-  summary?: string;
+  /**
+   * For the collapsed row: the cause in a few words, never cut ("Index unreachable: no Reviewed
+   * mods"), and what it is about, which may be cut (a repo, a list of names).
+   */
+  cause?: string;
+  subject?: string;
   actions?: ReactNode;
+  /** The one button the collapsed row offers for it, when that differs from `actions`. */
+  foldActions?: ReactNode;
   /**
    * Folded notes are listed by this, lowest first. The first one leads the collapsed row, with
    * its own buttons, so a note ranked first is never out of sight.
@@ -52,11 +58,22 @@ export function BannerStack({ full, quiet }: { full: BannerItem[]; quiet: Banner
         <Banner key={item.id} item={item} />
       ))}
       {first && (
-        <div className={`banner-fold ${open ? "open" : `banner ${first.tone} compact`}`}>
+        <div className={`banner-fold ${open ? "open" : `banner ${first.tone} compact`}${full.length ? " docked" : ""}`} data-banner-fold={first.id}>
           {!open && (
             <>
-              <span className="banner-text one-line">{first.summary ? <Truncate text={first.summary} /> : first.text}</span>
-              {first.actions && <span className="banner-actions">{first.actions}</span>}
+              <span className="banner-text banner-summary">
+                {first.cause ? (
+                  <>
+                    <span className="banner-cause" data-must-fit>
+                      {first.cause}
+                    </span>
+                    {first.subject && <Truncate className="banner-subject" text={first.subject} />}
+                  </>
+                ) : (
+                  first.text
+                )}
+              </span>
+              {(first.foldActions ?? first.actions) && <span className="banner-actions">{first.foldActions ?? first.actions}</span>}
             </>
           )}
           <div className="banner-group" id={listId} hidden={!open}>

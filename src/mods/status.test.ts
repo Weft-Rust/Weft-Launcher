@@ -40,7 +40,7 @@ describe("modMeta", () => {
     const railways = installed("railways", { status: "missingDeps", missingDeps: ["signals"], depsNotInstalled: ["signals"] });
     const r = report([railways]);
     const [b] = blockers(r, name, catalog([catalogMod("signals", [build("0.1.0", { abi: "other" })])]));
-    expect(b.reasons).toEqual([{ key: "mods.statusDepsNoBuild", count: 1, args: ["SIGNALS", "v26.11.1"] }]);
+    expect(b.reasons).toEqual([{ key: "mods.blockLineDepsNoBuild", count: 1, args: [b.mod.name, "SIGNALS", "v26.11.1"] }]);
     expect(b.fixes.map((f) => f.kind)).toEqual(["turnOff"]);
   });
 
@@ -58,7 +58,7 @@ describe("blockers", () => {
     const [b] = blockers(r, name);
     expect(b.fixes.map((f) => f.kind)).toEqual(["update", "turnOff"]);
     expect(b.fixes[0]).toMatchObject({ version: "1.1.0" });
-    expect(b.reasons).toEqual([{ key: "mods.blockWrongVersionTag", args: ["v26.10.4"] }]);
+    expect(b.reasons).toEqual([{ key: "mods.blockLineWrongVersionTag", args: [b.mod.name, "v26.10.4"] }]);
   });
 
   it("offers turning on an installed dependency that is off, and installing one that has a build", () => {
@@ -73,7 +73,7 @@ describe("blockers", () => {
       { kind: "install", id: "signals", name: "Signals", mod: signals, sha256: signals.versions[0].sha256 },
       { kind: "turnOff", id: "hearth", name: "Hearth" },
     ]);
-    expect(b.reasons.map((m) => m.key)).toEqual(["mods.statusDepsOff", "mods.statusDepsNotInstalled"]);
+    expect(b.reasons.map((m) => m.key)).toEqual(["mods.blockLineDepsOff", "mods.blockLineDepsNotInstalled"]);
   });
 
   it("never offers turning on a revoked dependency", () => {
@@ -83,7 +83,7 @@ describe("blockers", () => {
     ]);
     const [b] = blockers(r, name);
     expect(b.fixes.map((f) => f.kind)).toEqual(["turnOff"]);
-    expect(b.reasons[0].key).toBe("mods.statusDepsRevoked");
+    expect(b.reasons[0].key).toBe("mods.blockLineDepsRevoked");
   });
 
   it("is empty without a report or blockers", () => {
@@ -251,7 +251,8 @@ describe("contract R4: shadowing, reasons and recovery", () => {
       shadowed: [{ id: "cogwork", file: "cogwork-old.zip", managed: "revoked" }],
     });
     const [b] = blockers(r, name);
-    expect(b.reasons).toEqual([{ key: "mods.blockShadowedRevoked", args: ["cogwork-old.zip", "Cogwork", "Corrupts worlds."] }]);
+    expect(b.reasons).toEqual([{ key: "mods.blockLineShadowedRevoked", args: ["Cogwork", "cogwork-old.zip"] }]);
+    expect(b.quote).toEqual({ key: "mods.indexSays", args: ["Corrupts worlds."] });
     expect(b.fixes.map((f) => f.kind)).toEqual(["showFolder"]);
     // Turning it off can't help: it is off already.
     expect(b.fixes.some((f) => f.kind === "turnOff")).toBe(false);
@@ -269,7 +270,7 @@ describe("contract R4: shadowing, reasons and recovery", () => {
 
   it("uses the backend's reason for the wording", () => {
     const r = report([installed("old", { status: "wrongVersion", weftTag: "v26.10.4" })], { blockingReasons: { old: "wrongVersion" } });
-    expect(blockers(r, name)[0].reasons[0]).toEqual({ key: "mods.blockWrongVersionTag", args: ["v26.10.4"] });
+    expect(blockers(r, name)[0].reasons[0]).toEqual({ key: "mods.blockLineWrongVersionTag", args: [blockers(r, name)[0].mod.name, "v26.10.4"] });
   });
 
   it("a missing-dependency crash clears once that dependency is on and usable", () => {

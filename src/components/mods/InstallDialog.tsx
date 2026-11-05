@@ -81,6 +81,7 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
           </button>
         }
       >
+        {mod.summary && <p className="dialog-summary">{mod.summary}</p>}
         <p className="dialog-summary">{t("mods.dlgNoBuild", mod.name, tag)}</p>
       </Dialog>
     );
@@ -207,6 +208,8 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
       ))}
       {outcomeNote.node}
       {error && !changes && <ErrorText error={error} />}
+      {/* What the mod is, whole: the card shows only the start of it. */}
+      {mod.summary && <p className="dialog-summary mod-details-summary">{mod.summary}</p>}
     </Dialog>
   );
 }

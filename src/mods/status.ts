@@ -91,6 +91,20 @@ export function missingDepsReasons(mod: InstalledMod, tag: string, name: NameOf,
     .map(([ids, key]) => ({ key, count: ids.length, args: [names(ids, name), tag] }) as Msg);
 }
 
+/** The same groups as `missingDepsReasons`, each as a whole sentence that names the mod that stops Play. */
+const BLOCK_LINE: Record<string, Msg["key"]> = {
+  "mods.statusDepsOff": "mods.blockLineDepsOff",
+  "mods.statusDepsRevoked": "mods.blockLineDepsRevoked",
+  "mods.statusDepsNotInstalled": "mods.blockLineDepsNotInstalled",
+  "mods.statusDepsNoBuild": "mods.blockLineDepsNoBuild",
+};
+
+/** The index's reason for pulling a build, quoted, or that it gave none. */
+export function indexQuote(reason: string | null): Msg {
+  const r = (reason ?? "").trim();
+  return r ? { key: "mods.indexSays", args: [r] } : { key: "mods.indexGaveNoReason" };
+}
+
 /** Why a build was pulled, in the index's words, or that it gave none (in the player's language). */
 export function revokedMsg(reason: string | null): Msg {
   const r = (reason ?? "").trim();
@@ -162,7 +176,8 @@ export type Fix =
   | { kind: "showFolder"; id: string; name: string; file: string }
   | { kind: "turnOn"; id: string; name: string }
   | { kind: "install"; id: string; name: string; mod: CatalogMod; sha256: string }
-  | { kind: "update"; id: string; name: string; version: string; sha256: string };
+  /** `tentative`: nothing says the update fixes this (a library that didn't load); offered as "Try". */
+  | { kind: "update"; id: string; name: string; version: string; sha256: string; tentative?: boolean };
 
 /** What gets each dependency that isn't on back on, where something can. */
 function depFixes(states: Map<string, DepState>): Fix[] {
@@ -176,7 +191,13 @@ function depFixes(states: Map<string, DepState>): Fix[] {
 
 export interface Blocker {
   mod: InstalledMod;
+  /** Whole sentences, each naming the mod: "Lanterns stops Play: it was built for v26.10.4." */
   reasons: Msg[];
+  /**
+   * For a mod pulled from the index: what the index says about it, quoted, in its own words.
+   * Home shows it under the reason; the Mods tab's row says it already, right below the banner.
+   */
+  quote?: Msg;
   fixes: Fix[];
 }
 
@@ -203,33 +224,32 @@ export function blockers(report: ProfileReport | undefined, name: NameOf, catalo
     if (!mod) return [];
     const fixes: Fix[] = [];
     let reasons: Msg[];
+    let quote: Msg | undefined;
     const why: BlockingReason = blockingReason(report, mod);
     switch (why) {
       case "missingDeps": {
         const states = depStates(mod, report, catalog);
-        reasons = missingDepsReasons(mod, report.tag, name, states);
+        // One sentence per kind of trouble, each naming the mod: "Hearth stops Play: it needs
+        // Cogwork, which is off."
+        reasons = missingDepsReasons(mod, report.tag, name, states).map((m) => ({ ...m, key: BLOCK_LINE[m.key], args: [mod.name, ...(m.args ?? [])] }) as Msg);
         fixes.push(...depFixes(states));
         break;
       }
       case "shadowedRevoked": {
         // Turning it off can't help: it is off. The player's own copy has to go.
         const shadow = shadowOf(report, mod.id);
-        const why = (mod.revokedReason ?? "").trim();
-        reasons = [
-          why
-            ? { key: "mods.blockShadowedRevoked", args: [shadow?.file ?? mod.id, mod.name, why] }
-            : { key: "mods.blockShadowedRevokedNoReason", args: [shadow?.file ?? mod.id, mod.name] },
-        ];
+        reasons = [{ key: "mods.blockLineShadowedRevoked", args: [mod.name, shadow?.file ?? mod.id] }];
         if (mod.update) fixes.push({ kind: "update", id: mod.id, name: mod.name, version: mod.update.version, sha256: mod.update.sha256 });
         fixes.push({ kind: "showFolder", id: mod.id, name: mod.name, file: shadow?.file ?? "" });
-        return [{ mod, reasons, fixes }];
+        return [{ mod, reasons, fixes, quote: indexQuote(mod.revokedReason) }];
       }
       case "revoked":
-        reasons = [revokedMsg(mod.revokedReason)];
+        reasons = [{ key: "mods.blockLineRevoked", args: [mod.name] }];
+        quote = indexQuote(mod.revokedReason);
         break;
       case "wrongVersion":
         // Under "won't start", the build is the whole reason.
-        reasons = [mod.weftTag ? { key: "mods.blockWrongVersionTag", args: [mod.weftTag] } : { key: "mods.blockWrongVersion" }];
+        reasons = [mod.weftTag ? { key: "mods.blockLineWrongVersionTag", args: [mod.name, mod.weftTag] } : { key: "mods.blockLineWrongVersion", args: [mod.name] }];
         break;
       default:
         return unreachable(why);
@@ -238,7 +258,7 @@ export function blockers(report: ProfileReport | undefined, name: NameOf, catalo
       fixes.push({ kind: "update", id: mod.id, name: mod.name, version: mod.update.version, sha256: mod.update.sha256 });
     }
     fixes.push({ kind: "turnOff", id: mod.id, name: mod.name });
-    return [{ mod, reasons, fixes }];
+    return [{ mod, reasons, fixes, quote }];
   });
 }
 
@@ -256,11 +276,16 @@ export function crashFixes(failure: ModFailure | null, report: ProfileReport | u
     }
   }
   // A newer build can fix a build that doesn't load; it can't fix a missing dependency or a file.
-  const updatable: FailureKind[] = ["wrongVersion", "loadFailed", "initPanicked"];
-  if (mod?.update && updatable.includes(failure.kind)) {
-    fixes.push({ kind: "update", id: mod.id, name: mod.name, version: mod.update.version, sha256: mod.update.sha256 });
-  }
-  if (mod?.enabled) fixes.push({ kind: "turnOff", id: mod.id, name: mod.name });
+  // For a build for another version it is the fix; for a library that didn't load or crashed it
+  // is only a guess, so turning the mod off, which surely helps, comes first.
+  const sure = failure.kind === "wrongVersion";
+  const guess: FailureKind[] = ["loadFailed", "initPanicked"];
+  const update: Fix | null =
+    mod?.update && (sure || guess.includes(failure.kind))
+      ? { kind: "update", id: mod.id, name: mod.name, version: mod.update.version, sha256: mod.update.sha256, tentative: !sure }
+      : null;
+  const off: Fix | null = mod?.enabled ? { kind: "turnOff", id: mod.id, name: mod.name } : null;
+  for (const f of sure ? [update, off] : [off, update]) if (f) fixes.push(f);
   return fixes;
 }
 

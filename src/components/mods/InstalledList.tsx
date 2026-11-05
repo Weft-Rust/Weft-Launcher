@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n/useI18n";
 import { useMods } from "../../hooks/useMods";
 import type { InstalledMod, ProfileReport } from "../../mods/types";
@@ -30,16 +30,23 @@ interface RowProps {
   onRemoved: () => void;
 }
 
+/** A second press closer than this to the first is a double-click, not a confirmation. */
+const CONFIRM_GAP_MS = 400;
+
 function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, locked, onRemoving, onRemoved }: RowProps) {
   const { t, tm } = useI18n();
   const { setEnabled, remove, isBusy, progressOf, nameIn, catalog } = useMods();
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const askedAt = useRef(0);
+  const hintId = useId();
   const meta = modMeta(mod, tag, nameIn(tag), mod.status === "missingDeps" ? depStates(mod, report, catalog) : undefined, shadowOf(report, mod.id));
   const metaText = meta.parts.map(tm).join(" ");
   const working = isBusy(tag, mod.id);
   const events = progressOf({ kind: "mod", tag, id: mod.id });
   const updating = mod.update && events.length ? activeStep(events) : undefined;
   const disabled = working || locked;
+  // A reason is read whole: it gets the row's width under the buttons, as many lines as it needs.
+  const wide = meta.bad || meta.shadowed;
 
   // The confirmation lapses on Escape or when focus leaves the button, never on a timer: a
   // player reading it (or a screen reader saying it) keeps it. Undo limits a mistake anyway.
@@ -49,7 +56,13 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
   };
 
   const onRemove = async () => {
-    if (!confirmRemove) return setConfirmRemove(true);
+    if (!confirmRemove) {
+      askedAt.current = Date.now();
+      announce(`remove-ask:${mod.id}:${askedAt.current}`, t("mods.removeConfirmHint", mod.name));
+      return setConfirmRemove(true);
+    }
+    // The second click of a double-click lands here: it doesn't confirm.
+    if (Date.now() - askedAt.current < CONFIRM_GAP_MS) return;
     setConfirmRemove(false);
     onRemoving(mod.id);
     const r = await remove(tag, mod.id);
@@ -63,49 +76,57 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
   };
 
   const revoked = mod.status === "revoked";
-  const rowClass = ["mod-row framed", mod.enabled ? "" : "is-off", meta.bad ? "has-problem" : ""].join(" ");
+  const rowClass = ["mod-row framed", mod.enabled ? "" : "is-off", meta.bad ? "has-problem" : "", wide ? "wide" : ""].join(" ");
 
   return (
     <li className={rowClass} data-mod={mod.id} data-shadowed={meta.shadowed || undefined}>
       <ModIcon id={mod.id} url={mod.icon} />
-      <div className="mod-main">
-        {/* The name and its tier on one line (the name gives way first); the line under it is
-            the version and the row's state, two lines when it needs them, so a reason is read
-            whole rather than cut after a badge. */}
-        <div className="mod-title">
-          <Truncate className="mod-name" text={mod.name} />
+      {/* The name whole, and its tier beside it; the tier goes under the name when both don't
+          fit, never shortened. */}
+      <div className="mod-title">
+        <span className="mod-name" data-must-fit>
+          {mod.name}
+        </span>
+        <span className="mod-badges">
           <ChannelBadge channel={mod.channel} />
           {revoked ? <RevokedBadge reason={mod.revokedReason} /> : <TrustBadge trust={mod.trust} />}
-        </div>
-        <Truncate
-          className={`mod-meta${meta.bad ? " bad" : ""}`}
-          text={[mod.version, metaText].filter(Boolean).join(" · ")}
-          lines={meta.bad || meta.shadowed ? 2 : 1}
-        >
-          {mod.version && <span className="mod-version">{mod.version}</span>}
-          {mod.version && " · "}
-          <span className="mod-meta-text">{metaText}</span>
-        </Truncate>
-        {!updating && mod.update && !canUpdate && updateWhy && <span className="mod-update-why">{updateWhy}</span>}
+        </span>
+      </div>
+      {/* The version, then what the launcher knows: a reason is never cut, other details (a
+          repo, what it needs) may be, with the full text a hover or a Tab away. */}
+      <div className={`mod-meta${meta.bad ? " bad" : ""}`} data-must-fit={wide || undefined}>
+        {mod.version && (
+          <span className="mod-version" data-must-fit>
+            {mod.version}
+          </span>
+        )}
+        {/* An update sits by the version it replaces: the arrow and the new version; the label
+            says the rest. */}
+        {!updating && mod.update && (
+          <button
+            className="btn-flat primary chip update-btn-row"
+            disabled={disabled || !canUpdate}
+            onClick={() => onUpdate(mod, mod.update!.sha256)}
+            aria-label={t("mods.updateLabelTo", mod.name, mod.update.version, tag)}
+            title={updateWhy ?? t("mods.updateLabelTo", mod.name, mod.update.version, tag)}
+          >
+            <PixelIcon rows={ARROW_UP} />
+            <span data-must-fit>{mod.update.version}</span>
+          </button>
+        )}
+        {wide ? (
+          <span className="mod-reason">{metaText}</span>
+        ) : (
+          <Truncate className="mod-meta-text" text={metaText} />
+        )}
+        {!updating && mod.update && !canUpdate && updateWhy && (
+          <span className="mod-update-why" data-must-fit>
+            {updateWhy}
+          </span>
+        )}
       </div>
       <div className="mod-actions">
-        {updating ? (
-          <ModProgressBar progress={updating} name={updating.modId === mod.id ? mod.name : nameIn(tag)(updating.modId)} compact />
-        ) : (
-          mod.update && (
-            // Short, so the name keeps its room: the arrow and the version; the label says the rest.
-            <button
-              className="btn-primary btn-small update-btn-row"
-              disabled={disabled || !canUpdate}
-              onClick={() => onUpdate(mod, mod.update!.sha256)}
-              aria-label={t("mods.updateLabelTo", mod.name, mod.update.version, tag)}
-              title={updateWhy ?? t("mods.updateLabelTo", mod.name, mod.update.version, tag)}
-            >
-              <PixelIcon rows={ARROW_UP} />
-              {mod.update.version}
-            </button>
-          )
-        )}
+        {updating && <ModProgressBar progress={updating} name={updating.modId === mod.id ? mod.name : nameIn(tag)(updating.modId)} compact />}
         <button
           className={`toggle${mod.enabled ? " on" : ""}`}
           role="switch"
@@ -129,13 +150,14 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
           }}
           onBlur={() => confirmRemove && cancelRemove(false)}
           aria-label={confirmRemove ? t("mods.removeConfirmLabel", mod.name) : t("mods.removeLabel", mod.name)}
+          aria-describedby={confirmRemove ? hintId : undefined}
         >
           <StableLabel
             text={confirmRemove ? t("mods.removeConfirm") : t("mods.remove")}
             widest={[t("mods.removeConfirm"), t("mods.remove")]}
           />
         </button>
-        <span className="sr-only" aria-live="polite">
+        <span className="sr-only" id={hintId}>
           {confirmRemove ? t("mods.removeConfirmHint", mod.name) : ""}
         </span>
       </div>

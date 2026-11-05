@@ -227,19 +227,26 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
       };
     }
     if (id === "blocking" && report) {
-      const summary = tn("mods.blockersShort", report.blocking.length, tag, formatList(report.blocking.map(name)));
-      return { id, tone: "bad", text: <BlockerPanel tag={tag} locked={running} review={review} inBanner />, summary };
+      // Folded (on Browse): Play is off, and for which mod, never cut.
+      const cause = report.blocking.length === 1 ? t("mods.playOffOne", name(report.blocking[0])) : tn("mods.playOffMany", report.blocking.length);
+      return { id, tone: "bad", text: <BlockerPanel tag={tag} locked={running} review={review} inBanner />, cause };
     }
     if (id === "abi") {
       const text = t(view === "browse" ? "mods.abiUnknownBrowse" : "mods.abiUnknown", tag);
-      return { id, tone: "info", text, summary: t("mods.abiUnknownShort", tag), actions: <RetryProfile tag={tag} /> };
+      return { id, tone: "info", text, cause: t("mods.abiUnknownShort", tag), actions: <RetryProfile tag={tag} /> };
     }
     if (id === "shadowed") {
       const list = formatList(shadowedOff.map((x) => `${name(x.id)} (${x.file})`));
-      return { id, tone: "warn", text: t("mods.shadowBanner", list), summary: t("mods.shadowShort", formatList(shadowedOff.map((x) => name(x.id)))), actions: showFolder };
+      return { id, tone: "warn", text: t("mods.shadowBanner", list), cause: t("mods.shadowCause"), subject: formatList(shadowedOff.map((x) => name(x.id))), actions: showFolder };
     }
     if (id === "unmanaged" && report) {
-      return { id, tone: "warn", text: t("mods.unmanagedBanner", formatList(report.unmanaged)), summary: t("mods.unmanagedSummary"), actions: showFolder };
+      return {
+        id,
+        tone: "warn",
+        text: t("mods.unmanagedBanner", formatList(report.unmanaged)),
+        cause: tn("mods.unmanagedCause", report.unmanaged.length),
+        actions: showFolder,
+      };
     }
     return catalogBanners[id] ?? null;
   };
@@ -266,17 +273,17 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
             labelledBy={versionLabelId}
             compact
           />
-          <button className="btn-secondary btn-small" onClick={() => setShowSources(true)}>
+          <button className="btn-flat" onClick={() => setShowSources(true)}>
             {t("mods.sources")}
           </button>
           <button
-            className="btn-refresh"
+            className="btn-flat icon-btn mods-refresh"
             onClick={refreshCatalog}
             disabled={catalogLoading}
             title={t("mods.refresh")}
             aria-label={t("mods.refresh")}
           >
-            <PixelIcon rows={REFRESH_ICON} scale={4} />
+            <PixelIcon rows={REFRESH_ICON} scale={3} />
           </button>
         </div>
       </header>
@@ -291,11 +298,11 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
           ))}
         </div>
         <div className="toolbar-actions">
-          <button className="btn-secondary btn-small" onClick={pickFile} disabled={running || copying}>
+          <button className="btn-flat" onClick={pickFile} disabled={running || copying}>
             {t("mods.fromFile")}
           </button>
           {donors.length > 0 && (
-            <button className="btn-secondary btn-small" onClick={() => setShowCopy(true)} disabled={running || copying}>
+            <button className="btn-flat" onClick={() => setShowCopy(true)} disabled={running || copying}>
               {copying ? t("mods.copying") : t("mods.copyHeader")}
             </button>
           )}

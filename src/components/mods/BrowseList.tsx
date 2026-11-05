@@ -128,13 +128,20 @@ export function BrowseList({ report, locked }: BrowseListProps) {
                 <div className="mod-card-head">
                   <ModIcon id={mod.id} url={mod.icon} />
                   {/* The name has the whole width; the tier sits on the line under it. */}
+                  {/* The name opens the mod's details: its whole summary, authors, versions and
+                      checks, in one place rather than a tooltip per field. */}
                   <div className="mod-card-title">
-                    <Truncate className="mod-name" text={mod.name} />
+                    <button className="mod-name-btn" onClick={() => setOpen(mod)} aria-label={t("mods.detailsLabel", mod.name)}>
+                      <Truncate className="mod-name" text={mod.name} />
+                    </button>
                   </div>
                   <div className="mod-badges">
                     {shown && <TrustBadge trust={shown.trust} />}
                     {best && <ChannelBadge channel={best.channel} />}
-                    <Truncate className="mod-source" text={`${what} · ${who}`} />
+                    <span className="mod-card-version" data-must-fit>
+                      {what}
+                    </span>
+                    <Truncate className="mod-source" text={who} />
                   </div>
                 </div>
                 {/* Offline, the network note takes a line, so the summary gives one up: two rows of cards still fit. */}

@@ -297,6 +297,7 @@ button:disabled { cursor: not-allowed; }
 
 .switch { display: flex; }
 .mods-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 8px; }
+.toolbar-actions .btn-flat { min-width: 0; }
 .toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 /* The Mods page fills the window: its header, version picker, switch, toolbar and notes stay put,
    and only the list under them scrolls. */
@@ -304,9 +305,18 @@ button:disabled { cursor: not-allowed; }
 .mods-page > * { flex: none; }
 .mods-page .page-header { margin-bottom: 4px; }
 .mods-page .page-header h1 { line-height: 40px; }
-.mods-page .header-actions .btn-refresh { --top: 2px; --side: 10px; }
-.mods-page .version-select.compact .version-select-btn { --top: 2px; }
-.mods-page .version-select.compact .version-select-menu { top: 44px; }
+/* The page's own controls are flat, like the switch beside them and the bar above: two short
+   lines of chrome, so the list keeps the height. Raised blocks are for what acts on a mod. */
+.mods-page .page-header h1 { font-size: 24px; line-height: 32px; }
+.mods-page .header-actions { gap: 8px 12px; }
+.mods-page .version-select.compact .version-select-btn,
+.mods-page .version-select.compact .version-select-btn:is(:active:not(:disabled), :disabled) {
+  height: 32px; padding: 4px 12px; gap: 12px; min-width: 144px;
+  background: var(--g2); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g1);
+}
+.mods-page .version-select.compact .version-select-btn:hover:not(:disabled) { background: var(--g3); }
+.mods-page .version-select.compact .version-select-menu { top: 36px; }
+.mods-page .icon-btn { width: 40px; padding: 0; display: grid; place-items: center; }
 .mods-panel { flex: 1 1 auto; min-height: 0; scroll-padding-bottom: calc(16px + var(--toast-room, 0px)); overflow-y: auto; overscroll-behavior: contain; padding-bottom: 16px; scrollbar-gutter: stable; margin-right: -8px; padding-right: 8px; }
 .mods-panel:focus { outline: none; }
 /* Browse's filters stay on top as the cards scroll: a card brought into view by focus stops
@@ -325,8 +335,13 @@ button:disabled { cursor: not-allowed; }
 .banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 4px 8px 4px 16px; min-height: 40px; background: var(--ink); line-height: 24px; }
 .banner > span { padding: 0; }
 .banner-text { min-width: 0; }
-.banner-text.one-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; }
-.banner-text.one-line .truncate { display: block; }
+/* The folded row: the cause in a few words, whole (it wraps rather than being cut), then what it
+   is about (a repo, names), which may be cut with the full text a hover or Tab away. */
+.banner-summary { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; flex: 1 1 auto; }
+.banner-cause { min-width: 0; overflow-wrap: anywhere; }
+.banner-subject { flex: 1 1 0; min-width: 8ch; }
+/* Right under a banner shown in full: one block of notes, not two with a gap between. */
+.banner-fold.docked { margin-top: -4px; }
 .banner-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex: none; }
 .banner.compact { min-height: 32px; padding-top: 0; padding-bottom: 0; }
 .banner.compact .banner-toggle { flex: none; }
@@ -344,6 +359,12 @@ button:disabled { cursor: not-allowed; }
 .pager-btn:hover { background: var(--g3); }
 .pager-at { min-width: 56px; text-align: center; white-space: nowrap; }
 .banner .blocker { display: grid; gap: 4px; }
+/* The sentence (with "Turn off all" at its right when that fixes every one); the fixes and the
+   pager to the other mods on the line below. */
+.blocker-head { display: flex; align-items: flex-start; gap: 4px 12px; }
+.blocker-head > .blocker-text { flex: 1 1 auto; min-width: 0; }
+.blocker-line { display: block; }
+.blocker-line strong { color: var(--a3); }
 .banner .blocker-text { color: var(--g5); }
 .blocker-lead { color: var(--r3); }
 .blocker-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
@@ -390,33 +411,49 @@ button:disabled { cursor: not-allowed; }
 
 .mod-list, .mod-grid, .checks, .source-list { margin: 0; padding: 0; list-style: none; }
 .mod-list { display: grid; gap: 8px; }
-.mod-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 4px 12px 4px 16px; }
+/* A row: the icon; the name with its tier; under them the version and what the launcher knows;
+   the buttons at the right. A row with a reason gives that reason the width under the buttons
+   too, so it is read whole in a line or two rather than squeezed into the name's column. */
+.mod-row {
+  display: grid; grid-template-columns: 48px minmax(0, 1fr) auto;
+  grid-template-areas: "icon title actions" "icon meta actions";
+  align-items: center; gap: 0 12px; padding: 4px 8px 4px 12px;
+}
+.mod-row.wide { grid-template-areas: "icon title actions" "icon meta meta"; }
+.mod-row > .mod-icon { grid-area: icon; align-self: start; }
 .mod-row.is-off { background: #20252f; }
 .mod-row.is-off :is(.mod-name, .mod-icon) { opacity: .55; }
 .mod-row.has-problem { box-shadow: inset var(--px) 0 0 var(--r2); }
 .mod-icon { width: 48px; height: 48px; display: grid; place-items: center; background: var(--ink); flex: none; }
 .mod-icon img { image-rendering: pixelated; }
-.mod-main { min-width: 0; }
-/* One line: the name gives way first (with its full text a hover or Tab away), never the row height. */
-.mod-title { display: flex; align-items: center; gap: 12px; min-width: 0; overflow: hidden; }
-/* The name is what the player goes by, so the badges give way first: their words shorten (the
-   icon stays, and the tier is in the hover and the dialogs), then the name. */
-.mod-title > .badge { flex: 0 1000 auto; min-width: 36px; overflow: hidden; }
-.mod-title > .badge.channel { min-width: 24px; }
-.mod-title .badge-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The name whole, and its tier beside it: both are what the player decides by, so neither is
+   cut. When they don't fit side by side the tier goes under the name, a line of its own. */
+.mod-title { grid-area: title; display: flex; flex-wrap: wrap; align-items: center; gap: 0 12px; min-width: 0; align-self: end; }
 .mod-name { font-size: 24px; line-height: 32px; color: var(--a3); }
+.mod-row .mod-name { min-width: 0; overflow-wrap: anywhere; }
+.mod-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; min-width: 0; }
+.mod-badges > .badge { flex: none; }
 .mod-version { color: var(--g5); }
-.mod-meta { margin-top: 0; color: var(--g5); line-height: 24px; }
-.mod-meta.lines-1 { display: block; }
-.mod-update-why { display: block; color: var(--a3); line-height: 24px; }
+.mod-meta { grid-area: meta; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; color: var(--g5); line-height: 24px; align-self: start; }
+.mod-meta > .mod-version { flex: none; }
+.mod-meta > .mod-version:not(:last-child)::after { content: "·"; margin-left: 8px; }
+.mod-meta > .mod-meta-text { flex: 1 1 0; min-width: 8ch; }
+/* A reason reads as a sentence after the version: it wraps under it, across the row. */
+.mod-row.wide .mod-meta { display: block; overflow-wrap: anywhere; }
+.mod-row.wide .mod-meta > * { margin-right: 8px; }
+.mod-row.wide .mod-meta > .mod-version:not(:last-child)::after { margin-left: 8px; }
+.mod-row.wide .mod-meta > .chip { display: inline-flex; vertical-align: bottom; }
+.mod-meta.bad > .mod-reason { color: var(--r3); }
+.mod-update-why { flex-basis: 100%; color: var(--a3); line-height: 24px; }
 .update-btn-row { display: inline-flex; align-items: center; gap: 8px; }
 .update-btn-row .pixel-icon { margin-top: 0; }
-.mod-meta.bad .mod-meta-text { color: var(--r3); }
-/* It never shrinks a fraction (that would cut a name that fits); it stops where the badges keep
-   their icons. */
-.mod-title > .mod-name.truncate { flex: 0 0 auto; max-width: calc(100% - 48px); }
-.mod-title:has(> .badge.channel) > .mod-name.truncate { max-width: calc(100% - 84px); }
-.mod-actions { display: flex; align-items: center; gap: 8px; }
+/* A flat button the height of a line of text, for an action inside a line (an update by its version). */
+.btn-flat.chip { height: 24px; padding: 0 8px; box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--a1); align-self: center; }
+.btn-flat.chip:disabled { box-shadow: none; }
+.mod-actions { grid-area: actions; display: flex; align-items: center; gap: 8px; }
+/* Narrow blocks, so the name and its tier keep the room. */
+.mod-actions :is(.btn-small, .toggle) { --side: 10px; }
+.mod-actions .toggle { gap: 6px; }
 .mod-actions .progress-container { width: 200px; }
 .mod-card-foot .progress-container { width: 160px; }
 .progress-container.compact .progress-label { margin-top: 0; }
@@ -443,6 +480,10 @@ button:disabled { cursor: not-allowed; }
 .mod-card-head .mod-icon { grid-area: icon; align-self: start; }
 .mod-card-title { grid-area: title; min-width: 0; }
 .mod-card-title .mod-name { display: block; }
+.mod-name-btn { display: block; max-width: 100%; text-align: left; }
+.mod-name-btn:hover .mod-name { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
+.mod-card-version { flex: none; color: var(--g5); line-height: 24px; }
+.mod-card-version + .mod-source::before { content: "· "; }
 .mod-badges { grid-area: badges; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .mod-badges > .badge { flex: none; }
 .mod-summary { grid-area: summary; color: #b9c1d3; line-height: 24px; height: 48px; margin-top: 4px; align-self: start; }

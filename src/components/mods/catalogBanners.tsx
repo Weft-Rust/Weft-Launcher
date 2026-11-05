@@ -29,6 +29,15 @@ function cause(code: ErrorCode | undefined): "rate" | "gone" | "invalid" | "disk
   }
 }
 
+/** The cause in a few words, for the folded row; the repo follows it. */
+const SOURCE_SHORT: Record<ReturnType<typeof cause>, MessageKey> = {
+  rate: "mods.sourceCauseRate",
+  gone: "mods.sourceCauseGone",
+  invalid: "mods.sourceCauseInvalid",
+  disk: "mods.sourceCauseDisk",
+  network: "mods.sourceCauseNetwork",
+};
+
 const SOURCE_CAUSE: Record<ReturnType<typeof cause>, MessageKey> = {
   rate: "mods.sourceErrRate",
   gone: "mods.sourceErrGone",
@@ -68,7 +77,9 @@ export function indexProblem(index: Catalog["index"], t: T, formatDay: (iso: str
 /** The index's state in a few words, for the folded row. */
 export function indexSummary(index: Catalog["index"], t: T, formatDay: (iso: string | null) => string): string | null {
   if (index.freshness === "fresh" && !index.error) return null;
-  if (index.freshness === "unavailable" || !index.generated) return t("mods.indexUnavailableShort");
+  if (index.freshness === "unavailable" || !index.generated) {
+    return index.error && cause(index.error.code) === "network" && !refused(index.error.code) ? t("mods.indexUnreachableShort") : t("mods.indexUnavailableShort");
+  }
   const day = formatDay(index.signedAt ?? index.generated);
   if (index.freshness === "stale" && !index.error) return t("mods.indexStaleShort", day);
   // A refused index is never "offline": the network worked, and what came was not accepted.
@@ -102,7 +113,7 @@ export function useCatalogBanners(onManageSources: () => void): Record<string, B
           {shown.detail && <ErrorDetails detail={shown.detail} label={t("errors.details")} />}
         </>
       ),
-      summary: t("mods.refreshFailedShort"),
+      cause: t("mods.refreshFailedShort"),
       actions: retry,
     };
   }
@@ -119,7 +130,7 @@ export function useCatalogBanners(onManageSources: () => void): Record<string, B
           {detail && <ErrorDetails detail={detail} label={t("errors.details")} />}
         </>
       ),
-      summary: indexSummary(catalog.index, t, formatDay) ?? index,
+      cause: indexSummary(catalog.index, t, formatDay) ?? index,
       actions: retry,
     };
   }
@@ -134,7 +145,7 @@ export function useCatalogBanners(onManageSources: () => void): Record<string, B
           {catalog.sourcesError.detail && <ErrorDetails detail={catalog.sourcesError.detail} label={t("errors.details")} />}
         </>
       ),
-      summary: t("mods.sourcesDamagedShort"),
+      cause: t("mods.sourcesDamagedShort"),
       actions: (
         <button className="btn-flat" onClick={onManageSources}>
           {t("mods.manageSources")}
@@ -148,7 +159,9 @@ export function useCatalogBanners(onManageSources: () => void): Record<string, B
       id: `source:${s.repo}`,
       tone: "warn",
       text,
-      summary: t("mods.sourceShort", s.repo),
+      cause: t(SOURCE_SHORT[cause(s.error?.code)]),
+      subject: s.repo,
+      foldActions: retry,
       actions: (
         <>
           {retry}

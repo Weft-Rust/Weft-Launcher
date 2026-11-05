@@ -9,8 +9,7 @@ import { blockers, crashFixes, failureTitle, shadowOf, shadowStillThere, type Fi
 import type { CatalogMod, InstalledMod } from "../../mods/types";
 import { Announce } from "../Announce";
 import { announce } from "../LiveRegion";
-import { ErrorText } from "../ErrorText";
-import { Truncate } from "../Truncate";
+import { ErrorDetails, ErrorText } from "../ErrorText";
 import { InstallDialog } from "./InstallDialog";
 
 /** A build to review in the install dialog, opened from a fix button. */
@@ -81,7 +80,16 @@ function useFix(tag: string, review: Review) {
     const r = await setEnabled(tag, fix.id, fix.kind === "turnOn");
     if (r.status === "failed") setError(r.shown);
   };
-  return { apply, error, lookAgain };
+  /** Several turn-offs, one after the other; stops at the first that fails and says why. */
+  const applyAll = async (fixes: Fix[]) => {
+    setError(null);
+    for (const fix of fixes) {
+      if (fix.kind !== "turnOff") continue;
+      const r = await setEnabled(tag, fix.id, false);
+      if (r.status === "failed") return setError(r.shown);
+    }
+  };
+  return { apply, applyAll, error, lookAgain };
 }
 
 /** The buttons for a list of fixes: turn off, turn on, install a dependency, update. */
@@ -97,7 +105,7 @@ function FixButtons({ tag, fixes, locked, review, apply, flat = false }: { tag: 
       case "install":
         return t("mods.installDep", fix.name);
       case "update":
-        return t("mods.update", fix.version);
+        return fix.tentative ? t("mods.tryUpdate", fix.version) : t("mods.update", fix.version);
       case "showFolder":
         return t("mods.showFolderFix", fix.file);
     }
@@ -144,22 +152,33 @@ interface BlockerPanelProps {
  */
 export function BlockerPanel({ tag, locked, review, id, inBanner = false }: BlockerPanelProps) {
   const { t, tn, tm } = useI18n();
-  const { profile, nameIn, catalog } = useMods();
-  const { apply, error } = useFix(tag, review);
+  const { profile, nameIn, catalog, isBusy } = useMods();
+  const { apply, applyAll, error } = useFix(tag, review);
   const list = blockers(profile(tag), nameIn(tag), catalog);
   const [page, setPage] = useState<{ id: string | null; index: number }>({ id: null, index: 0 });
   const title = tn("mods.homeBlocked", list.length, tag);
+  const sentences = (b: (typeof list)[number]) => b.reasons.map(tm);
   // Assertive, and only for what wasn't there a moment ago: a new mod, or a new reason for one.
   const said = (
     <Announce
       channel={`blockers:${tag}`}
-      items={list.map((b) => ({ id: `${b.mod.id}|${b.reasons.map((r) => r.key).join(",")}`, text: `${b.mod.name}: ${b.reasons.map(tm).join(" ")}` }))}
+      items={list.map((b) => ({ id: `${b.mod.id}|${b.reasons.map((r) => r.key).join(",")}`, text: [...sentences(b), ...(b.quote ? [tm(b.quote)] : [])].join(" ") }))}
       prefix={title}
     />
   );
   if (!list.length) return said;
 
-  const reasonsOf = (b: (typeof list)[number]) => b.reasons.map(tm).join(" ");
+  // One translated sentence per reason, each naming the mod (shown in its colour), never cut.
+  const reasonLines = (b: (typeof list)[number], withQuote: boolean) => (
+    <span className="blocker-text" data-must-fit>
+      {sentences(b).map((text, i) => (
+        <span key={i} className="blocker-line">
+          <Named text={text} name={b.mod.name} />
+        </span>
+      ))}
+      {withQuote && b.quote && <span className="blocker-line blocker-quote">{tm(b.quote)}</span>}
+    </span>
+  );
 
   if (inBanner) {
     // The mod on screen stays on screen while the list changes around it; a fixed one gives its
@@ -170,18 +189,29 @@ export function BlockerPanel({ tag, locked, review, id, inBanner = false }: Bloc
     const go = (step: number) => {
       const next = (index + step + list.length) % list.length;
       setPage({ id: list[next].mod.id, index: next });
+      announce(`blocker-page:${tag}:${next}:${Date.now()}`, t("mods.blockerPage", String(next + 1), String(list.length)));
     };
     const many = list.length > 1;
+    // When every mod that blocks can simply be turned off, one press does them all.
+    const offs = list.flatMap((b) => b.fixes.filter((f) => f.kind === "turnOff").slice(0, 1));
+    const allOff = many && offs.length === list.length;
     return (
       <section className="blockers in-banner" id={id} aria-label={title}>
         {said}
         <div className="blocker" data-blocker={shown.mod.id}>
-          {/* Two lines at most, so the banner keeps its height; the whole text is a hover or a
-              Tab away, said in full to a screen reader, and stated again on the mod's row. */}
-          <Truncate className="blocker-text" lines={2} text={`${t("mods.blockerLead")} ${shown.mod.name} ${reasonsOf(shown)}`}>
-            <span className="blocker-lead">{t("mods.blockerLead")}</span> <strong>{shown.mod.name}</strong>{" "}
-            <span className="blocker-why">{reasonsOf(shown)}</span>
-          </Truncate>
+          <span className="blocker-head">
+            {reasonLines(shown, false)}
+            {allOff && (
+              <button
+                className="btn-flat blocker-all"
+                data-fix="turnOffAll"
+                disabled={locked || list.some((b) => isBusy(tag, b.mod.id))}
+                onClick={() => applyAll(offs)}
+              >
+                {tn("mods.turnOffAll", list.length)}
+              </button>
+            )}
+          </span>
           <span className="blocker-foot">
             <span className="blocker-actions" role="group" aria-label={t("mods.fixesFor", shown.mod.name)}>
               <FixButtons tag={tag} fixes={shown.fixes} locked={locked} review={review} apply={apply} flat />
@@ -191,7 +221,7 @@ export function BlockerPanel({ tag, locked, review, id, inBanner = false }: Bloc
                 <button className="pager-btn" onClick={() => go(-1)} aria-label={t("mods.blockerPrev")}>
                   ‹
                 </button>
-                <span className="pager-at" aria-live="polite">
+                <span className="pager-at" data-must-fit>
                   {t("mods.blockerPage", String(index + 1), String(list.length))}
                 </span>
                 <button className="pager-btn" onClick={() => go(1)} aria-label={t("mods.blockerNext")}>
@@ -213,13 +243,10 @@ export function BlockerPanel({ tag, locked, review, id, inBanner = false }: Bloc
       <span className="play-off" id={id ? `${id}-why` : undefined}>
         {list.length === 1 ? t("mods.playOffOne", list[0].mod.name) : tn("mods.playOffMany", list.length)}
       </span>
-      <span className="blockers-title">{title}</span>
       <ul className="blocker-list">
         {list.map((b) => (
           <li key={b.mod.id} className="blocker" data-blocker={b.mod.id}>
-            <span className="blocker-text">
-              <strong>{b.mod.name}</strong> <span className="blocker-why">{reasonsOf(b)}</span>
-            </span>
+            {reasonLines(b, true)}
             <span className="blocker-actions" role="group" aria-label={t("mods.fixesFor", b.mod.name)}>
               <FixButtons tag={tag} fixes={b.fixes} locked={locked} review={review} apply={apply} />
             </span>
@@ -228,6 +255,19 @@ export function BlockerPanel({ tag, locked, review, id, inBanner = false }: Bloc
       </ul>
       {error && <ErrorText error={error} className="blockers-error" />}
     </section>
+  );
+}
+
+/** A sentence with the mod's name in it, the name drawn in the name colour. */
+function Named({ text, name }: { text: string; name: string }) {
+  const at = name ? text.indexOf(name) : -1;
+  if (at < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, at)}
+      <strong>{name}</strong>
+      {text.slice(at + name.length)}
+    </>
   );
 }
 
@@ -283,14 +323,17 @@ export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNotice
   return (
     <section className="launch-error mod-failure" aria-label={title}>
       <CrashSaid id={crashId(crash)} text={title} />
-      <span className="mod-failure-title">{title}</span>
-      {failure && <span className="mod-failure-line">{failure.line}</span>}
+      <span className="mod-failure-title" data-must-fit>
+        {title}
+      </span>
       {failure && !managed && failure.modId && !shadowFile && <span className="mod-failure-why">{t("mods.failureOutside")}</span>}
       {shadowFile && (
         <span className="mod-failure-why" data-testid="crash-shadow">
           {t(loadsInstead ? "mods.failureShadowedStill" : "mods.failureShadowed", shadowFile)}
         </span>
       )}
+      {/* The log's own line, folded: the sentence above says what it means. */}
+      {failure?.line && <ErrorDetails detail={failure.line} label={t("mods.failureLogLine")} />}
       <span className="mod-failure-actions">
         <FixButtons tag={crash.tag} fixes={fixes} locked={false} review={review} apply={apply} />
         {managed && onGoToMods && (
@@ -309,12 +352,15 @@ export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNotice
             {t("mods.openModsFolder")}
           </button>
         )}
-        <button className="btn-secondary btn-small" onClick={() => attempt(() => modsApi.openLog(crash.tag))}>
-          {t("openLogButton")}
-        </button>
-        <button className="btn-secondary btn-small" onClick={clearCrash}>
-          {t("mods.dismiss")}
-        </button>
+        {/* Quieter than the fixes: looking at the log and putting the notice away. */}
+        <span className="mod-failure-quiet">
+          <button className="btn-flat" onClick={() => attempt(() => modsApi.openLog(crash.tag))}>
+            {t("openLogButton")}
+          </button>
+          <button className="btn-flat" onClick={clearCrash}>
+            {t("mods.dismiss")}
+          </button>
+        </span>
       </span>
       {(error || actionError) && <ErrorText error={(error ?? actionError)!} className="blockers-error" />}
     </section>
