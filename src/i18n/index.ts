@@ -120,11 +120,15 @@ export function formatList(items: string[]): string {
   return new Intl.ListFormat(currentLocale, { style: 'long', type: 'conjunction' }).format(items);
 }
 
-export function formatDay(iso: string | null | undefined): string {
+/** A day, short: "2 Nov" this year, "2 Nov 2025" before it. */
+export function formatDay(iso: string | null | undefined, now: Date = new Date()): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(currentLocale, { day: 'numeric', month: 'short', year: 'numeric' });
+  const year = d.getFullYear() === now.getFullYear() ? undefined : 'numeric';
+  // Russian short months end in a dot ("нояб."), which reads as a full stop before one.
+  const month = currentLocale === 'ru' ? 'long' : 'short';
+  return d.toLocaleDateString(currentLocale, { day: 'numeric', month, year });
 }
 
 export function formatSize(bytes: number): string {

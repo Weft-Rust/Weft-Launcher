@@ -396,7 +396,7 @@ button:disabled { cursor: not-allowed; }
 .mod-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
 /* The name has the card's whole width: the tier and where it is from sit on the line under it,
    and the button beside the summary. */
-.mod-card { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; grid-template-areas: "icon title title" "icon badges badges" "summary summary foot"; gap: 0 12px; padding: 8px 12px; }
+.mod-card { display: grid; align-content: start; grid-template-columns: 48px minmax(0, 1fr) auto; grid-template-areas: "icon title title" "icon badges badges" "summary summary foot"; gap: 0 12px; padding: 8px 12px; }
 .mod-card-head { display: contents; }
 .mod-card-head .mod-icon { grid-area: icon; align-self: start; }
 .mod-card-title { grid-area: title; min-width: 0; }
@@ -406,6 +406,10 @@ button:disabled { cursor: not-allowed; }
 .mod-summary { grid-area: summary; color: #b9c1d3; line-height: 24px; height: 48px; margin-top: 4px; align-self: start; }
 .mod-card-foot { grid-area: foot; display: flex; flex-direction: column; align-items: flex-end; justify-content: flex-end; gap: 0; margin-top: 4px; }
 .mod-card-foot .needs-net { color: var(--a3); font-size: 16px; line-height: 24px; white-space: nowrap; }
+/* Offline, the note goes beside the button on a line of its own, so the summary keeps its width. */
+.mod-card.needs-net-card { grid-template-areas: "icon title title" "icon badges badges" "summary summary summary" "foot foot foot"; }
+.needs-net-card .mod-card-foot { flex-direction: row; align-items: center; justify-content: flex-end; gap: 12px; }
+.needs-net-card .needs-net { order: -1; }
 .mod-source { color: var(--g5); line-height: 24px; min-width: 0; flex: 0 1 auto; }
 .installed-mark { color: var(--v3); line-height: 24px; white-space: nowrap; }
 
@@ -453,18 +457,19 @@ button:disabled { cursor: not-allowed; }
 .typed-confirm strong { color: var(--a3); }
 .typed-confirm .text-input { flex: 1 1 160px; height: 36px; }
 .source-list { display: grid; gap: 4px; margin-top: 16px; }
-.source-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "badge name retry action" "badge meta retry action"; gap: 0 12px; align-items: center; padding: 8px 12px; background: var(--ink); }
+.source-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "badge name retry action" "meta meta meta meta"; gap: 0 12px; align-items: center; padding: 8px 12px; background: var(--ink); }
 .source-row-retry { grid-area: retry; }
 .source-actions { grid-area: action; display: flex; align-items: center; gap: 12px; }
 .source-detail { color: var(--g5); overflow-wrap: anywhere; }
 .source-refresh { display: block; }
 .source-row .badge { grid-area: badge; }
 .source-name { grid-area: name; overflow-wrap: anywhere; }
-.source-meta { grid-area: meta; color: var(--g5); line-height: 24px; }
+/* Under the name and the buttons, across the row: a cause in Russian has room to say itself. */
+.source-meta { grid-area: meta; color: var(--g5); line-height: 24px; margin-top: 4px; }
 .source-meta.bad { color: var(--r3); }
 .source-row > button { grid-area: action; }
 .source-name.truncate { display: block; }
-.source-row.confirming { grid-template-areas: "badge name name name" "badge meta meta meta" "confirm confirm confirm confirm"; }
+.source-row.confirming { grid-template-areas: "badge name name name" "meta meta meta meta" "confirm confirm confirm confirm"; }
 .source-confirm { grid-area: confirm; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-top: 8px; color: var(--a3); line-height: 24px; }
 .source-confirm-actions { display: flex; gap: 8px; }
 .source-error { grid-column: 1 / -1; margin-top: 8px; }

@@ -121,9 +121,10 @@ export function BrowseList({ report, locked }: BrowseListProps) {
             const p = events.length ? activeStep(events) : undefined;
             const who = mod.origin.kind === "source" ? mod.origin.repo : formatList(mod.authors) || mod.id;
             const cardId = `${listId}-${mod.key.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+            const needsNet = offline && !!best && !p && !isCurrent;
             const what = best ? best.version : onlyPre ? t("mods.onlyPrerelease") : t("mods.notForVersion", tag);
             return (
-              <li key={mod.key} className="mod-card framed" data-key={mod.key}>
+              <li key={mod.key} className={`mod-card framed${needsNet ? " needs-net-card" : ""}`} data-key={mod.key}>
                 <div className="mod-card-head">
                   <ModIcon id={mod.id} url={mod.icon} />
                   {/* The name has the whole width; the tier sits on the line under it. */}
@@ -149,12 +150,12 @@ export function BrowseList({ report, locked }: BrowseListProps) {
                         disabled={!best || locked}
                         onClick={() => setOpen(mod)}
                         aria-label={t(installed ? "mods.updateLabel" : "mods.installLabel", mod.name)}
-                        aria-describedby={offline && best ? `${cardId}-net` : undefined}
+                        aria-describedby={needsNet ? `${cardId}-net` : undefined}
                       >
                         {t(installed ? "mods.updateButton" : "mods.install")}
                       </button>
                       {/* A download needs the network, and it was down at the last try. */}
-                      {offline && best && (
+                      {needsNet && (
                         <small className="needs-net" id={`${cardId}-net`}>
                           {t("mods.needsNetworkShort")}
                         </small>
