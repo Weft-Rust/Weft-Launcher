@@ -5,7 +5,7 @@ import { useMods } from "../../hooks/useMods";
 import { useGameState, type GameCrash } from "../../hooks/useGameState";
 import { modsApi } from "../../mods/api";
 import { catalogModFor } from "../../mods/select";
-import { blockers, crashFixes, failureTitle, shadowOf, type Fix } from "../../mods/status";
+import { blockers, crashFixes, failureTitle, shadowOf, shadowStillThere, type Fix } from "../../mods/status";
 import type { CatalogMod, InstalledMod } from "../../mods/types";
 import { Announce } from "../Announce";
 import { announce } from "../LiveRegion";
@@ -251,7 +251,7 @@ interface ModFailureNoticeProps {
  */
 export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNoticeProps) {
   const { t, tm } = useI18n();
-  const { profile, nameIn, catalog } = useMods();
+  const { profile, nameIn, catalog, crashSnapshot } = useMods();
   const { clearCrash } = useGameState();
   const { apply, error, lookAgain } = useFix(crash.tag, review);
   const [actionError, setActionError] = useState<Shown | null>(null);
@@ -259,9 +259,13 @@ export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNotice
   const report = profile(crash.tag);
   const managed = failure?.modId ? report?.mods.find((m) => m.id === failure.modId) : undefined;
   const fixes = crashFixes(failure, report, catalog);
-  // A copy in the player's own folder may be what the game loaded, so turning this one off may not help.
+  // A copy in the player's own folder may be what the game loaded, so turning this one off may not
+  // help: it loads instead. Named for as long as it is there, also once the launcher's is gone.
   const shadow = failure?.modId ? shadowOf(report, failure.modId) : undefined;
-  const outside = !!failure?.modId && (!managed || !!shadow);
+  const leftover = shadowStillThere(crashSnapshot, report);
+  const shadowFile = shadow?.file ?? leftover;
+  const loadsInstead = !!shadowFile && !managed?.enabled;
+  const outside = !!failure?.modId && (!managed || !!shadowFile);
 
   const attempt = async (work: () => Promise<void>) => {
     setActionError(null);
@@ -281,8 +285,12 @@ export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNotice
       <CrashSaid id={crashId(crash)} text={title} />
       <span className="mod-failure-title">{title}</span>
       {failure && <span className="mod-failure-line">{failure.line}</span>}
-      {failure && !managed && failure.modId && <span className="mod-failure-why">{t("mods.failureOutside")}</span>}
-      {shadow && <span className="mod-failure-why">{t("mods.failureShadowed", shadow.file)}</span>}
+      {failure && !managed && failure.modId && !shadowFile && <span className="mod-failure-why">{t("mods.failureOutside")}</span>}
+      {shadowFile && (
+        <span className="mod-failure-why" data-testid="crash-shadow">
+          {t(loadsInstead ? "mods.failureShadowedStill" : "mods.failureShadowed", shadowFile)}
+        </span>
+      )}
       <span className="mod-failure-actions">
         <FixButtons tag={crash.tag} fixes={fixes} locked={false} review={review} apply={apply} />
         {managed && onGoToMods && (

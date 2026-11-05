@@ -69,6 +69,9 @@ interface ModsContextValue {
   notices: (tag: string) => Notice[];
   dismissNotice: (id: number) => void;
 
+  /** The blamed mod as it was when the last crash happened, for its notice. */
+  crashSnapshot: CrashSnapshot | null;
+
   plan: (tag: string, sha256: string) => Promise<InstallPlan>;
   previewCopy: (from: string, to: string) => Promise<CopyPreview>;
   inspectFile: (tag: string, path: string) => Promise<FileInspection>;
@@ -273,18 +276,21 @@ export function ModsProvider({ children }: { children: ReactNode }) {
 
   // A crash notice stays until its problem is fixed: the blamed mod is off, gone or replaced, or
   // the dependency it lacked is on and usable.
-  const crashSnapshot = useRef<{ crash: unknown; snapshot: CrashSnapshot | null } | null>(null);
+  // A copy in the player's own folder counts too: it loads whenever the launcher's doesn't, so the
+  // notice stays until that file is gone or a launcher build that is on stands in for it.
+  const [crashSnap, setCrashSnap] = useState<{ crash: unknown; snapshot: CrashSnapshot | null } | null>(null);
   useEffect(() => {
     if (!lastCrash) {
-      crashSnapshot.current = null;
+      setCrashSnap(null);
       return;
     }
-    if (crashSnapshot.current?.crash !== lastCrash) {
-      crashSnapshot.current = { crash: lastCrash, snapshot: snapshotFor(lastCrash.modFailure, profiles[lastCrash.tag]) };
+    if (crashSnap?.crash !== lastCrash) {
+      setCrashSnap({ crash: lastCrash, snapshot: snapshotFor(lastCrash.modFailure, profiles[lastCrash.tag]) });
       return;
     }
-    if (crashResolved(crashSnapshot.current.snapshot, profiles[lastCrash.tag])) clearCrash();
-  }, [lastCrash, profiles, clearCrash]);
+    if (crashResolved(crashSnap.snapshot, profiles[lastCrash.tag])) clearCrash();
+  }, [lastCrash, profiles, clearCrash, crashSnap]);
+  const crashSnapshot = crashSnap && crashSnap.crash === lastCrash ? crashSnap.snapshot : null;
 
   const nameIn = useCallback((tag: string): NameOf => (id) => modName(id, profiles[tag], catalog), [profiles, catalog]);
 
@@ -452,6 +458,7 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       isCancelling,
       notices: noticesFor,
       dismissNotice,
+      crashSnapshot,
       plan: modsApi.plan,
       previewCopy: modsApi.previewCopy,
       inspectFile: modsApi.inspectFile,
@@ -478,6 +485,7 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       isCancelling,
       noticesFor,
       dismissNotice,
+      crashSnapshot,
       install,
       installFile,
       setEnabled,

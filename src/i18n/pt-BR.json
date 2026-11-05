@@ -476,7 +476,8 @@
     "sourceNoModsInvalid": "as versões quebram uma regra que todo mod segue.",
     "sourceFormatLink": "O que uma fonte precisa",
     "sourcesDamaged": "Não foi possível ler sua lista de fontes; ela foi guardada à parte. Adicione suas fontes de novo em Fontes.",
-    "sourcesDamagedShort": "Não foi possível ler sua lista de fontes"
+    "sourcesDamagedShort": "Não foi possível ler sua lista de fontes",
+    "failureShadowedStill": "Sua pasta de mods ainda tem {0}, que carrega no lugar dele, então isso ainda pode acontecer. Remova esse arquivo para ter certeza."
   },
   "sizeUnits": {
     "B": "B",

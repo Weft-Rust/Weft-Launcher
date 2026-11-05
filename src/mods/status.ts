@@ -302,6 +302,11 @@ export interface CrashSnapshot {
   kind: FailureKind;
   /** For `missingDep`: the mod it lacked. */
   dependency: string | null;
+  /**
+   * A copy of the mod in the player's own folder at the time (contract R4 §4): it loads whenever
+   * the launcher's copy doesn't, so it may be what crashed.
+   */
+  shadowFile: string | null;
 }
 
 export function snapshotFor(failure: ModFailure | null, report: ProfileReport | undefined): CrashSnapshot | null {
@@ -313,7 +318,14 @@ export function snapshotFor(failure: ModFailure | null, report: ProfileReport | 
     enabled: mod.enabled,
     kind: failure.kind,
     dependency: failure.kind === "missingDep" ? failure.other : null,
+    shadowFile: shadowOf(report, mod.id)?.file ?? null,
   };
+}
+
+/** The player's own copy a crash snapshot names, while it is still in their folder. */
+export function shadowStillThere(snapshot: CrashSnapshot | null, report: ProfileReport | undefined): string | null {
+  const file = snapshot?.shadowFile;
+  return file && report?.unmanaged.includes(file) ? file : null;
 }
 
 /**
@@ -325,6 +337,15 @@ export function snapshotFor(failure: ModFailure | null, report: ProfileReport | 
 export function crashResolved(snapshot: CrashSnapshot | null, report: ProfileReport | undefined): boolean {
   if (!snapshot || !report) return false;
   const now = report.mods.find((m) => m.id === snapshot.id);
+  const usable = !!now && now.enabled && now.status !== "revoked";
+  if (shadowStillThere(snapshot, report)) {
+    // The player's copy loads whenever the launcher's doesn't: turning that off or removing it
+    // only lets the player's copy load. Only a launcher copy that is on, and isn't what ran at
+    // the crash, loads in its place.
+    return usable && (!snapshot.enabled || now!.sha256 !== snapshot.sha256);
+  }
+  // The player's copy was what loaded, and it is gone.
+  if (snapshot.shadowFile && !snapshot.enabled) return true;
   if (!now || !now.enabled || now.sha256 !== snapshot.sha256) return true;
   if (snapshot.kind === "missingDep" && snapshot.dependency) {
     const dep = report.mods.find((m) => m.id === snapshot.dependency);

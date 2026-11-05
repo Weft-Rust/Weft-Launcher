@@ -26,6 +26,23 @@ test.describe("launch safety", () => {
     await expect(page.locator(".mod-failure")).toHaveCount(0);
   });
 
+  test("a crash notice for a mod with a copy in the player's folder stays until that copy goes", async ({ page }) => {
+    await open(page, "scenario=crash&shadow=structures");
+    await page.locator(".btn-play").click();
+    const notice = page.locator(".mod-failure");
+    await expect(notice).toBeVisible({ timeout: 10_000 });
+    await expect(notice.getByTestId("crash-shadow")).toContainText("structures-old.zip");
+    // Turning off the launcher's copy doesn't fix it: the player's own copy loads instead.
+    await notice.locator("button", { hasText: "Turn off" }).click();
+    await expect(notice).toHaveCount(1);
+    await expect(notice.getByTestId("crash-shadow")).toContainText("still has structures-old.zip");
+    // The player opens their folder and deletes it; back in the launcher, the notice goes.
+    await notice.locator("button", { hasText: "Open mods folder" }).click();
+    await page.evaluate(() => (window as unknown as { mockPlayer: { deleteFile(f: string): void } }).mockPlayer.deleteFile("structures-old.zip"));
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(notice).toHaveCount(0);
+  });
+
   test("a missing-dependency crash names the dependency and turns it on", async ({ page }) => {
     await open(page, "scenario=crash&crash=missingDep");
     await page.locator(".btn-play").click();

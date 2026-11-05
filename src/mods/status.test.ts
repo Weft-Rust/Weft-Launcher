@@ -117,6 +117,29 @@ describe("crash notices", () => {
     expect(crashResolved(snap, report([installed("structures", { sha256: "n".repeat(64) })]))).toBe(true);
   });
 
+  it("stay while a copy in the player's own folder can still load in its place", () => {
+    const shadowed = { unmanaged: ["structures-old.zip"], shadowed: [{ id: "structures", file: "structures-old.zip", managed: "on" as const }] };
+    const at = report([installed("structures")], shadowed);
+    const snap = snapshotFor(failure, at);
+    expect(snap?.shadowFile).toBe("structures-old.zip");
+    // Off or removed: the player's copy loads now. Still there, so the warning stays.
+    const off = report([installed("structures", { enabled: false, status: "off" })], { unmanaged: ["structures-old.zip"], shadowed: [{ id: "structures", file: "structures-old.zip", managed: "off" }] });
+    expect(crashResolved(snap, off)).toBe(false);
+    expect(crashResolved(snap, report([], { unmanaged: ["structures-old.zip"] }))).toBe(false);
+    // Replaced by a build that is on: that one loads instead of the player's copy.
+    expect(crashResolved(snap, report([installed("structures", { sha256: "n".repeat(64) })], shadowed))).toBe(true);
+    // The file is gone: as for any crash.
+    expect(crashResolved(snap, report([installed("structures", { enabled: false, status: "off" })]))).toBe(true);
+    expect(crashResolved(snap, report([installed("structures")]))).toBe(false);
+  });
+
+  it("go with the player's copy that crashed while the launcher's was off", () => {
+    const off = { unmanaged: ["structures-old.zip"], shadowed: [{ id: "structures", file: "structures-old.zip", managed: "off" as const }] };
+    const snap = snapshotFor(failure, report([installed("structures", { enabled: false, status: "off" })], off));
+    expect(crashResolved(snap, report([installed("structures", { enabled: false, status: "off" })], off))).toBe(false);
+    expect(crashResolved(snap, report([installed("structures", { enabled: false, status: "off" })]))).toBe(true);
+  });
+
   it("never go on their own when no managed mod is blamed", () => {
     expect(snapshotFor({ ...failure, modId: "oldtweak" }, before)).toBeNull();
     expect(crashResolved(null, report([]))).toBe(false);

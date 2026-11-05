@@ -476,7 +476,8 @@
     "sourceNoModsInvalid": "sus versiones rompen una regla que cumple todo mod.",
     "sourceFormatLink": "Qué necesita una fuente",
     "sourcesDamaged": "No se pudo leer tu lista de fuentes; se guardó aparte. Vuelve a añadir tus fuentes en Fuentes.",
-    "sourcesDamagedShort": "No se pudo leer tu lista de fuentes"
+    "sourcesDamagedShort": "No se pudo leer tu lista de fuentes",
+    "failureShadowedStill": "Tu carpeta de mods todavía tiene {0}, que se carga en su lugar, así que puede seguir pasando. Quita ese archivo para estar seguro."
   },
   "sizeUnits": {
     "B": "B",
