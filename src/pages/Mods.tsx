@@ -323,6 +323,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
       <section
         {...tabs.panel}
         className="mods-panel"
+        data-focus-scope
         ref={panel}
         tabIndex={-1}
         style={{ "--toast-room": `${toastRoom}px` } as CSSProperties}

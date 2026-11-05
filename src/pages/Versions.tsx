@@ -89,6 +89,7 @@ export function VersionsPage({
                 key={release.tag}
                 className={`version-entry${installedVersion ? " in-use" : ""}${isNew ? " is-new" : ""}`}
                 role="listitem"
+                data-focus-scope
               >
                 <div className="version-header">
                   <div className="version-main">

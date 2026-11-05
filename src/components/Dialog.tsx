@@ -1,5 +1,6 @@
 import { ReactNode, useCallback, useEffect, useId, useRef } from "react";
 import { tipOpenOn } from "./Truncate";
+import { focusNear, scopesOf } from "./focusRescue";
 
 interface DialogProps {
   title: ReactNode;
@@ -31,7 +32,8 @@ function usable(el: Element | null): el is HTMLElement {
 /**
  * A modal. Keeps focus inside, also when its content is replaced (an async inspection) or a
  * focused button is disabled, and gives focus back to whatever opened it. It first focuses the
- * element marked `data-autofocus` (the safe choice, e.g. Cancel), else its title.
+ * element marked `data-autofocus` (the safe choice, e.g. Cancel), else its title. When the opener
+ * is gone by then, focus goes to the nearest place around where it was (components/focusRescue).
  */
 export function Dialog({ title, subtitle, onClose, locked = false, children, footer }: DialogProps) {
   const box = useRef<HTMLDivElement>(null);
@@ -54,6 +56,8 @@ export function Dialog({ title, subtitle, onClose, locked = false, children, foo
 
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
+    // Where the opener was, in case it is gone when this closes: an Install that became "Installed".
+    const openerScopes = scopesOf(opener);
     settle();
 
     // Content changes can take focus away: an element unmounts or gets disabled.
@@ -101,7 +105,8 @@ export function Dialog({ title, subtitle, onClose, locked = false, children, foo
       observer.disconnect();
       document.removeEventListener("keydown", onKey, true);
       document.removeEventListener("focusin", onFocusIn);
-      if (opener?.isConnected) opener.focus?.({ preventScroll: true });
+      if (opener?.isConnected && opener !== document.body) opener.focus?.({ preventScroll: true });
+      else focusNear(openerScopes);
     };
   }, [settle]);
 

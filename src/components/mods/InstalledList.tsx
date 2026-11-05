@@ -66,7 +66,7 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
   const rowClass = ["mod-row framed", mod.enabled ? "" : "is-off", meta.bad ? "has-problem" : "", wide ? "wide" : ""].join(" ");
 
   return (
-    <li className={rowClass} data-mod={mod.id} data-shadowed={meta.shadowed || undefined}>
+    <li className={rowClass} data-mod={mod.id} data-shadowed={meta.shadowed || undefined} data-focus-scope>
       <ModIcon id={mod.id} url={mod.icon} />
       {/* The name whole, and its tier beside it; the tier goes under the name when both don't
           fit, never shortened. */}

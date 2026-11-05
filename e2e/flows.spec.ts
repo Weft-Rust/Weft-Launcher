@@ -595,6 +595,53 @@ test.describe("announcements", () => {
   });
 });
 
+test.describe("focus after a result", () => {
+  const notOnBody = async (page: Page) => {
+    await expect.poll(async () => (await focused(page)).tag).not.toBe("BODY");
+    await expect.poll(async () => (await focused(page)).inDialog).toBe(false);
+  };
+
+  test("an install from Browse leaves focus on its card, though Install became Installed", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    await browse(page);
+    const card = page.locator(".mod-card", { has: page.locator(".mod-card-foot .btn-primary", { hasText: /^Install$/ }) }).first();
+    const key = await card.getAttribute("data-key");
+    await card.locator(".mod-card-foot .btn-primary").click();
+    const d = page.locator(dialog);
+    await d.locator(".dialog-actions .btn-primary").click();
+    await expect(d).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.locator(`.mod-card[data-key="${key}"] .installed-mark`)).toHaveCount(1);
+    await notOnBody(page);
+    expect(await page.evaluate(() => document.activeElement?.closest(".mod-card")?.getAttribute("data-key"))).toBe(key);
+  });
+
+  test("a copy into an empty set leaves focus in the list, not on the page body", async ({ page }) => {
+    await open(page, "scenario=empty");
+    await goToTab(page, MODS_TAB);
+    await page.locator(".empty-actions .btn-secondary").first().click();
+    const d = page.locator(dialog);
+    await d.locator(".dialog-actions .btn-primary", { hasText: "Copy 4 mods to v26.11.1" }).click();
+    await expect(d.locator(".dialog-title")).toHaveText("Mods copied to v26.11.1", { timeout: 30_000 });
+    await d.locator(".dialog-actions .btn-primary").click();
+    await expect(d).toHaveCount(0);
+    await notOnBody(page);
+    expect(await page.evaluate(() => !!document.activeElement?.closest(".mods-panel"))).toBe(true);
+  });
+
+  test("a file install leaves focus on the page, not the body", async ({ page }) => {
+    await open(page, "scenario=mods&file=known");
+    await goToTab(page, MODS_TAB);
+    await page.locator("button", { hasText: "From file" }).click();
+    const d = page.locator(dialog);
+    const go = d.locator(".dialog-actions .btn-primary");
+    await expect(go).toBeEnabled({ timeout: 10_000 });
+    await go.click();
+    await expect(d).toHaveCount(0, { timeout: 15_000 });
+    await notOnBody(page);
+  });
+});
+
 test.describe("remove and undo", () => {
   test("a double-click on Remove asks, and doesn't remove", async ({ page }) => {
     await open(page, "scenario=mods");

@@ -124,7 +124,7 @@ export function BrowseList({ report, locked }: BrowseListProps) {
             const needsNet = offline && !!best && !p && !isCurrent;
             const what = best ? best.version : onlyPre ? t("mods.onlyPrerelease") : t("mods.notForVersion", tag);
             return (
-              <li key={mod.key} className={`mod-card framed${needsNet ? " needs-net-card" : ""}`} data-key={mod.key}>
+              <li key={mod.key} className={`mod-card framed${needsNet ? " needs-net-card" : ""}`} data-key={mod.key} data-focus-scope>
                 <div className="mod-card-head">
                   <ModIcon id={mod.id} url={mod.icon} />
                   {/* The name has the whole width; the tier sits on the line under it. */}

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useI18n } from "./i18n/useI18n";
 import { showError, type Shown } from "./i18n/errors";
 import { LiveRegion } from "./components/LiveRegion";
+import { watchFocus } from "./components/focusRescue";
 import { useInstall } from "./hooks/useInstall";
 import { Sidebar } from "./components/Sidebar";
 import { Tabs, TabId, useMainTabs } from "./components/Tabs";
@@ -78,6 +79,9 @@ function App() {
   }
 
   // The cache shows something at once, then GitHub says what is new.
+  // Focus never falls to the page body when what had it goes away.
+  useEffect(() => watchFocus(), []);
+
   useEffect(() => {
     fetchReleases(false).then((cached) => {
       if (cached) fetchReleases(true);
