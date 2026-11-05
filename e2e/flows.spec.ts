@@ -268,9 +268,27 @@ test.describe("every install shows what it does", () => {
     const seq = await page.evaluate(() => (window as unknown as { seq: string[] }).seq.join(""));
     // Off until the first plan, then on for good.
     expect(seq.replace(/(.)\1*/g, "$1"), "enabled, disabled, enabled again").toBe("De");
-    // A click the moment it is enabled starts the install.
     await button.click();
     await expect(page.locator(`${dialog} .progress-bar`)).toHaveCount(1);
+  });
+
+  test("a click in the very frame the button turns on starts the install", async ({ page }) => {
+    await open(page, "scenario=mods");
+    // Clicks from inside the page in the first frame the button is enabled: no wait for a
+    // stable state, as a quick player wouldn't wait either.
+    await page.evaluate(() => {
+      const tick = () => {
+        const b = document.querySelector<HTMLButtonElement>("[role=dialog] .dialog-actions .btn-primary");
+        if (b && !b.disabled) b.click();
+        else requestAnimationFrame(tick);
+      };
+      tick();
+    });
+    await goToTab(page, MODS_TAB);
+    await page.locator(".mod-row", { hasText: "Lanterns" }).locator(".update-btn-row").click();
+    await expect(page.locator(`${dialog} .progress-bar`)).toHaveCount(1);
+    await expect(page.locator(dialog)).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.locator(".mod-row[data-mod=lanterns] .mod-version")).toHaveText("1.1.0");
   });
 
   test("a failed dependency download leaves no progress behind", async ({ page }) => {
