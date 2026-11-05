@@ -78,9 +78,18 @@ describe("locale files", () => {
 
   it("use the Russian glossary for the tiers, everywhere", () => {
     const mods = (ru as unknown as { mods: Record<string, string> }).mods;
-    expect([mods.badgeReviewed, mods.badgeUnreviewed, mods.badgeUnverified]).toEqual(["Проверен", "Не проверен", "Не верифицирован"]);
+    expect([mods.badgeReviewed, mods.badgeUnreviewed, mods.badgeUnverified]).toEqual(["Проверен", "Не проверен", "Неизвестный"]);
     // "Одобрен" was the old word for Reviewed; one word per tier, so it pairs with "Не проверен".
-    expect(JSON.stringify(ru)).not.toMatch(/[Оо]добр/);
+    // "Не верифицирован" read as a synonym of "Не проверен", not as the weaker tier.
+    const all = JSON.stringify(ru);
+    expect(all).not.toMatch(/[Оо]добр/);
+    expect(all).not.toMatch(/верифиц/);
+    expect(mods.fileUnverifiedTitle).toMatch(/неизвестный файл/);
+    // A copy leaves the mods where they were: «Скопировать», never «Перенести» (move).
+    expect(all).not.toMatch(/[Пп]еренес|[Пп]еренос/);
+    // Only the words: a key may still be called "digest".
+    const words = all.replace(/"[^"]*":/g, "");
+    expect(words).not.toMatch(/дайджест|digest/i);
   });
 
   it("say on and off in full in Spanish", () => {
