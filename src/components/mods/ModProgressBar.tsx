@@ -3,6 +3,7 @@ import { useI18n } from "../../i18n/useI18n";
 import type { UiProgress, UiStage } from "../../mods/types";
 import type { MessageKey } from "../../i18n";
 import { announce } from "../LiveRegion";
+import { dwellDelay, stepKey } from "../../mods/progress";
 
 /** What is shown: "downloading 40%" has the percent in it, the others don't. */
 const STEP: Record<UiStage, MessageKey> = {
@@ -14,34 +15,33 @@ const STEP: Record<UiStage, MessageKey> = {
 /** What is said, once per step: never a number, so nothing like a lone "%" is left behind. */
 const SPOKEN: Record<UiStage, MessageKey> = { ...STEP, downloading: "mods.stepDownloadingSpoken" };
 
-/** The check of a file stays on screen at least this long, so the player sees it happen. */
-export const VERIFY_DWELL_MS = 400;
-
 /**
- * The stage to show: the newest, except that a check is held for VERIFY_DWELL_MS once it starts,
- * however quickly the backend moves on. Only what is drawn waits; the operation doesn't.
+ * The progress record to show: the newest, except that a file's check is held for
+ * VERIFY_DWELL once it shows, however quickly the backend moves on. The whole record is held,
+ * not only its stage, so the file's number, its name and what is happening to it always describe
+ * the same file. Only what is drawn waits; the operation doesn't.
  */
-function useDwell(stage: UiStage): UiStage {
-  const [shown, setShown] = useState(stage);
-  const since = useRef(0);
+function useDwell(progress: UiProgress | undefined): UiProgress | undefined {
+  const [shown, setShown] = useState(progress);
+  const since = useRef(Date.now());
   useEffect(() => {
-    if (stage === shown) return;
-    if (stage === "verifying") since.current = Date.now();
-    const wait = shown === "verifying" ? VERIFY_DWELL_MS - (Date.now() - since.current) : 0;
-    if (wait <= 0) {
-      setShown(stage);
-      return;
-    }
-    const timer = setTimeout(() => setShown(stage), wait);
+    if (progress === shown) return;
+    const show = () => {
+      if (stepKey(progress) !== stepKey(shown)) since.current = Date.now();
+      setShown(progress);
+    };
+    const wait = dwellDelay(shown, progress, since.current, Date.now());
+    if (wait <= 0) return show();
+    const timer = setTimeout(show, wait);
     return () => clearTimeout(timer);
-  }, [stage, shown]);
+  }, [progress, shown]);
   return shown;
 }
 
 interface ModProgressBarProps {
   progress: UiProgress | undefined;
-  /** The name of the mod `progress` is about. */
-  name: string;
+  /** The name of the mod a progress record is about: asked of the record shown, never another. */
+  nameOf: (p: UiProgress) => string;
   /** Offered while the operation can still stop: until its files are being installed. */
   onCancel?: () => void;
   cancelling?: boolean;
@@ -53,12 +53,14 @@ interface ModProgressBarProps {
  * Which file of the operation is being worked on, what is happening to it, and a way to stop:
  * "File 2 of 3: Glowmoss, downloading 40%". The step is said once per change, not each percent.
  */
-export function ModProgressBar({ progress, name, onCancel, cancelling = false, compact = false }: ModProgressBarProps) {
+export function ModProgressBar({ progress, nameOf, onCancel, cancelling = false, compact = false }: ModProgressBarProps) {
   const { t } = useI18n();
-  const stage = useDwell(progress?.stage ?? "preparing");
-  const percent = stage === "downloading" ? (progress?.percent ?? 0) : stage === "preparing" ? 0 : 100;
-  const count = progress?.count ?? 1;
-  const index = progress?.index ?? 1;
+  const shown = useDwell(progress);
+  const stage = shown?.stage ?? "preparing";
+  const percent = stage === "downloading" ? (shown?.percent ?? 0) : stage === "preparing" ? 0 : 100;
+  const count = shown?.count ?? 1;
+  const index = shown?.index ?? 1;
+  const name = shown ? nameOf(shown) : "";
   const whole = (step: string) => (count > 1 ? t("mods.progressOf", String(index), String(count), name, step) : t("mods.progressOne", name, step));
   const step = t(STEP[stage], String(percent));
   const label = whole(step);

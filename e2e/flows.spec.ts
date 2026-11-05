@@ -531,6 +531,38 @@ test.describe("operations", () => {
     await expect(page.locator(".progress-bar")).toHaveCount(0);
   });
 
+  test("each progress line names the file it is about: its number, its name and its step together", async ({ page }) => {
+    await open(page, "scenario=empty");
+    // Everything the bar shows and the live region says, as it changes.
+    await page.evaluate(() => {
+      const log: string[] = ((window as unknown as { progressLog: string[] }).progressLog = []);
+      const keep = (t: string | null | undefined) => t && /^File \d+ of \d+:/.test(t) && log[log.length - 1] !== t && log.push(t);
+      new MutationObserver(() => {
+        keep(document.querySelector("[role=dialog] .dialog-actions .progress-label")?.textContent?.replace(/ \d+%$/, ""));
+        document.querySelector("[data-testid=live-region]")?.textContent?.split(/(?=File \d+ of)/).forEach((x) => keep(x.trim()));
+      }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    });
+    await goToTab(page, MODS_TAB);
+    await page.locator(".empty-actions .btn-secondary").first().click();
+    const d = page.locator(dialog);
+    await d.locator(".dialog-actions .btn-primary", { hasText: "Copy 4 mods to v26.11.1" }).click();
+    await expect(d.locator(".dialog-title")).toHaveText("Mods copied to v26.11.1", { timeout: 30_000 });
+    const log = await page.evaluate(() => (window as unknown as { progressLog: string[] }).progressLog);
+    const lines = log.map((l) => l.match(/^File (\d+) of \d+: (.+), (downloading|checking the file|installing|getting ready)$/)!);
+    expect(lines.every(Boolean), log.join("\n")).toBe(true);
+    // One name per file number, all the way through.
+    const names = new Map<string, string>();
+    for (const [, index, name] of lines) {
+      expect(names.get(index) ?? name, `file ${index}`).toBe(name);
+      names.set(index, name);
+    }
+    expect(names.size).toBeGreaterThan(1);
+    // A file is checked only after it was shown downloading.
+    lines.forEach(([line, index, name, step], i) => {
+      if (step === "checking the file") expect(log.slice(0, i), line).toContain(`File ${index} of ${line.match(/of (\d+)/)![1]}: ${name}, downloading`);
+    });
+  });
+
   test("a set that changed meanwhile is planned again, shown, and asked again", async ({ page }) => {
     const d = await updateLanterns(page, "scenario=mods&fail=meanwhile");
     await d.locator(".dialog-actions .btn-primary").click();

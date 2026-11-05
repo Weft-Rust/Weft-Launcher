@@ -113,7 +113,7 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
         )}
       </div>
       <div className="mod-actions">
-        {updating && <ModProgressBar progress={updating} name={updating.modId === mod.id ? mod.name : nameIn(tag)(updating.modId)} compact />}
+        {updating && <ModProgressBar progress={updating} nameOf={(p) => (p.modId === mod.id ? mod.name : nameIn(tag)(p.modId))} compact />}
         <button
           className={`toggle${mod.enabled ? " on" : ""}`}
           role="switch"

@@ -19,7 +19,7 @@ interface BrowseListProps {
 
 export function BrowseList({ report, locked }: BrowseListProps) {
   const { t, formatList } = useI18n();
-  const { catalog, catalogLoading, catalogError, refreshCatalog, progressOf } = useMods();
+  const { catalog, catalogLoading, catalogError, refreshCatalog, progressOf, nameIn } = useMods();
   const [query, setQuery] = useState("");
   const [onlyFitting, setOnlyFitting] = useState(true);
   const [prereleases, setPrereleases] = useState(false);
@@ -148,7 +148,7 @@ export function BrowseList({ report, locked }: BrowseListProps) {
                 <Truncate className="mod-summary" text={mod.summary || t("mods.noSummary")} lines={needsNet ? 1 : 2} />
                 <div className="mod-card-foot">
                   {p ? (
-                    <ModProgressBar progress={p} name={p.modId === mod.id ? mod.name : p.modId} compact />
+                    <ModProgressBar progress={p} nameOf={(x) => (x.modId === mod.id ? mod.name : nameIn(tag)(x.modId))} compact />
                   ) : isCurrent ? (
                     <span className="installed-mark">{t("mods.installed")}</span>
                   ) : (

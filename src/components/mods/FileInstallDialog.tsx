@@ -4,7 +4,7 @@ import type { Shown } from "../../i18n/errors";
 import { useMods } from "../../hooks/useMods";
 import { useCheckContext } from "../../hooks/useCheckContext";
 import { usePlan } from "../../hooks/usePlan";
-import type { FileInspection, InstallPlan } from "../../mods/types";
+import type { FileInspection, InstallPlan, UiProgress } from "../../mods/types";
 import { networkDown, shortSha } from "../../mods/select";
 import {
   activeStep,
@@ -112,7 +112,8 @@ export function FileInstallDialog({ tag, path, onClose }: FileInstallDialogProps
   const outcome = plan ? installOutcome(plan, replacing, name, ctx) : null;
   const weaker = plan ? weakerDeps(plan, ctx) : [];
   const step = activeStep(progressOf(op));
-  const stepName = step ? (plan ? [plan.target, ...plan.install].find((i) => i.sha256 === step.sha256)?.name : undefined) ?? (step.modId === id ? name : nameIn(tag)(step.modId)) : name;
+  const stepName = (p: UiProgress) =>
+    (plan ? [plan.target, ...plan.install].find((i) => i.sha256 === p.sha256)?.name : undefined) ?? (p.modId === id ? name : nameIn(tag)(p.modId));
   const checks = withProblem(problem, [...fileChecks(inspection, tag, ctx.indexFrom ?? null), ...(plan && known ? planDepChecks(plan, known.build.deps, ctx) : [])]);
   const notes = usable ? fileReplaceNotes(inspection, report?.mods.find((m) => m.id === id)?.trust) : [];
   const changes = changedFrom && ready ? consentChanges(changedFrom, fileConsent(inspection, plan), nameIn(tag)) : null;
@@ -167,7 +168,7 @@ export function FileInstallDialog({ tag, path, onClose }: FileInstallDialogProps
       }
       footer={
         working ? (
-          <ModProgressBar progress={step} name={stepName} onCancel={() => cancel(op)} cancelling={isCancelling(op)} />
+          <ModProgressBar progress={step} nameOf={stepName} onCancel={() => cancel(op)} cancelling={isCancelling(op)} />
         ) : (
           <>
             {needsTyping && (

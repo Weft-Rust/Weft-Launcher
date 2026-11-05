@@ -5,7 +5,7 @@ import type { Shown } from "../../i18n/errors";
 import { useMods } from "../../hooks/useMods";
 import { useCheckContext } from "../../hooks/useCheckContext";
 import { usePlan } from "../../hooks/usePlan";
-import type { CatalogMod, InstallPlan } from "../../mods/types";
+import type { CatalogMod, InstallPlan, UiProgress } from "../../mods/types";
 import { fittingVersions, installedFor, networkDown, sourceUrl } from "../../mods/select";
 import {
   activeStep,
@@ -98,7 +98,7 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
   const blocked = !request.ready || !plan || !!plan.problem;
   const changes = changedFrom && plan && request.ready ? consentChanges(changedFrom, planConsent(plan), nameIn(tag)) : null;
   const step = activeStep(progressOf(op));
-  const stepName = step ? (plan ? [plan.target, ...plan.install].find((i) => i.sha256 === step.sha256)?.name : undefined) ?? nameIn(tag)(step.modId) : mod.name;
+  const stepName = (p: UiProgress) => (plan ? [plan.target, ...plan.install].find((i) => i.sha256 === p.sha256)?.name : undefined) ?? nameIn(tag)(p.modId);
   const offline = networkDown(catalog, catalogError);
   const label = t(outcome?.button ?? (replacing ? "mods.updateButton" : "mods.install"));
 
@@ -140,7 +140,7 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
       footer={
         <>
           {working ? (
-            <ModProgressBar progress={step} name={stepName} onCancel={() => cancel(op)} cancelling={isCancelling(op)} />
+            <ModProgressBar progress={step} nameOf={stepName} onCancel={() => cancel(op)} cancelling={isCancelling(op)} />
           ) : (
             <>
               <button className="btn-primary" onClick={confirm} disabled={blocked}>

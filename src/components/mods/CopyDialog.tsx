@@ -87,7 +87,7 @@ export function CopyDialog({ tag, donors, onClose }: CopyDialogProps) {
       {t("mods.close")}
     </button>
   ) : copying ? (
-    <ModProgressBar progress={step} name={step ? name(step.modId) : ""} onCancel={() => cancel(op)} cancelling={isCancelling(op)} />
+    <ModProgressBar progress={step} nameOf={(p) => name(p.modId)} onCancel={() => cancel(op)} cancelling={isCancelling(op)} />
   ) : (
     <>
       <button className="btn-primary" onClick={confirm} disabled={blocked}>
@@ -239,7 +239,7 @@ function ExtraList({
                 <span>{r.text}</span>
                 {r.trust && <TrustBadge trust={r.trust} />}
               </span>
-              {p && <ModProgressBar progress={p} name={r.text} compact />}
+              {p && <ModProgressBar progress={p} nameOf={() => r.text} compact />}
             </span>
           </li>
         );
@@ -310,7 +310,7 @@ function CopyList({
                 {item.trust && <TrustBadge trust={item.trust} />}
               </span>
               {p ? (
-                <ModProgressBar progress={p} name={item.name} compact />
+                <ModProgressBar progress={p} nameOf={() => item.name} compact />
               ) : (
                 <small>{t(o.key, tag)}</small>
               )}
