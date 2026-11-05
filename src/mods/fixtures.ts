@@ -92,6 +92,7 @@ export function report(mods: InstalledMod[], extra: Partial<ProfileReport> = {})
     versionAbi: ABI,
     abiError: null,
     mods,
+    revocationsPending: [],
     blocking: mods.filter((m) => m.status === "wrongVersion" || m.status === "missingDeps").map((m) => m.id),
     blockingReasons: Object.fromEntries(
       mods.filter((m) => m.status === "wrongVersion" || m.status === "missingDeps").map((m) => [m.id, m.status as "wrongVersion" | "missingDeps"])

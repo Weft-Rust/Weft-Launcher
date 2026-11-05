@@ -147,7 +147,23 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
     </button>
   );
   const item = (id: string): BannerItem | null => {
-    if (id === "running") return { id, tone: "info", text: t("mods.runningBanner", tag) };
+    if (id === "running") {
+      // A revocation that arrived while the game runs is applied when it stops (the backend
+      // never rewrites a running version's mods); say so rather than look like nothing happened.
+      const pending = report?.revocationsPending ?? [];
+      return {
+        id,
+        tone: pending.length ? "warn" : "info",
+        text: pending.length ? (
+          <>
+            <span className="banner-line">{t("mods.runningBanner", tag)}</span>
+            <span className="banner-line">{t("mods.revocationsPending", formatList(pending.map(name)))}</span>
+          </>
+        ) : (
+          t("mods.runningBanner", tag)
+        ),
+      };
+    }
     if (id.startsWith("notice:")) {
       const n = notices(tag).find((x) => `notice:${x.id}` === id);
       if (!n) return null;

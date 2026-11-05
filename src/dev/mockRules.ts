@@ -194,7 +194,7 @@ export function report(
       update: updateFor(e, fit, catalog),
     };
   });
-  return { tag, versionAbi, abiError, mods, blocking, blockingReasons, unmanaged: playerFolder.map((f) => f.file), shadowed };
+  return { tag, versionAbi, abiError, mods, blocking, blockingReasons, unmanaged: playerFolder.map((f) => f.file), shadowed, revocationsPending: [] };
 }
 
 /** `profile::apply_revocations`, remembering each in the lock. Returns whether anything changed. */

@@ -114,15 +114,6 @@ const unionPath = "src/mods/bindings/ErrorCode.ts";
 const union = readFileSync(join(root, unionPath), "utf8").match(/export type ErrorCode =([\s\S]*?);/);
 if (!union) problems.push(`${unionPath}: no ErrorCode union found`);
 else for (const m of union[1].matchAll(/"([A-Za-z0-9]+)"/g)) codes.add(m[1]);
-// TEMPORARY (contract R4): codes the backend adds before the bindings are regenerated. The
-// integrator removes src/mods/types.pending.ts, and with it this.
-try {
-  const pending = readFileSync(join(root, "src/mods/types.pending.ts"), "utf8").match(/export type PendingErrorCode =([\s\S]*?);/);
-  if (pending) for (const m of pending[1].matchAll(/"([A-Za-z0-9]+)"/g)) codes.add(m[1]);
-} catch {
-  /* no pending codes */
-}
-
 const errorsTs = readFileSync(join(dir, "errors.ts"), "utf8");
 const mapping = Object.fromEntries([...errorsTs.matchAll(/^\s*([A-Z][A-Za-z0-9]*):\s*'([^']+)'/gm)].map((m) => [m[1], m[2]]));
 for (const code of codes) {

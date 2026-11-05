@@ -103,6 +103,9 @@
     "modChangedMeanwhile": "Algo cambió desde que lo miraste, así que no se instaló nada. Mira qué cambió y vuelve a confirmar.",
     "unknownBare": "Pasó algo que el launcher no esperaba.",
     "modCancelled": "Cancelado. No se cambió nada.",
+    "modLockInvalid": "La lista de mods de esta versión está dañada, así que el launcher no la cambiará. Elimina la carpeta de mods de la versión o reinstala la versión.",
+    "modUrlRefused": "Un enlace de descarga no apuntaba adonde dice la ficha del mod, así que el launcher lo rechazó. No se descargó nada.",
+    "modIconInvalid": "El icono de este mod no es un PNG pequeño, así que no se muestra.",
     "details": "Detalles"
   },
   "mods": {
@@ -120,6 +123,7 @@
     "browseMods": "Explorar mods",
     "copyButton": "Copiar mods de {0}",
     "runningBanner": "{0} está en ejecución. Ciérralo para cambiar sus mods.",
+    "revocationsPending": "Retirado del índice: {0}. Se desactivará en cuanto se cierre el juego.",
     "unmanagedBanner": "Tu propia carpeta de mods de Weft contiene {0}. Esos mods cargan en todas las versiones y el launcher no puede comprobarlos.",
     "unmanagedShow": "Abrir carpeta",
     "abiUnknown": "No se pudo comprobar qué mods sirven para {0}. El juego los comprueba al arrancar.",

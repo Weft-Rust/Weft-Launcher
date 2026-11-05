@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
-import { asAppError } from "../mods/api";
-import { listenToModProgress, modsApi, newOperationId } from "../mods/api.pending";
+import { asAppError, listenTo, modsApi, newOperationId } from "../mods/api";
+import { EVENTS } from "../mods/ipc";
 import { modName } from "../mods/select";
 import {
   crashResolved,
@@ -156,7 +156,7 @@ function useOperations() {
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    listenToModProgress((e) => {
+    listenTo(EVENTS.modProgress, (e) => {
       const id = e.payload.operationId;
       if (![...live.current.values()].includes(id)) return;
       setProgress((p) => {

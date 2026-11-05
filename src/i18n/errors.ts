@@ -54,6 +54,9 @@ export const ERROR_KEY: Record<ErrorCode, MessageKey> = {
   ModIdReserved: 'errors.modIdReserved',
   ModChangedMeanwhile: 'errors.modChangedMeanwhile',
   ModCancelled: 'errors.modCancelled',
+  ModLockInvalid: 'errors.modLockInvalid',
+  ModUrlRefused: 'errors.modUrlRefused',
+  ModIconInvalid: 'errors.modIconInvalid',
 };
 
 export function isErrorCode(code: unknown): code is ErrorCode {

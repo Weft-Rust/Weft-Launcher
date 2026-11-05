@@ -28,6 +28,13 @@ export function listenTo<E extends keyof EventPayloads>(
   return listen<EventPayloads[E]>(event, handler);
 }
 
+/** A fresh id for one operation, chosen by the client: its progress and `cancel` refer to it. */
+export function newOperationId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `op-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 export const modsApi = {
   catalog: (forceRefresh: boolean) => call(COMMANDS.listModCatalog, { forceRefresh }),
   profile: (tag: string) => call(COMMANDS.getModProfile, { tag }),

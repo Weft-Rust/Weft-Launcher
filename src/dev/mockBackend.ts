@@ -11,7 +11,6 @@
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 import { COMMANDS, EVENTS } from "../mods/ipc";
-import { CANCEL_MOD_OPERATION } from "../mods/api.pending";
 import { parseRepo, sameRepo } from "../mods/select";
 import { SCENARIOS } from "./scenarios";
 import { CRASH_LOGS } from "./crashes";
@@ -798,7 +797,7 @@ export function installMockBackend() {
           return previewCopy(args.from, args.to).preview;
         case COMMANDS.copyModProfile:
           return copyProfile(args.from, args.to, args.planToken, args.operationId);
-        case CANCEL_MOD_OPERATION: {
+        case COMMANDS.cancelModOperation: {
           const op = operations.get(String(args.operationId));
           if (op) op.cancelled = true;
           return !!op;

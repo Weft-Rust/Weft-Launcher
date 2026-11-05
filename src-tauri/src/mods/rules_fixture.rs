@@ -191,7 +191,17 @@ fn code(e: Option<AppError>) -> Value {
 }
 
 const SECTIONS: &[&str] = &[
-    "_about", "abi", "catalogs", "plans", "commits", "toggles", "copies", "statuses", "updates",
+    "_about",
+    "abi",
+    "catalogs",
+    "plans",
+    "commits",
+    "toggles",
+    "copies",
+    "statuses",
+    "updates",
+    "shadowing",
+    "revocations",
 ];
 
 #[test]
@@ -523,5 +533,91 @@ fn updates() {
             profile::update_for(&e, None, &c).is_none(),
             "update: {what}: no ABI"
         );
+    }
+}
+
+#[test]
+fn shadowing() {
+    let r = Rules::load();
+    let s = r.section("shadowing");
+    only(
+        "shadowing",
+        s,
+        &[
+            "rust",
+            "catalog",
+            "lock",
+            "playerFolder",
+            "unmanaged",
+            "shadowed",
+            "blocking",
+            "blockingReasons",
+        ],
+    );
+    let c = r.catalog(text(&s["catalog"]));
+    let lock = r.lock(&s["lock"]);
+    let folder = arr(&s["playerFolder"])
+        .iter()
+        .map(|f| {
+            let f = obj(f);
+            only("shadowing.playerFolder[]", f, &["file", "id"]);
+            profile::PlayerFile {
+                file: text(&f["file"]).to_string(),
+                id: f["id"].as_str().map(str::to_string),
+            }
+        })
+        .collect();
+    let report = profile::report(
+        "v1",
+        &lock,
+        Some(fit().abi.to_string()),
+        None,
+        &c,
+        fit().platform,
+        folder,
+    );
+    assert_eq!(report.unmanaged, strings(&s["unmanaged"]), "unmanaged");
+    assert_eq!(
+        serde_json::to_value(&report.shadowed).unwrap(),
+        s["shadowed"],
+        "shadowed"
+    );
+    assert_eq!(
+        sorted(report.blocking.clone()),
+        sorted(strings(&s["blocking"])),
+        "blocking"
+    );
+    assert_eq!(
+        serde_json::to_value(&report.blocking_reasons).unwrap(),
+        s["blockingReasons"],
+        "blockingReasons"
+    );
+}
+
+#[test]
+fn revocations() {
+    use super::index::revocation;
+    let r = Rules::load();
+    let s = r.section("revocations");
+    only(
+        "revocations",
+        s,
+        &["rust", "entries", "kept", "dropped", "matches"],
+    );
+    let entries = arr(&s["entries"]);
+    let kept: Vec<_> = entries.iter().cloned().filter_map(revocation).collect();
+    assert_eq!(
+        serde_json::to_value(&kept).unwrap(),
+        s["kept"],
+        "revocations kept"
+    );
+    let dropped = s["dropped"].as_u64().expect("dropped is a count") as usize;
+    assert_eq!(entries.len() - kept.len(), dropped, "revocations dropped");
+    let shas: Vec<&str> = kept.iter().map(|k| k.sha256.as_str()).collect();
+    let c = profile::tests::catalog(vec![], &shas);
+    for m in arr(&s["matches"]) {
+        let m = arr(m);
+        let (sha, want) = (text(&m[0]), m[1].as_bool().expect("a match is a bool"));
+        assert_eq!(c.revocation(sha).is_some(), want, "revocation of {sha}");
     }
 }

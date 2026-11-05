@@ -103,6 +103,9 @@
     "modChangedMeanwhile": "Something changed since you looked, so nothing was installed. Look at what changed and confirm again.",
     "unknownBare": "Something went wrong that the launcher didn't expect.",
     "modCancelled": "Cancelled. Nothing was changed.",
+    "modLockInvalid": "This version's mod list is damaged, so the launcher won't change it. Remove the version's mods folder or reinstall the version.",
+    "modUrlRefused": "A download link didn't point where the mod's listing says it should, so the launcher refused it. Nothing was downloaded.",
+    "modIconInvalid": "This mod's icon isn't a small PNG, so it isn't shown.",
     "details": "Details"
   },
   "mods": {
@@ -120,6 +123,7 @@
     "browseMods": "Browse mods",
     "copyButton": "Copy mods from {0}",
     "runningBanner": "{0} is running. Close it to change its mods.",
+    "revocationsPending": "Pulled from the index: {0}. It is turned off as soon as the game stops.",
     "unmanagedBanner": "Your own Weft mods folder has {0}. Mods there load in every version, and the launcher can't check them.",
     "unmanagedShow": "Show folder",
     "abiUnknown": "Couldn't check which mods fit {0}. The game checks them when it starts.",
