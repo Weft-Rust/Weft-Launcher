@@ -16,6 +16,12 @@ pub async fn list_mod_catalog(app: AppHandle, force_refresh: bool) -> Result<Cat
     Ok(service::load_catalog(&Ctx::of(&app)?, force_refresh).await?)
 }
 
+/// Asks one source again; the others keep their answers.
+#[tauri::command]
+pub async fn refresh_mod_source(app: AppHandle, repo: String) -> Result<Catalog, AppError> {
+    Ok(service::refresh_source(&Ctx::of(&app)?, &repo).await?)
+}
+
 #[tauri::command]
 pub async fn get_mod_sources(app: AppHandle) -> Result<Vec<String>, AppError> {
     Ok(service::source_list(&Ctx::of(&app)?)?)

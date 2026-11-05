@@ -621,11 +621,13 @@ pub(crate) mod tests {
                 generated: None,
                 signed_at: None,
                 error: None,
+                cache_error: None,
             },
             sources: vec![],
             weft: vec![],
             platform: String::new(),
             sources_error: None,
+            revision: 0,
         }
     }
 

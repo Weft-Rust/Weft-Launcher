@@ -214,16 +214,18 @@ const catalog: Catalog = {
   revoked: [],
   index:
     indexFlag === "stale"
-      ? { freshness: "stale", generated: "2026-09-21T12:00:00Z", signedAt: "2026-09-21T12:00:00Z", error: null }
+      ? { freshness: "stale", generated: "2026-09-21T12:00:00Z", signedAt: "2026-09-21T12:00:00Z", error: null, cacheError: null }
       : indexFlag === "cached"
-        ? { freshness: "cached", generated: INDEX_DATE, signedAt: INDEX_DATE, error: err("Network", "offline") }
+        ? { freshness: "cached", generated: INDEX_DATE, signedAt: INDEX_DATE, error: err("Network", "offline"), cacheError: null }
         : indexFlag === "unavailable"
-          ? { freshness: "unavailable", generated: null, signedAt: null, error: err("Network", "offline") }
+          ? { freshness: "unavailable", generated: null, signedAt: null, error: err("Network", "offline"), cacheError: null }
           : indexFlag === "invalid"
-            ? { freshness: "cached", generated: INDEX_DATE, signedAt: INDEX_DATE, error: err("IndexSignatureInvalid", "signature by an unknown key") }
+            ? { freshness: "cached", generated: INDEX_DATE, signedAt: INDEX_DATE, error: err("IndexSignatureInvalid", "signature by an unknown key"), cacheError: null }
             : indexFlag === "rollback"
-              ? { freshness: "cached", generated: INDEX_DATE, signedAt: INDEX_DATE, error: err("IndexRollback") }
-              : { freshness: "fresh", generated: INDEX_DATE, signedAt: INDEX_DATE, error: null },
+              ? { freshness: "cached", generated: INDEX_DATE, signedAt: INDEX_DATE, error: err("IndexRollback"), cacheError: null }
+              : indexFlag === "unsaved"
+                ? { freshness: "fresh", generated: INDEX_DATE, signedAt: INDEX_DATE, error: null, cacheError: err("DiskFull", "No space left on device (os error 28)") }
+                : { freshness: "fresh", generated: INDEX_DATE, signedAt: INDEX_DATE, error: null, cacheError: null },
   sources: [
     {
       repo: LANTERN_REPO,
@@ -247,10 +249,17 @@ const catalog: Catalog = {
   ],
   platform: PLATFORM,
   sourcesError: null,
+  revision: 0,
 };
 if (sourceFlag === "notfound") {
   catalog.mods = catalog.mods.filter((m) => m.origin.kind !== "source");
   catalog.sources[0].mods = 0;
+}
+// `nomods=<reason>`: GitHub answers for the source, with nothing usable in it, for that reason.
+const noModsFlag = flag("nomods") as NoModsReason | null;
+if (noModsFlag) {
+  catalog.mods = catalog.mods.filter((m) => m.origin.kind !== "source");
+  Object.assign(catalog.sources[0], { mods: 0, freshness: "fresh", error: null, noMods: noModsFlag });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -738,6 +747,13 @@ function iconUrl(id: string): string {
 
 /** Repos that exist, as GitHub spells them. `add_mod_source` asks GitHub; anything else is a 404. */
 const KNOWN_REPOS = [LANTERN_REPO, "Zorro909/weft-mods", "glow-team/fireflies"];
+
+const raceFlag = flag("race");
+let raced = false;
+/** Counts up with every catalogue the mock answers with, like the backend's held revision. */
+let revision = 0;
+/** `slowsource=<repo>`: that source takes long to answer a refresh of its own. */
+const slowSource = flag("slowsource");
 /** What GitHub has in repos added here: `glow-team/fireflies` publishes releases without mods. */
 const EMPTY_REPOS: Record<string, NoModsReason> = { "glow-team/fireflies": "noModFiles" };
 
@@ -783,9 +799,24 @@ const handlers: Handlers = {
   // Opening the folder only opens it; the player deleting a file there is `mockPlayer.deleteFile`.
   open_player_mods_folder: () => undefined,
   list_mod_catalog: async ({ forceRefresh }) => {
-    await sleep(forceRefresh ? 400 : 0);
+    // `race`: the first refresh is slow, and what it found is older than what the next one
+    // finds; it answers last, with the older revision (`stale`) or an error (`error`).
+    const late = forceRefresh && raceFlag && !raced;
+    if (late) raced = true;
+    const answer = { ...structuredClone(catalog), revision: ++revision };
+    if (late && raceFlag === "stale") answer.sources = answer.sources.map((x) => ({ ...x, freshness: "cached", error: err("ModSourceRateLimited", x.repo) }));
+    await sleep(late ? 2500 : forceRefresh ? 400 : 0);
+    if (late && raceFlag === "error") fail("Network", "the slow refresh timed out");
     if (failures.has("catalog")) fail("Network", "the catalogue request timed out");
-    return structuredClone(catalog);
+    return answer;
+  },
+  refresh_mod_source: async ({ repo }) => {
+    const s = catalog.sources.find((x) => sameRepo(x.repo, repo)) ?? fail("ModSourceNotFound", repo);
+    await sleep(slowSource && sameRepo(repo, slowSource) ? 3000 : 400);
+    if (addedSources.has(s.repo)) {
+      Object.assign(s, { freshness: "fresh", checked: new Date().toISOString(), error: null, noMods: EMPTY_REPOS[s.repo] ?? null });
+    }
+    return { ...structuredClone(catalog), revision: ++revision };
   },
   get_mod_sources: async () => {
     await sleep(150);

@@ -73,10 +73,15 @@ where
         Err(e) => (None, Err(e)),
     };
     let new_age = fetched.as_ref().ok().and_then(Age::of);
-    let (state, store) = decide(cached, fetched, cache.highest(), now);
-    if store && let Some((bytes, sig)) = raw {
-        if let Err(e) = cache.write(&bytes, &sig) {
+    let (mut state, store) = decide(cached, fetched, cache.highest(), now);
+    if store
+        && let Some((bytes, sig)) = raw
+        && let Some(age) = new_age
+    {
+        // In use either way; a failure to save it is said with the status, not only logged.
+        if let Err(e) = cache.write_if_newer(&bytes, &sig, age) {
             eprintln!("mod index: could not cache: {e}");
+            state.cache_error = Some(e);
         }
         remember(cache, new_age);
     }

@@ -107,6 +107,9 @@ pub struct IndexStatus {
     /// RFC 3339, from the signature's trusted comment (`timestamp:`).
     pub signed_at: Option<String>,
     pub error: Option<AppError>,
+    /// The index shown was fetched and checked, but couldn't be saved: it is fetched again at
+    /// the next start, and offline until then the older saved copy, if any, is what shows.
+    pub cache_error: Option<AppError>,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -138,6 +141,10 @@ pub struct Catalog {
     /// The player's list of sources couldn't be read (`ModSourcesDamaged`): it was kept aside,
     /// and `sources` is empty until they save a new one.
     pub sources_error: Option<AppError>,
+    /// Counts up each time the launcher holds a new catalogue (0: read from disk, never held).
+    /// Answers can reach the page in any order; it keeps the one with the highest revision.
+    /// A count of refreshes in one session, far below 2^53, so a JavaScript number holds it.
+    pub revision: u64,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -180,9 +187,82 @@ impl Catalog {
     }
 }
 
-/// The catalogue the page last loaded.
+/// What a catalogue is built from, each part with the ticket of the refresh that brought it.
+/// Refreshes take tickets in the order they start; a part is replaced only by an answer from a
+/// later one, so a slow refresh that finishes last can't put back older answers over newer ones.
+#[derive(Debug, Clone)]
+pub struct CatalogParts {
+    pub index: Option<Index>,
+    pub index_status: IndexStatus,
+    pub index_ticket: u64,
+    pub sources: Vec<(SourceResult, u64)>,
+    pub sources_error: Option<AppError>,
+}
+
+impl CatalogParts {
+    /// `new` over `old`, part by part, keeping whichever answer is from the later refresh. The
+    /// sources are those `listed` now, in that order: one removed meanwhile doesn't come back,
+    /// and one whose answer neither has yet waits for the next refresh.
+    pub fn merge(old: Option<&CatalogParts>, new: CatalogParts, listed: &[String]) -> CatalogParts {
+        let Some(old) = old else {
+            let sources = new
+                .sources
+                .into_iter()
+                .filter(|(s, _)| listed.iter().any(|r| same_repo(r, &s.repo)))
+                .collect();
+            return CatalogParts { sources, ..new };
+        };
+        let (index, index_status, index_ticket) = if new.index_ticket >= old.index_ticket {
+            (new.index, new.index_status, new.index_ticket)
+        } else {
+            (
+                old.index.clone(),
+                old.index_status.clone(),
+                old.index_ticket,
+            )
+        };
+        let find = |list: &[(SourceResult, u64)], repo: &str| {
+            list.iter().find(|(s, _)| same_repo(&s.repo, repo)).cloned()
+        };
+        let sources = listed
+            .iter()
+            .filter_map(
+                |repo| match (find(&new.sources, repo), find(&old.sources, repo)) {
+                    (Some(n), Some(o)) => Some(if n.1 >= o.1 { n } else { o }),
+                    (n, o) => n.or(o),
+                },
+            )
+            .collect();
+        CatalogParts {
+            index,
+            index_status,
+            index_ticket,
+            sources,
+            sources_error: new.sources_error,
+        }
+    }
+
+    pub fn build(&self) -> Catalog {
+        let sources = self.sources.iter().map(|(s, _)| s.clone()).collect();
+        Catalog {
+            sources_error: self.sources_error.clone(),
+            ..build(self.index.as_ref(), self.index_status.clone(), sources)
+        }
+    }
+}
+
+/// The catalogue the page last loaded, what it was built from, and the refresh tickets.
+#[derive(Default)]
+pub struct HeldCatalog {
+    pub issued: u64,
+    /// The revision of the catalogue held last.
+    pub revision: u64,
+    pub parts: Option<CatalogParts>,
+    pub catalog: Option<Catalog>,
+}
+
 #[derive(Default, Clone)]
-pub struct CatalogState(pub Arc<Mutex<Option<Catalog>>>);
+pub struct CatalogState(pub Arc<Mutex<HeldCatalog>>);
 
 fn version_view(v: &IndexVersion, trust: Trust, from_index: bool) -> CatalogVersion {
     CatalogVersion {
@@ -247,6 +327,7 @@ fn mod_view(m: &IndexMod, origin: Origin, trust: Trust, skip: &[String]) -> Cata
 
 /// One source as read for this catalogue: its mods (possibly from the cache) and how fresh
 /// they are.
+#[derive(Debug, Clone)]
 pub struct SourceResult {
     pub repo: String,
     pub mods: Vec<IndexMod>,
@@ -325,6 +406,7 @@ pub fn build(
             .map(|p| p.as_str().to_string())
             .unwrap_or_default(),
         sources_error: None,
+        revision: 0,
     }
 }
 
@@ -332,6 +414,110 @@ pub fn build(
 pub(crate) mod tests {
     use super::super::index::{Provenance, tests::version};
     use super::*;
+
+    fn answer(repo: &str, sha: &str, freshness: Freshness) -> SourceResult {
+        SourceResult {
+            repo: repo.into(),
+            mods: vec![index_mod("lanterns", repo, sha)],
+            freshness,
+            checked: None,
+            error: None,
+            no_mods: None,
+        }
+    }
+
+    fn parts(ticket: u64, sources: Vec<SourceResult>, index_freshness: Freshness) -> CatalogParts {
+        CatalogParts {
+            index: None,
+            index_status: IndexStatus {
+                freshness: index_freshness,
+                ..status()
+            },
+            index_ticket: ticket,
+            sources: sources.into_iter().map(|s| (s, ticket)).collect(),
+            sources_error: None,
+        }
+    }
+
+    /// Two refreshes, the first finishing last: its answers don't replace the second's, part
+    /// by part, and what neither had is kept from before.
+    #[test]
+    fn answers_arriving_in_reverse_order_keep_the_newer_parts() {
+        let listed = vec!["a/one".to_string(), "b/two".to_string()];
+        let first = parts(
+            1,
+            vec![
+                answer("a/one", &"1".repeat(64), Freshness::Cached),
+                answer("b/two", &"1".repeat(64), Freshness::Cached),
+            ],
+            Freshness::Cached,
+        );
+        let second = parts(
+            2,
+            vec![answer("a/one", &"2".repeat(64), Freshness::Fresh)],
+            Freshness::Fresh,
+        );
+        // The second arrives first, over nothing; then the first, late.
+        let held = CatalogParts::merge(None, second, &listed);
+        let held = CatalogParts::merge(Some(&held), first, &listed);
+        assert_eq!(
+            held.index_status.freshness,
+            Freshness::Fresh,
+            "the index from the later refresh"
+        );
+        let one = held
+            .sources
+            .iter()
+            .find(|(s, _)| s.repo == "a/one")
+            .unwrap();
+        assert_eq!(
+            (one.0.freshness, one.1),
+            (Freshness::Fresh, 2),
+            "a/one from the later refresh"
+        );
+        let two = held
+            .sources
+            .iter()
+            .find(|(s, _)| s.repo == "b/two")
+            .unwrap();
+        assert_eq!(two.1, 1, "b/two only the first had");
+        let built = held.build();
+        assert_eq!(built.mods[0].versions[0].sha256, "2".repeat(64));
+    }
+
+    #[test]
+    fn a_source_removed_meanwhile_does_not_come_back() {
+        let held = parts(
+            1,
+            vec![answer("a/one", &"1".repeat(64), Freshness::Fresh)],
+            Freshness::Fresh,
+        );
+        let late = parts(
+            2,
+            vec![answer("a/one", &"2".repeat(64), Freshness::Fresh)],
+            Freshness::Fresh,
+        );
+        let merged = CatalogParts::merge(Some(&held), late, &[]);
+        assert!(merged.sources.is_empty());
+    }
+
+    #[test]
+    fn a_disk_read_never_replaces_a_refreshed_part() {
+        let listed = vec!["a/one".to_string()];
+        let fresh = parts(
+            3,
+            vec![answer("a/one", &"3".repeat(64), Freshness::Fresh)],
+            Freshness::Fresh,
+        );
+        let from_disk = parts(
+            0,
+            vec![answer("a/one", &"0".repeat(64), Freshness::Cached)],
+            Freshness::Cached,
+        );
+        let merged = CatalogParts::merge(Some(&fresh), from_disk, &listed);
+        assert_eq!(merged.index_status.freshness, Freshness::Fresh);
+        assert_eq!(merged.sources[0].1, 3);
+    }
 
     pub fn index_mod(id: &str, repo: &str, sha: &str) -> IndexMod {
         IndexMod {
@@ -352,6 +538,7 @@ pub(crate) mod tests {
             generated: None,
             signed_at: None,
             error: None,
+            cache_error: None,
         }
     }
 

@@ -140,7 +140,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
     blocked,
     rowError: !!rowError,
     index: catalog?.index.freshness ?? null,
-    indexTrouble: !!catalog?.index.error,
+    indexTrouble: !!catalog?.index.error || !!catalog?.index.cacheError,
     refreshFailed: !!catalog && !!mods.catalogError,
     sources: (catalog?.sources ?? []).filter((x) => x.error).map((x) => x.repo),
     sourcesDamaged: !!catalog?.sourcesError,

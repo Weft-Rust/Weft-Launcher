@@ -43,6 +43,9 @@ pub struct IndexState {
     pub signed_at: Option<OffsetDateTime>,
     pub freshness: Freshness,
     pub error: Option<ModsError>,
+    /// The index was fetched and is in use, but couldn't be saved: it is fetched again at the
+    /// next start, and offline until then the older saved copy (if any) is what shows.
+    pub cache_error: Option<ModsError>,
 }
 
 /// How new an index is: `generated`, then the signing time. A re-signed index with the same
@@ -96,6 +99,9 @@ pub struct IndexCache {
 
 const KEEP_GENERATIONS: usize = 2;
 
+/// Held while a generation is chosen, written and the old ones pruned.
+static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 impl IndexCache {
     /// `cache_dir` is the launcher's `cache/` folder.
     pub fn new(cache_dir: &Path, key: String) -> Self {
@@ -148,7 +154,36 @@ impl IndexCache {
     }
 
     /// Stores a verified pair as a new generation and drops all but the newest few.
+    ///
+    /// Choosing the generation number, writing it and pruning are one step under one lock: two
+    /// refreshes at once never pick the same number, and neither takes the other's staging
+    /// folder for crash debris. (One launcher runs at a time: the single-instance plugin.)
     pub fn write(&self, bytes: &[u8], signature: &str) -> Result<u64, ModsError> {
+        let _held = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+        self.write_locked(bytes, signature)
+    }
+
+    /// As [`IndexCache::write`], unless the generation in use is already newer than `age`: a
+    /// refresh that fetched an older index and finished last doesn't replace a newer one.
+    /// `None` when nothing was written.
+    pub fn write_if_newer(
+        &self,
+        bytes: &[u8],
+        signature: &str,
+        age: Age,
+    ) -> Result<Option<u64>, ModsError> {
+        let _held = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+        if self
+            .read()
+            .and_then(|(_, s)| Age::of(&s))
+            .is_some_and(|held| held > age)
+        {
+            return Ok(None);
+        }
+        self.write_locked(bytes, signature).map(Some)
+    }
+
+    fn write_locked(&self, bytes: &[u8], signature: &str) -> Result<u64, ModsError> {
         std::fs::create_dir_all(&self.dir)?;
         let next = self.generations().first().map_or(1, |n| n + 1);
         let staging = self.dir.join(format!(".{next}.{}.tmp", unique_suffix()));
@@ -219,6 +254,7 @@ fn usable(
         index: Some(signed.index),
         freshness,
         error,
+        cache_error: None,
     }
 }
 
@@ -231,6 +267,7 @@ fn fallback(cached: Option<Signed>, error: Option<ModsError>, now: OffsetDateTim
             signed_at: None,
             freshness: Freshness::Unavailable,
             error,
+            cache_error: None,
         },
     }
 }
@@ -405,6 +442,56 @@ mod tests {
 
     fn cache(dir: &Path) -> IndexCache {
         IndexCache::new(dir, FIXTURE_KEY.to_string())
+    }
+
+    /// Many refreshes storing at once: each gets its own generation, every write succeeds, the
+    /// generation in use verifies, the newest few are kept and no staging folder is left.
+    #[test]
+    fn concurrent_writers_keep_complete_generations() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
+        let handles: Vec<_> = (0..12)
+            .map(|_| {
+                let dir = dir.clone();
+                std::thread::spawn(move || cache(&dir).write(FIXTURE, FIXTURE_SIG))
+            })
+            .collect();
+        let mut numbers: Vec<u64> = handles
+            .into_iter()
+            .map(|h| h.join().unwrap().unwrap())
+            .collect();
+        numbers.sort_unstable();
+        assert_eq!(numbers, (1..=12).collect::<Vec<_>>(), "one generation each");
+        let c = cache(&dir);
+        assert_eq!(c.read().unwrap().0, 12);
+        assert_eq!(c.generations(), [12, 11]);
+        let leftovers: Vec<_> = std::fs::read_dir(dir.join("mod-index"))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "no staging folder left behind");
+    }
+
+    #[test]
+    fn an_older_index_finishing_last_does_not_replace_a_newer_one() {
+        use super::super::signature::tests::{OLDER, OLDER_SIG};
+        let tmp = tempfile::tempdir().unwrap();
+        let c = cache(tmp.path());
+        let newer = Age::of(&verify(FIXTURE, FIXTURE_SIG, FIXTURE_KEY).unwrap()).unwrap();
+        let older = Age::of(&verify(OLDER, OLDER_SIG, FIXTURE_KEY).unwrap()).unwrap();
+        assert!(older < newer);
+        assert_eq!(
+            c.write_if_newer(FIXTURE, FIXTURE_SIG, newer).unwrap(),
+            Some(1)
+        );
+        assert_eq!(c.write_if_newer(OLDER, OLDER_SIG, older).unwrap(), None);
+        assert_eq!(c.read().unwrap().0, 1);
+        assert_eq!(
+            c.write_if_newer(FIXTURE, FIXTURE_SIG, newer).unwrap(),
+            Some(2),
+            "the same age again is stored"
+        );
     }
 
     #[test]

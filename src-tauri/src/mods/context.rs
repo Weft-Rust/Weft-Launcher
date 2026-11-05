@@ -9,12 +9,13 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use tauri::{AppHandle, Manager};
 use tokio::sync::{Mutex, OwnedMutexGuard, watch};
 
-use super::catalog::{Catalog, CatalogState};
+use super::catalog::{Catalog, CatalogParts, CatalogState, SourceResult};
 use super::error::ModsError;
 use super::index::is_sha256;
 use super::install::{ModProgress, ProgressStage};
 use super::paths::Paths;
 use super::store::{self, Reservations};
+use crate::error::AppError;
 use crate::launch::RunningGames;
 
 /// Held while a profile or the store changes, and by a launch from its last check until the
@@ -261,11 +262,69 @@ impl Ctx {
 
     /// The catalogue the page last loaded, if it loaded one.
     pub fn held_catalog(&self) -> Option<Catalog> {
-        self.catalog.0.lock().unwrap().clone()
+        self.catalog.0.lock().unwrap().catalog.clone()
     }
 
+    /// Holds a catalogue as it is, with nothing to merge a later answer into (tests).
     pub fn hold_catalog(&self, catalog: Catalog) {
-        *self.catalog.0.lock().unwrap() = Some(catalog);
+        let mut held = self.catalog.0.lock().unwrap();
+        held.revision += 1;
+        held.catalog = Some(Catalog {
+            revision: held.revision,
+            ..catalog
+        });
+        held.parts = None;
+    }
+
+    /// A ticket for a refresh that starts now: later refreshes get higher ones.
+    pub fn catalog_ticket(&self) -> u64 {
+        let mut held = self.catalog.0.lock().unwrap();
+        held.issued += 1;
+        held.issued
+    }
+
+    /// Takes a refresh's answer part by part ([`CatalogParts::merge`]) and holds the catalogue
+    /// built from the result, which it returns: never older, part by part, than what was held.
+    pub fn publish_catalog(&self, new: CatalogParts, listed: &[String]) -> Catalog {
+        let mut held = self.catalog.0.lock().unwrap();
+        let parts = CatalogParts::merge(held.parts.as_ref(), new, listed);
+        held.revision += 1;
+        let catalog = Catalog {
+            revision: held.revision,
+            ..parts.build()
+        };
+        held.parts = Some(parts);
+        held.catalog = Some(catalog.clone());
+        catalog
+    }
+
+    /// One source's answer into the held catalogue; `None` when there is nothing to merge it
+    /// into yet (then a whole refresh is needed).
+    pub fn publish_source(
+        &self,
+        ticket: u64,
+        result: SourceResult,
+        listed: &[String],
+        sources_error: Option<AppError>,
+    ) -> Option<Catalog> {
+        let mut held = self.catalog.0.lock().unwrap();
+        let old = held.parts.as_ref()?;
+        let new = CatalogParts {
+            index: old.index.clone(),
+            index_status: old.index_status.clone(),
+            index_ticket: old.index_ticket,
+            sources: vec![(result, ticket)],
+            sources_error,
+        };
+        let parts = CatalogParts::merge(Some(old), new, listed);
+        held.revision += 1;
+        let catalog = Catalog {
+            revision: held.revision,
+            ..parts.build()
+        };
+        held.parts = Some(parts);
+        held.catalog = Some(catalog.clone());
+        Some(catalog)
     }
 
     /// Deletes store files nothing uses. The caller holds `ModsLock`.

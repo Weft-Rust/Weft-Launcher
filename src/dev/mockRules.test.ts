@@ -86,11 +86,12 @@ function catalog(name: keyof typeof rules.catalogs): Catalog {
   return {
     mods,
     revoked: c.revoked.map((sha256) => ({ sha256, reason: "broken" })),
-    index: { freshness: "fresh", generated: null, error: null, signedAt: null },
+    index: { freshness: "fresh", generated: null, error: null, signedAt: null, cacheError: null },
     sources: [],
     weft: [],
     platform: "linux-x64",
     sourcesError: null,
+    revision: 0,
   };
 }
 

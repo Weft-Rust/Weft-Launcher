@@ -60,6 +60,7 @@ fn the_index_example_parses_and_keeps_everything() {
         generated: None,
         signed_at: None,
         error: None,
+        cache_error: None,
     };
     let catalog = catalog::build(Some(&index), status, vec![]);
     let v = &catalog.mods[0].versions[0];

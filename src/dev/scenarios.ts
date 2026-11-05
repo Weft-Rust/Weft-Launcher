@@ -63,8 +63,23 @@ export interface Flag {
 }
 
 export const FLAGS: Flag[] = [
-  { name: "index", values: ["fresh", "stale", "cached", "unavailable", "invalid", "rollback"], description: "State of the signed mod index." },
+  {
+    name: "index",
+    values: ["fresh", "stale", "cached", "unavailable", "invalid", "rollback", "unsaved"],
+    description: "State of the signed mod index; `unsaved` is fresh but couldn't be saved to disk (`cacheError`).",
+  },
   { name: "source", values: ["ok", "notfound", "ratelimited", "offline"], description: "State of the added GitHub source." },
+  {
+    name: "nomods",
+    values: ["noReleases", "noModFiles", "unreadable", "noDigest", "disagrees", "invalid"],
+    description: "GitHub answers for the added source, but it has no usable mods, for this reason.",
+  },
+  {
+    name: "race",
+    values: ["stale", "error"],
+    description: "The first catalogue refresh is slow and answers last: with an older catalogue (`stale`) or an error (`error`). The page keeps the newer answer.",
+  },
+  { name: "slowsource", values: ["<repo>"], description: "That source takes three seconds to answer a refresh of its own." },
   { name: "revoked", values: ["<mod id>"], description: "Revokes the installed builds of that mod." },
   { name: "abi", values: ["error"], description: "The game version's mod interface can't be found out." },
   {

@@ -22,7 +22,9 @@ use tokio::sync::OwnedMutexGuard;
 
 use super::abi::{abi_for_tag, cached_abi};
 use super::archive::current_platform;
-use super::catalog::{self, Catalog, CatalogMod, CatalogVersion, IndexStatus, SourceResult};
+use super::catalog::{
+    self, Catalog, CatalogMod, CatalogParts, CatalogVersion, IndexStatus, SourceResult,
+};
 use super::context::{Ctx, Operation, Step, blocking, check_sha, ensure_installed};
 use super::error::ModsError;
 use super::index::{self, IndexCache, IndexState, RESERVED_ID};
@@ -73,13 +75,18 @@ fn listed_sources(paths: &Paths) -> (Vec<String>, Option<AppError>) {
     }
 }
 
-fn build_catalog(state: IndexState, sources: Vec<SourceResult>) -> Catalog {
-    let status = IndexStatus {
+fn index_status(state: &mut IndexState) -> IndexStatus {
+    IndexStatus {
         freshness: state.freshness,
         generated: state.index.as_ref().map(|i| i.generated.clone()),
         signed_at: state.signed_at.map(rfc3339),
-        error: state.error.map(AppError::from),
-    };
+        error: state.error.take().map(AppError::from),
+        cache_error: state.cache_error.take().map(AppError::from),
+    }
+}
+
+fn build_catalog(mut state: IndexState, sources: Vec<SourceResult>) -> Catalog {
+    let status = index_status(&mut state);
     catalog::build(state.index.as_ref(), status, sources)
 }
 
@@ -87,32 +94,68 @@ fn index_cache(paths: &Paths) -> IndexCache {
     IndexCache::new(&paths.cache_dir(), index::public_key())
 }
 
+/// How many sources are asked at once: one slow source doesn't hold up the others.
+const SOURCE_FETCHES_AT_ONCE: usize = 4;
+
 /// The index and every source; refreshed from the network when `refresh` is set. The page sees
 /// this list, and installs only what is in it.
+///
+/// Each call takes a ticket as it starts. What it found is merged into the held catalogue part
+/// by part, and only over parts from refreshes that started before it ([`Ctx::publish_catalog`]):
+/// a slow refresh that finishes last can't put an older answer back. It returns the merged
+/// catalogue, which is what the page should show.
 pub async fn load_catalog(ctx: &Ctx, refresh: bool) -> Result<Catalog, ModsError> {
+    use futures_util::stream::{self, StreamExt};
+    // Read from disk only, it never replaces a part a refresh brought: ticket 0 is the oldest.
+    let ticket = if refresh { ctx.catalog_ticket() } else { 0 };
     let client = http()?;
     let cache = index_cache(&ctx.paths);
     let url = index::index_url();
-    let state = index::load(&cache, refresh, OffsetDateTime::now_utc(), async {
+    let index_load = index::load(&cache, refresh, OffsetDateTime::now_utc(), async {
         let bytes = index::fetch_bytes(&client, &url).await?;
         let sig = index::fetch_bytes(&client, &format!("{url}.minisig")).await?;
         let sig = String::from_utf8(sig)
             .map_err(|_| ModsError::IndexSignatureInvalid("not text".into()))?;
         Ok((bytes, sig))
-    })
-    .await;
-    let mut fetched = Vec::new();
-    let (repos, sources_error) = listed_sources(&ctx.paths);
-    for repo in repos {
-        let f = sources::fetch(&ctx.paths, &client, &repo, refresh).await;
-        fetched.push(source_result(repo, f));
-    }
-    let catalog = Catalog {
+    });
+    let (repos, _) = listed_sources(&ctx.paths);
+    let sources_load = stream::iter(repos)
+        .map(|repo| {
+            let (paths, client) = (&ctx.paths, &client);
+            async move {
+                let f = sources::fetch(paths, client, &repo, refresh).await;
+                (source_result(repo, f), ticket)
+            }
+        })
+        .buffered(SOURCE_FETCHES_AT_ONCE)
+        .collect::<Vec<_>>();
+    let (mut state, fetched) = futures_util::future::join(index_load, sources_load).await;
+    // The list as it is now: a source removed meanwhile isn't brought back.
+    let (listed, sources_error) = listed_sources(&ctx.paths);
+    let parts = CatalogParts {
+        index_status: index_status(&mut state),
+        index: state.index,
+        index_ticket: ticket,
+        sources: fetched,
         sources_error,
-        ..build_catalog(state, fetched)
     };
-    ctx.hold_catalog(catalog.clone());
-    Ok(catalog)
+    Ok(ctx.publish_catalog(parts, &listed))
+}
+
+/// Asks one source again, alone: its answer replaces only its own part of the held catalogue,
+/// so the others keep theirs and nothing waits on them. With nothing held yet, a whole load.
+pub async fn refresh_source(ctx: &Ctx, repo: &str) -> Result<Catalog, ModsError> {
+    let (listed, sources_error) = listed_sources(&ctx.paths);
+    let Some(repo) = listed.iter().find(|r| index::same_repo(r, repo)).cloned() else {
+        return Err(ModsError::SourceNotFound(repo.to_string()));
+    };
+    let ticket = ctx.catalog_ticket();
+    let f = sources::fetch(&ctx.paths, &http()?, &repo, true).await;
+    let (listed, _) = listed_sources(&ctx.paths);
+    match ctx.publish_source(ticket, source_result(repo, f), &listed, sources_error) {
+        Some(catalog) => Ok(catalog),
+        None => load_catalog(ctx, false).await,
+    }
 }
 
 /// The catalogue from what is on disk: the cached index and each source's last answer.

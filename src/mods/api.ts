@@ -37,6 +37,8 @@ export function newOperationId(): string {
 
 export const modsApi = {
   catalog: (forceRefresh: boolean) => call(COMMANDS.listModCatalog, { forceRefresh }),
+  /** One source asked again; the catalogue as the backend holds it afterwards. */
+  refreshSource: (repo: string) => call(COMMANDS.refreshModSource, { repo }),
   profile: (tag: string) => call(COMMANDS.getModProfile, { tag }),
   plan: (tag: string, sha256: string) => call(COMMANDS.planModInstall, { tag, sha256 }),
   /** `planToken` is the reviewed plan's; `ModChangedMeanwhile` when what it would do changed. */

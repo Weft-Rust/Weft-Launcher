@@ -631,6 +631,10 @@ fn icon_hosts() {
     for case in arr(&s["cases"]) {
         let case = arr(case);
         let (url, want) = (text(&case[0]), case[1].as_bool().expect("a case is a bool"));
-        assert_eq!(crate::download::icon_url_allowed(url), want, "icon from {url}");
+        assert_eq!(
+            crate::download::icon_url_allowed(url),
+            want,
+            "icon from {url}"
+        );
     }
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useI18n } from "../../i18n/useI18n";
 import { showError, type Shown } from "../../i18n/errors";
-import { ErrorText } from "../ErrorText";
+import { ErrorDetails, ErrorText } from "../ErrorText";
 import { useMods } from "../../hooks/useMods";
 import { asAppError, modsApi } from "../../mods/api";
 import { parseRepo, sameRepo } from "../../mods/select";
@@ -18,13 +18,14 @@ const INDEX_REPO = "https://github.com/Zorro909/weft-mods-index";
 /** What a repo must publish to be a source. */
 const SOURCE_FORMAT = "https://github.com/Zorro909/Weft-Launcher/blob/master/docs/mod-manager/INDEX_FORMAT.md#publishing-from-your-own-repo";
 
+/** One whole sentence per reason, so each language words it in its own order. */
 const NO_MODS: Record<NoModsReason, MessageKey> = {
-  noReleases: "mods.sourceNoModsNoReleases",
-  noModFiles: "mods.sourceNoModsNoFiles",
-  unreadable: "mods.sourceNoModsUnreadable",
-  noDigest: "mods.sourceNoModsNoDigest",
-  disagrees: "mods.sourceNoModsDisagrees",
-  invalid: "mods.sourceNoModsInvalid",
+  noReleases: "mods.sourceNoModsLineNoReleases",
+  noModFiles: "mods.sourceNoModsLineNoFiles",
+  unreadable: "mods.sourceNoModsLineUnreadable",
+  noDigest: "mods.sourceNoModsLineNoDigest",
+  disagrees: "mods.sourceNoModsLineDisagrees",
+  invalid: "mods.sourceNoModsLineInvalid",
 };
 
 /**
@@ -54,13 +55,13 @@ function IndexBadge({ index }: { index: Catalog["index"] | undefined }) {
 /** A source's line: how many mods, when checked, and when there are none, why. */
 function sourceMeta(s: SourceStatus | undefined, checking: boolean, t: (k: MessageKey, ...a: string[]) => string, tn: (k: "mods.sourcesMods", n: number) => string, formatDay: (iso: string | null) => string) {
   if (!s || (!s.checked && !s.error)) return checking ? t("mods.sourcesChecking") : t("mods.sourcesNotChecked");
-  if (s.mods === 0 && s.noMods) return `${t("mods.sourceNoMods")} ${t(NO_MODS[s.noMods])}`;
+  if (s.mods === 0 && s.noMods) return t(NO_MODS[s.noMods]);
   return [tn("mods.sourcesMods", s.mods), s.checked ? t("mods.sourcesChecked", formatDay(s.checked)) : ""].filter(Boolean).join(" · ");
 }
 
 export function SourcesDialog({ onClose }: { onClose: () => void }) {
   const { t, tn, formatDay } = useI18n();
-  const { catalog, catalogError, catalogLoading, refreshCatalog } = useMods();
+  const { catalog, catalogError, catalogLoading, refreshCatalog, refreshSource, sourceRefreshing } = useMods();
   const [repos, setRepos] = useState<string[] | null>(null);
   const [loadError, setLoadError] = useState<Shown | null>(null);
   // The list couldn't be read and was kept aside: adding a source starts a new one.
@@ -74,6 +75,7 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
   const [changed, setChanged] = useState(false);
   const busy = useRef(false);
   const inputId = useId();
+  const errorId = useId();
 
   const load = useCallback(() => {
     setLoadError(null);
@@ -105,8 +107,8 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
       setLoadError(null);
       setDamaged(false);
       setInput("");
-      // Asked at once, so the dialog says what the new source has before it closes.
-      refreshCatalog();
+      // Asked at once, alone, so the dialog says what the new source has before it closes.
+      retrySource(repo);
     } catch (err) {
       setError(showError(err));
     } finally {
@@ -132,6 +134,13 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
+  /** One source asked again; a failure to even ask is said on its row. */
+  const retrySource = async (repo: string) => {
+    setRowError(null);
+    const failed = await refreshSource(repo);
+    if (failed) setRowError({ repo, error: showError(failed) });
+  };
+
   const close = () => {
     if (changed) refreshCatalog();
     onClose();
@@ -144,7 +153,7 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
   const indexMeta = !index
     ? t("mods.sourcesIndexNone")
     : index.freshness === "fresh" && !index.error
-      ? t("mods.sourcesIndexFresh", formatDay(index.generated))
+      ? t("mods.sourcesIndexFresh")
       : index.freshness === "stale" && !index.error
         ? t("mods.sourcesIndexStale", formatDay(index.signedAt ?? index.generated))
         : (indexProblem(index, t, formatDay) ?? t("mods.sourcesIndexNone"));
@@ -174,10 +183,14 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
           </span>
           <span className={`source-meta${index?.error || index?.freshness === "stale" ? " bad" : ""}`} data-testid="index-meta">
             {indexMeta}
-            {index?.error && showError(index.error).detail && (
-              <> {/* The backend's words, apart from ours. */}
-                <code className="source-detail">{showError(index.error).detail}</code>
-              </>
+            {/* The backend's words, apart from ours, folded like every other error's. */}
+            {index?.error && showError(index.error).detail && <ErrorDetails detail={showError(index.error).detail!} label={t("errors.details")} />}
+            {index?.cacheError && (
+              <span className="source-unsaved">
+                {" "}
+                {t("mods.sourcesIndexUnsaved")}
+                {showError(index.cacheError).detail && <ErrorDetails detail={showError(index.cacheError).detail!} label={t("errors.details")} />}
+              </span>
             )}
           </span>
           <span className="source-actions">
@@ -197,6 +210,7 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
           const asking = confirming !== null && sameRepo(confirming, repo);
           const working = removing !== null && sameRepo(removing, repo);
           const none = !!s && !s.error && s.mods === 0 && !!s.noMods;
+          const asked = sourceRefreshing(repo);
           return (
             <li className={`source-row${asking ? " confirming" : ""}`} key={repo} data-repo={repo}>
               <span className="source-title">
@@ -204,7 +218,7 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
                 <span className="badge channel">{t("mods.sourceBadgeRepo")}</span>
               </span>
               <span className={`source-meta${s?.error ? " bad" : none ? " warn" : ""}`} data-testid="source-meta">
-                {s?.error ? sourceProblem(s, t, formatDay) : sourceMeta(s, catalogLoading, t, tn, formatDay)}
+                {asked ? t("mods.sourcesChecking") : s?.error ? sourceProblem(s, t, formatDay) : sourceMeta(s, catalogLoading, t, tn, formatDay)}
                 {none && (
                   <>
                     {" "}
@@ -214,7 +228,18 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
                   </>
                 )}
               </span>
-              {s?.error && !asking && <span className="source-row-retry">{retry}</span>}
+              {(s?.error || asked) && !asking && (
+                <span className="source-row-retry">
+                  <button
+                    className="btn-secondary btn-small"
+                    onClick={() => retrySource(repo)}
+                    disabled={asked || locked}
+                    aria-label={t("mods.sourceRetryLabel", repo)}
+                  >
+                    {asked ? t("mods.retrying") : t("mods.sourcesRetry")}
+                  </button>
+                </span>
+              )}
               {asking ? (
                 <span className="source-confirm">
                   <span className="source-confirm-text">{t("mods.sourcesRemoveConfirm", repo)}</span>
@@ -275,13 +300,15 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
           spellCheck={false}
           autoComplete="off"
           readOnly={adding}
+          aria-invalid={!!error || undefined}
+          aria-describedby={error ? errorId : undefined}
         />
         <button className="btn-secondary" onClick={add} disabled={locked || !input.trim()}>
           {adding ? t("mods.sourcesAdding") : t("mods.sourcesAdd")}
         </button>
       </div>
       <p className="dialog-note">{t("mods.sourcesWarning")}</p>
-      {error && <ErrorText error={error} />}
+      {error && <ErrorText error={error} id={errorId} />}
     </Dialog>
   );
 }

@@ -48,11 +48,12 @@ export function catalog(mods: CatalogMod[], extra: Partial<Catalog> = {}): Catal
   return {
     mods,
     revoked: [],
-    index: { freshness: "fresh", generated: "2026-11-04T00:00:00Z", signedAt: "2026-11-04T00:00:00Z", error: null },
+    index: { freshness: "fresh", generated: "2026-11-04T00:00:00Z", signedAt: "2026-11-04T00:00:00Z", error: null, cacheError: null },
     sources: [],
     weft: [],
     platform: "linux-x64",
     sourcesError: null,
+    revision: 0,
     ...extra,
   };
 }

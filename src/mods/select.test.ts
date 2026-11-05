@@ -123,7 +123,7 @@ describe("networkDown", () => {
   const net = { code: "Network", detail: "offline" } as const;
   const fresh = { repo: "a/b", mods: 1, freshness: "fresh", checked: "2026-11-04T00:00:00Z", error: null, noMods: null } as const;
   const offline = { ...fresh, freshness: "cached", error: net } as const;
-  const indexDown = { freshness: "unavailable", generated: null, signedAt: null, error: net } as const;
+  const indexDown = { freshness: "unavailable", generated: null, signedAt: null, error: net, cacheError: null } as const;
 
   it("is down when the catalogue itself couldn't be fetched for want of a connection", () => {
     expect(networkDown(null, net)).toBe(true);

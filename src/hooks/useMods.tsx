@@ -1,6 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
-import { asAppError, listenTo, modsApi, newOperationId } from "../mods/api";
-import { EVENTS } from "../mods/ipc";
+import { modsApi } from "../mods/api";
 import { modName } from "../mods/select";
 import {
   crashResolved,
@@ -31,6 +30,9 @@ import { announce } from "../components/LiveRegion";
 import { useInstall } from "./useInstall";
 import { useGameState } from "./useGameState";
 import { failed, type ActionResult } from "./result";
+import { useCatalog } from "./useCatalog";
+import { useOperations, type FirstFile } from "./useOperations";
+import { useProfileCoordinator } from "./useProfileCoordinator";
 
 export interface Notice extends NoticeText {
   id: number;
@@ -39,10 +41,8 @@ export interface Notice extends NoticeText {
   undo?: { id: string; name: string };
 }
 
-/** What a running change is about, so the busy state has one owner. */
-export type Operation = { kind: "mod"; tag: string; id: string } | { kind: "copy"; tag: string };
-
-export const keyOf = (op: Operation) => (op.kind === "mod" ? `mod:${op.tag}:${op.id}` : `copy:${op.tag}`);
+export { keyOf, type Operation } from "./useOperations";
+import { keyOf, type Operation } from "./useOperations";
 
 interface ModsContextValue {
   catalog: Catalog | null;
@@ -50,6 +50,9 @@ interface ModsContextValue {
   /** Why the last catalogue load failed; kept until one succeeds, also while an older catalogue shows. */
   catalogError: UiError | null;
   refreshCatalog: () => Promise<void>;
+  /** Asks one source again, alone; resolves with why it failed, if it did. */
+  refreshSource: (repo: string) => Promise<UiError | null>;
+  sourceRefreshing: (repo: string) => boolean;
 
   profile: (tag: string | null | undefined) => ProfileReport | undefined;
   profileError: (tag: string) => Shown | null;
@@ -93,138 +96,9 @@ function without<T>(record: Record<string, T>, key: string): Record<string, T> {
   return rest;
 }
 
-/**
- * Profile answers per version, in order. Every read and every finished change takes a ticket;
- * an answer older than one already shown is dropped, so a slow read can't undo a change.
- */
-function useProfileCoordinator(setProfiles: (fn: (p: Record<string, ProfileReport>) => Record<string, ProfileReport>) => void) {
-  const issued = useRef<Record<string, number>>({});
-  const shown = useRef<Record<string, number>>({});
-  const reads = useRef<Record<string, Promise<ProfileReport>>>({});
-
-  const ticket = useCallback((tag: string) => (issued.current[tag] = (issued.current[tag] ?? 0) + 1), []);
-
-  const offer = useCallback(
-    (tag: string, at: number, report: ProfileReport) => {
-      if (at <= (shown.current[tag] ?? 0)) return;
-      shown.current[tag] = at;
-      setProfiles((p) => ({ ...p, [tag]: report }));
-    },
-    [setProfiles]
-  );
-
-  /** One read per version at a time; a caller during a read shares it. */
-  const read = useCallback(
-    (tag: string): Promise<ProfileReport> => {
-      const running = reads.current[tag];
-      if (running) return running;
-      const at = ticket(tag);
-      const p = modsApi
-        .profile(tag)
-        .then((report) => {
-          offer(tag, at, report);
-          return report;
-        })
-        .finally(() => {
-          delete reads.current[tag];
-        });
-      reads.current[tag] = p;
-      return p;
-    },
-    [offer, ticket]
-  );
-
-  /** A change's report is the newest state when it arrives: its ticket is taken then. */
-  const changed = useCallback((tag: string, report: ProfileReport) => offer(tag, ticket(tag), report), [offer, ticket]);
-
-  return { read, changed };
-}
-
-/** The first file an operation will work on, so its progress shows at once, before any event. */
-export interface FirstFile {
-  sha256: string;
-  modId: string;
-  count: number;
-  /** A file already on the player's computer: its first step is checking it, not a download. */
-  local?: boolean;
-}
-
-/**
- * Running operations and their progress. The client names each operation (contract R4 §3) and
- * every event carries that id, so progress always belongs to the operation that caused it; an
- * event for an operation that isn't running is dropped. When one ends, however it ends, its
- * progress goes with it.
- */
-function useOperations() {
-  const [progress, setProgress] = useState<Record<string, UiProgress[]>>({});
-  const [running, setRunning] = useState<Record<string, { op: Operation; operationId: string; cancelling: boolean }>>({});
-  const live = useRef<Map<string, string>>(new Map());
-
-  useEffect(() => {
-    let cancelled = false;
-    let unlisten: (() => void) | undefined;
-    listenTo(EVENTS.modProgress, (e) => {
-      const id = e.payload.operationId;
-      if (![...live.current.values()].includes(id)) return;
-      setProgress((p) => {
-        const list = (p[id] ?? []).filter((x) => x.sha256 !== e.payload.sha256 && x.sha256 !== "");
-        return { ...p, [id]: [...list, e.payload] };
-      });
-    }).then((fn) => {
-      if (cancelled) fn();
-      else unlisten = fn;
-    });
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, []);
-
-  /** Starts an operation and says its id, or null when the same one is already running. */
-  const begin = useCallback((op: Operation, first: FirstFile | null): string | null => {
-    const key = keyOf(op);
-    if (live.current.has(key)) return null;
-    const operationId = newOperationId();
-    live.current.set(key, operationId);
-    setRunning((r) => ({ ...r, [key]: { op, operationId, cancelling: false } }));
-    // The first file shows at once, before its first event: getting ready, or being checked when
-    // it is a file the player picked. Never "downloading" before anything is.
-    const waiting: UiProgress = {
-      operationId,
-      sha256: first?.sha256 ?? "",
-      modId: first?.modId ?? (op.kind === "mod" ? op.id : ""),
-      stage: first?.local ? "verifying" : "preparing",
-      percent: 0,
-      index: 1,
-      count: Math.max(1, first?.count ?? 1),
-    };
-    setProgress((p) => ({ ...p, [operationId]: [waiting] }));
-    return operationId;
-  }, []);
-
-  const end = useCallback((op: Operation) => {
-    const key = keyOf(op);
-    const operationId = live.current.get(key);
-    live.current.delete(key);
-    setRunning((r) => without(r, key));
-    if (operationId) setProgress((p) => without(p, operationId));
-  }, []);
-
-  const markCancelling = useCallback((op: Operation) => {
-    const key = keyOf(op);
-    setRunning((r) => (r[key] ? { ...r, [key]: { ...r[key], cancelling: true } } : r));
-    return live.current.get(key) ?? null;
-  }, []);
-
-  return { progress, running, begin, end, markCancelling };
-}
-
 export function ModsProvider({ children }: { children: ReactNode }) {
   const { installedVersions } = useInstall();
   const { lastCrash, clearCrash } = useGameState();
-  const [catalog, setCatalog] = useState<Catalog | null>(null);
-  const [catalogLoading, setCatalogLoading] = useState(true);
-  const [catalogError, setCatalogError] = useState<UiError | null>(null);
   const [profiles, setProfiles] = useState<Record<string, ProfileReport>>({});
   const [profileErrors, setProfileErrors] = useState<Record<string, Shown>>({});
   const [notices, setNotices] = useState<Notice[]>([]);
@@ -260,29 +134,10 @@ export function ModsProvider({ children }: { children: ReactNode }) {
     tags.forEach((tag) => loadProfile(tag));
   }, [tags, loadProfile]);
 
-  const refreshCatalog = useCallback(async () => {
-    setCatalogLoading(true);
-    try {
-      setCatalog(await modsApi.catalog(true));
-      setCatalogError(null);
-    } catch (err) {
-      // The catalogue shown so far stays; the banner says it couldn't be refreshed, and why.
-      setCatalogError(asAppError(err));
-    } finally {
-      setCatalogLoading(false);
-    }
-    // Revocations and updates come with the catalogue.
-    await Promise.all(tagsRef.current.map((tag) => loadProfile(tag)));
-  }, [loadProfile]);
-
-  // The cache shows something at once, then the network says what is new.
-  useEffect(() => {
-    modsApi
-      .catalog(false)
-      .then(setCatalog)
-      .catch(() => {})
-      .finally(() => refreshCatalog());
-  }, [refreshCatalog]);
+  // The catalogue, in order; every version's set is read again after each refresh, since
+  // revocations and updates come with it.
+  const catalogState = useCatalog(() => Promise.all(tagsRef.current.map((tag) => loadProfile(tag))));
+  const { catalog, catalogLoading, catalogError, refreshCatalog, refreshSource, sourceRefreshing } = catalogState;
 
   // A crash notice stays until its problem is fixed: the blamed mod is off, gone or replaced, or
   // the dependency it lacked is on and usable.
@@ -457,6 +312,8 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       catalogLoading,
       catalogError,
       refreshCatalog,
+      refreshSource,
+      sourceRefreshing,
       profile,
       profileError,
       loadProfile,
@@ -485,6 +342,8 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       catalogLoading,
       catalogError,
       refreshCatalog,
+      refreshSource,
+      sourceRefreshing,
       profile,
       profileError,
       loadProfile,

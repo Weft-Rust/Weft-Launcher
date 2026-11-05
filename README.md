@@ -89,8 +89,11 @@ Pick a state with `?scenario=` and adjust it with flags, which combine: `?scenar
 
 | Flag | Values | Effect |
 |---|---|---|
-| `index` | `fresh`, `stale`, `cached`, `unavailable`, `invalid`, `rollback` | State of the signed mod index. |
+| `index` | `fresh`, `stale`, `cached`, `unavailable`, `invalid`, `rollback`, `unsaved` | State of the signed mod index; `unsaved` is fresh but couldn't be saved to disk (`cacheError`). |
 | `source` | `ok`, `notfound`, `ratelimited`, `offline` | State of the added GitHub source. |
+| `nomods` | `noReleases`, `noModFiles`, `unreadable`, `noDigest`, `disagrees`, `invalid` | GitHub answers for the added source, but it has no usable mods, for this reason. |
+| `race` | `stale`, `error` | The first catalogue refresh is slow and answers last: with an older catalogue (`stale`) or an error (`error`). The page keeps the newer answer. |
+| `slowsource` | `<repo>` | That source takes three seconds to answer a refresh of its own. |
 | `revoked` | `<mod id>` | Revokes the installed builds of that mod. |
 | `abi` | `error` | The game version's mod interface can't be found out. |
 | `fail` | `install`, `network`, `toolarge`, `dep`, `meanwhile`, `catalog`, `sources` | Comma-separated. Installs fail at the hash check, mid-download, before it, or while downloading a dependency; `meanwhile` publishes a newer Glowmoss after the first plan, so a plan with Glowmoss in it is refused as changed and planned again; the catalogue fails to load; `sources` finds the list of sources damaged (kept aside, `ModSourcesDamaged`). |

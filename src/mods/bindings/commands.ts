@@ -24,6 +24,7 @@ export const COMMANDS = {
   openGameFolder: "open_game_folder",
   openLog: "open_log",
   listModCatalog: "list_mod_catalog",
+  refreshModSource: "refresh_mod_source",
   getModSources: "get_mod_sources",
   addModSource: "add_mod_source",
   removeModSource: "remove_mod_source",
@@ -64,6 +65,7 @@ export interface CommandSignatures {
   open_game_folder: { args: { tag: string }; result: void };
   open_log: { args: { tag: string }; result: void };
   list_mod_catalog: { args: { forceRefresh: boolean }; result: Catalog };
+  refresh_mod_source: { args: { repo: string }; result: Catalog };
   get_mod_sources: { args: Record<string, never>; result: Array<string> };
   add_mod_source: { args: { repo: string }; result: Array<string> };
   remove_mod_source: { args: { repo: string }; result: Array<string> };

@@ -730,6 +730,120 @@ test.describe("sources", () => {
   });
 });
 
+test.describe("catalogue answers in any order", () => {
+  for (const race of ["stale", "error"] as const) {
+    test(`a slow refresh answering last (${race}) never replaces a newer one`, async ({ page }) => {
+      await open(page, `scenario=mods&race=${race}`);
+      await goToTab(page, MODS_TAB);
+      // The first refresh is slow; removing a source and closing asks a second one, which answers first.
+      await page.locator(".header-actions button", { hasText: "Sources" }).click();
+      await page.locator(".source-row button", { hasText: "Remove" }).click();
+      await page.locator(".source-confirm .btn-danger").click();
+      await expect(page.locator(".source-row")).toHaveCount(1);
+      await page.locator(`${dialog} .btn-secondary`, { hasText: "Close" }).click();
+      await expect(page.locator(".mods-refresh")).toBeEnabled({ timeout: 2000 });
+      // The slow one has answered by now, older (with every source rate limited) or failed.
+      await page.waitForTimeout(2600);
+      await browse(page);
+      await expect(page.locator(".banners")).not.toContainText("GitHub rate limit");
+      await expect(page.locator(".banners")).not.toContainText("Couldn't refresh");
+      await expect(page.locator(".mods-panel")).not.toContainText("lantern-dev/lanterns");
+      await expect(page.locator(".mods-refresh")).toBeEnabled();
+    });
+  }
+});
+
+test.describe("one source at a time", () => {
+  test("a source's own Retry runs alone, says so, and leaves everything else usable", async ({ page }) => {
+    await open(page, "scenario=mods&source=ratelimited&slowsource=lantern-dev/lanterns");
+    await goToTab(page, MODS_TAB);
+    await page.locator(".header-actions button", { hasText: "Sources" }).click();
+    const row = page.locator(".source-row[data-repo='lantern-dev/lanterns']");
+    const retry = row.getByRole("button", { name: "Ask lantern-dev/lanterns again" });
+    await retry.click();
+    await expect(retry).toHaveText("Retrying…");
+    await expect(retry).toBeDisabled();
+    await expect(row.getByTestId("source-meta")).toHaveText("checking…");
+    // The whole catalogue isn't being refreshed: its own button stays usable.
+    await expect(page.locator(".mods-refresh")).toBeEnabled();
+    await expect(retry).toHaveText("Retry", { timeout: 5000 });
+    await expect(row).toContainText("GitHub is limiting requests");
+  });
+
+  test("the banner for one source retries that source only", async ({ page }) => {
+    await open(page, "scenario=mods&source=ratelimited&slowsource=lantern-dev/lanterns");
+    await goToTab(page, MODS_TAB);
+    await browse(page);
+    const toggle = page.locator(".banner-toggle");
+    if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
+    const retry = page.locator(".banners").getByRole("button", { name: "Ask lantern-dev/lanterns again" }).first();
+    await retry.click();
+    await expect(retry).toHaveText("Retrying…");
+    await expect(page.locator(".mods-refresh")).toBeEnabled();
+    await expect(retry).toHaveText("Retry", { timeout: 5000 });
+  });
+
+  const NO_MODS = {
+    noReleases: "it has no releases yet.",
+    noModFiles: "no release has an <id>.zip with its <id>.mod.json.",
+    unreadable: "a release's <id>.mod.json couldn't be read.",
+    noDigest: "GitHub has no SHA-256 for its zips, so they can't be checked.",
+    disagrees: "a release's <id>.mod.json doesn't match that release on GitHub.",
+    invalid: "its releases break a rule every mod follows.",
+  };
+  for (const [reason, words] of Object.entries(NO_MODS)) {
+    test(`a source with no mods says why: ${reason}`, async ({ page }) => {
+      await open(page, `scenario=mods&nomods=${reason}`);
+      await goToTab(page, MODS_TAB);
+      await page.locator(".header-actions button", { hasText: "Sources" }).click();
+      const meta = page.locator(".source-row[data-repo='lantern-dev/lanterns']").getByTestId("source-meta");
+      await expect(meta).toContainText(`No compatible mod releases found: ${words}`);
+      await expect(meta).toHaveClass(/warn/);
+    });
+  }
+
+  test("an index in use but not saved says so, and what that means offline", async ({ page }) => {
+    await open(page, "scenario=mods&index=unsaved");
+    await goToTab(page, MODS_TAB);
+    await browse(page);
+    await expect(page.locator(".banners")).toContainText("Mod index not saved");
+    await page.locator(".header-actions button", { hasText: "Sources" }).click();
+    await expect(page.getByTestId("index-meta")).toContainText("Checked on this refresh. It couldn't be saved on this computer");
+    await page.getByTestId("index-meta").locator("summary").click();
+    await expect(page.getByTestId("index-meta").locator("code")).not.toBeEmpty();
+  });
+});
+
+test.describe("network down is not index down", () => {
+  test("offline, a download says it needs the internet", async ({ page }) => {
+    await open(page, "scenario=offline");
+    await goToTab(page, MODS_TAB);
+    await browse(page);
+    await expect(page.locator(".banners")).toContainText("Offline: mod index from Nov 2");
+    await expect(page.locator(".mods-panel").getByText("needs internet").first()).toBeVisible();
+  });
+
+  test("an index that can't be reached while a source answers never says the internet is down", async ({ page }) => {
+    await open(page, "scenario=indexdown");
+    await goToTab(page, MODS_TAB);
+    await browse(page);
+    await expect(page.locator(".banners")).toContainText("Index unreachable");
+    await expect(page.locator(".mods-panel")).not.toContainText("needs internet");
+  });
+});
+
+test.describe("icons", () => {
+  test("icons come only from GitHub's hosts: one elsewhere is never asked for", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    await browse(page);
+    await expect(page.locator(".mod-card", { hasText: "Cogwork" }).locator("img")).toHaveCount(1);
+    const asked = await page.evaluate(() => (window as unknown as { mockIconRequests: string[] }).mockIconRequests);
+    expect(asked.length).toBeGreaterThan(0);
+    for (const url of asked) expect(new URL(url).hostname).toMatch(/(^|\.)(github\.com|githubusercontent\.com|github\.io)$/);
+  });
+});
+
 test.describe("results never move the list", () => {
   const FIXED = [".mods-page .version-select", ".switch", ".banners", ".mods-panel"];
   for (const locale of LOCALES) {

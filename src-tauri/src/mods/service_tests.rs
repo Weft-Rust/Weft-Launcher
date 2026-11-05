@@ -1205,7 +1205,7 @@ mod files {
                     sha256: sha.to_ascii_uppercase(),
                     reason: Some("steals passwords".into()),
                 });
-                *held.0.lock().unwrap() = Some(c);
+                held.0.lock().unwrap().catalog = Some(c);
             }
         });
         let err = run(service::install_file(

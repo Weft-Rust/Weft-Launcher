@@ -293,9 +293,7 @@ pub(crate) fn accept(
         authors: json.authors,
         license: json.license,
         homepage: json.homepage.filter(|u| u.starts_with("https://")),
-        icon: json
-            .icon
-            .filter(|u| crate::download::icon_url_allowed(u)),
+        icon: json.icon.filter(|u| crate::download::icon_url_allowed(u)),
         versions: vec![version],
     })
 }
@@ -475,9 +473,9 @@ pub(crate) fn revalidate(repo: &str, mods: Vec<IndexMod>) -> Vec<IndexMod> {
                 }
             });
             m.icon = m
-            .icon
-            .take()
-            .filter(|u| crate::download::icon_url_allowed(u));
+                .icon
+                .take()
+                .filter(|u| crate::download::icon_url_allowed(u));
             m.homepage = m.homepage.take().filter(|u| u.starts_with("https://"));
             clamp_summary(&mut m.summary);
             (!m.versions.is_empty()).then_some(m)

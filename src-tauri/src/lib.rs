@@ -53,6 +53,7 @@ pub fn run() {
             launch::open_game_folder,
             launch::open_log,
             mods::commands::list_mod_catalog,
+            mods::commands::refresh_mod_source,
             mods::commands::get_mod_sources,
             mods::commands::add_mod_source,
             mods::commands::remove_mod_source,

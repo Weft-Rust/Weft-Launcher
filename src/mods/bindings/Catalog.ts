@@ -15,4 +15,10 @@ platform: string,
  * The player's list of sources couldn't be read (`ModSourcesDamaged`): it was kept aside,
  * and `sources` is empty until they save a new one.
  */
-sourcesError: AppErrorPayload | null, };
+sourcesError: AppErrorPayload | null, 
+/**
+ * Counts up each time the launcher holds a new catalogue (0: read from disk, never held).
+ * Answers can reach the page in any order; it keeps the one with the highest revision.
+ * A count of refreshes in one session, far below 2^53, so a JavaScript number holds it.
+ */
+revision: number, };

@@ -12,13 +12,15 @@ interface ErrorTextProps {
   lead?: string;
   /** Said once, politely, as it appears. On by default; off where the same text is said elsewhere. */
   speak?: boolean;
+  /** For a field it describes (`aria-describedby`). */
+  id?: string;
 }
 
 /**
  * A failure: the translated sentence, and the backend's own words behind "Details" when there
  * are any. Said once in the polite live region, not as an alert.
  */
-export function ErrorText({ error, className = "inline-error", children, lead, speak = true }: ErrorTextProps) {
+export function ErrorText({ error, className = "inline-error", children, lead, speak = true, id: domId }: ErrorTextProps) {
   const { t } = useI18n();
   const id = useId();
   const text = lead ? `${lead} ${error.message}` : error.message;
@@ -26,7 +28,7 @@ export function ErrorText({ error, className = "inline-error", children, lead, s
     if (speak && text) announce(`error:${id}:${text}`, text);
   }, [speak, text, id]);
   return (
-    <div className={`${className} error-text${children ? " with-action" : ""}`}>
+    <div className={`${className} error-text${children ? " with-action" : ""}`} id={domId}>
       <span className="error-message" data-must-fit>
         {text}
         {error.detail && <ErrorDetails detail={error.detail} label={t("errors.details")} />}

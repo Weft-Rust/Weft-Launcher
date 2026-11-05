@@ -94,11 +94,16 @@ export function indexSummary(index: Catalog["index"], t: T, formatDay: (iso: str
  */
 export function useCatalogBanners(onManageSources: () => void): Record<string, BannerItem> {
   const { t, formatDay } = useI18n();
-  const { catalog, catalogLoading, catalogError, refreshCatalog } = useMods();
+  const { catalog, catalogLoading, catalogError, refreshCatalog, refreshSource, sourceRefreshing } = useMods();
   if (!catalog) return {};
   const retry = (
     <button className="btn-flat" onClick={refreshCatalog} disabled={catalogLoading}>
       {catalogLoading ? t("mods.retrying") : t("mods.retry")}
+    </button>
+  );
+  const retryOne = (repo: string) => (
+    <button className="btn-flat" onClick={() => refreshSource(repo)} disabled={sourceRefreshing(repo)} aria-label={t("mods.sourceRetryLabel", repo)}>
+      {sourceRefreshing(repo) ? t("mods.retrying") : t("mods.retry")}
     </button>
   );
   const out: Record<string, BannerItem> = {};
@@ -134,6 +139,21 @@ export function useCatalogBanners(onManageSources: () => void): Record<string, B
       actions: retry,
     };
   }
+  if (!index && catalog.index.cacheError) {
+    // Fresh and in use, but not saved: said, since offline after a restart it won't be there.
+    const detail = showError(catalog.index.cacheError).detail;
+    out.index = {
+      id: "index",
+      tone: "info",
+      text: (
+        <>
+          {t("mods.indexUnsaved")}
+          {detail && <ErrorDetails detail={detail} label={t("errors.details")} />}
+        </>
+      ),
+      cause: t("mods.indexUnsavedShort"),
+    };
+  }
   if (catalog.sourcesError) {
     // Kept aside, never read as "no sources": where it is, behind Details.
     out.sourcesDamaged = {
@@ -161,10 +181,11 @@ export function useCatalogBanners(onManageSources: () => void): Record<string, B
       text,
       cause: t(SOURCE_SHORT[cause(s.error?.code)]),
       subject: s.repo,
-      foldActions: retry,
+      // This source alone, asked again: the others keep their answers and nothing waits on them.
+      foldActions: retryOne(s.repo),
       actions: (
         <>
-          {retry}
+          {retryOne(s.repo)}
           <button className="btn-flat" onClick={onManageSources}>
             {t("mods.manageSources")}
           </button>
