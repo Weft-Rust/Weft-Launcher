@@ -197,6 +197,22 @@ describe("mock rules follow the backend's", () => {
     expect(r.mods[0]).toMatchObject({ status: "revoked", revokedReason: "broken" });
   });
 
+  it("cascades: a revoked dependency turned off blocks what needs it", () => {
+    const s = rules.cascades;
+    const cat = catalog(s.catalog as "statuses");
+    const lock = (s.lock as EntrySpec[]).map(entry);
+    expect(R.applyRevocations(lock, cat, "2026-11-04T00:00:00Z")).toBe(true);
+    expect(lock.filter((e) => !e.enabled).map((e) => e.id)).toEqual(s.turnedOff);
+    expect(R.applyRevocations(lock, cat, "later")).toBe(false);
+    const r = R.report("v1", lock, rules.abi.ABI, null, cat, []);
+    for (const [id, want] of Object.entries(s.statuses)) expect(r.mods.find((m) => m.id === id)?.status, id).toBe(want);
+    expect(r.blocking).toEqual(s.blocking);
+    expect(r.blockingReasons).toEqual(s.blockingReasons);
+    for (const [id, want] of Object.entries(s.missingDeps)) expect(r.mods.find((m) => m.id === id)?.missingDeps).toEqual(want);
+    for (const [id, want] of Object.entries(s.depsNotInstalled)) expect(r.mods.find((m) => m.id === id)?.depsNotInstalled).toEqual(want);
+    for (const [id, want] of Object.entries(s.revokedReason)) expect(r.mods.find((m) => m.id === id)?.revokedReason).toBe(want);
+  });
+
   it("shadowing: a player-folder copy of a managed mod, and a revoked one blocks", () => {
     const s = rules.shadowing;
     const cat = catalog(s.catalog as "statuses");

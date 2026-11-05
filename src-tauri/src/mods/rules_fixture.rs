@@ -199,6 +199,7 @@ const SECTIONS: &[&str] = &[
     "toggles",
     "copies",
     "statuses",
+    "cascades",
     "updates",
     "shadowing",
     "revocations",
@@ -495,6 +496,82 @@ fn statuses() {
     let full = report(Some(fit().abi.to_string()));
     assert_eq!(full.blocking, strings(&s["blocking"]), "blocking");
     let find = |id: &str| full.mods.iter().find(|m| m.entry.id == id).unwrap();
+    for (id, want) in obj(&s["missingDeps"]) {
+        assert_eq!(find(id).missing_deps, strings(want), "missingDeps of {id}");
+    }
+    for (id, want) in obj(&s["depsNotInstalled"]) {
+        assert_eq!(
+            find(id).deps_not_installed,
+            strings(want),
+            "depsNotInstalled of {id}"
+        );
+    }
+    for (id, want) in obj(&s["revokedReason"]) {
+        assert_eq!(
+            find(id).revoked_reason.as_deref(),
+            want.as_str(),
+            "revokedReason of {id}"
+        );
+    }
+}
+
+#[test]
+fn cascades() {
+    let r = Rules::load();
+    let s = r.section("cascades");
+    only(
+        "cascades",
+        s,
+        &[
+            "rust",
+            "catalog",
+            "lock",
+            "turnedOff",
+            "statuses",
+            "blocking",
+            "blockingReasons",
+            "missingDeps",
+            "depsNotInstalled",
+            "revokedReason",
+        ],
+    );
+    let c = r.catalog(text(&s["catalog"]));
+    let mut lock = r.lock(&s["lock"]);
+    assert!(
+        profile::apply_revocations(&mut lock, &c),
+        "the revocation is applied"
+    );
+    let off: Vec<String> = lock
+        .mods
+        .iter()
+        .filter(|m| !m.enabled)
+        .map(|m| m.id.clone())
+        .collect();
+    assert_eq!(off, strings(&s["turnedOff"]), "turned off");
+    assert!(!profile::apply_revocations(&mut lock, &c), "once");
+    let report = profile::report(
+        "v1",
+        &lock,
+        Some(fit().abi.to_string()),
+        None,
+        &c,
+        fit().platform,
+        vec![],
+    );
+    let find = |id: &str| report.mods.iter().find(|m| m.entry.id == id).unwrap();
+    for (id, want) in obj(&s["statuses"]) {
+        assert_eq!(
+            &serde_json::to_value(find(id).status).unwrap(),
+            want,
+            "status of {id}"
+        );
+    }
+    assert_eq!(report.blocking, strings(&s["blocking"]), "blocking");
+    assert_eq!(
+        serde_json::to_value(&report.blocking_reasons).unwrap(),
+        s["blockingReasons"],
+        "blockingReasons"
+    );
     for (id, want) in obj(&s["missingDeps"]) {
         assert_eq!(find(id).missing_deps, strings(want), "missingDeps of {id}");
     }

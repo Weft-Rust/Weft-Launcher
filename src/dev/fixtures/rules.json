@@ -1,5 +1,5 @@
 {
-  "_about": "Input/output cases for the mod-set rules, written from the Rust table tests in src-tauri/src/mods/plan.rs and profile.rs (the test each block follows is named in `rust`). mockRules.test.ts runs them against src/dev/mockRules.ts. Builds are [version, abi, channel, deps]; an entry is the Rust test helper `entry(id, deps, abi)` (version 0.1.0, on, Reviewed, from the index, abi ABI) with the fields given changed. A sha is `<id>@<version>`. Contract R4 adds transitive cases (§1) to plans and commits, and the blocks `shadowing` (§4) and `revocations` (§6).",
+  "_about": "Input/output cases for the mod-set rules, written from the Rust table tests in src-tauri/src/mods/plan.rs and profile.rs (the test each block follows is named in `rust`). mockRules.test.ts runs them against src/dev/mockRules.ts. Builds are [version, abi, channel, deps]; an entry is the Rust test helper `entry(id, deps, abi)` (version 0.1.0, on, Reviewed, from the index, abi ABI) with the fields given changed. A sha is `<id>@<version>`. Contract R4 adds transitive cases (§1) to plans and commits, and the blocks `shadowing` (§4) and `revocations` (§6); `cascades` follows a revocation through to what needs the revoked mod.",
   "abi": { "ABI": "f470b1cbb1f9ad91", "OLD": "5f0569a6bea71b81" },
   "catalogs": {
     "world": {
@@ -271,6 +271,18 @@
     "shadowed": [{ "id": "fine", "file": "fine-copy.zip", "managed": "on" }, { "id": "kept", "file": "kept-old.zip", "managed": "revoked" }, { "id": "showcase", "file": "tweak.zip", "managed": "off" }],
     "blocking": ["kept", "old"],
     "blockingReasons": { "kept": "shadowedRevoked", "old": "wrongVersion" }
+  },
+  "cascades": {
+    "rust": "profile.rs apply_revocations, then report: a revoked dependency turned off blocks what needs it",
+    "catalog": "statuses",
+    "lock": [{ "id": "user", "deps": ["pulled"] }, { "id": "pulled" }, { "id": "bystander" }],
+    "turnedOff": ["pulled"],
+    "statuses": { "user": "missingDeps", "pulled": "revoked", "bystander": "ready" },
+    "blocking": ["user"],
+    "blockingReasons": { "user": "missingDeps" },
+    "missingDeps": { "user": ["pulled"] },
+    "depsNotInstalled": { "user": [] },
+    "revokedReason": { "pulled": "broken" }
   },
   "revocations": {
     "rust": "contract R4 §6: index::format revoked[] entries fail closed",
