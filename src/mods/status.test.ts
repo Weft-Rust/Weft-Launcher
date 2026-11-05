@@ -167,7 +167,12 @@ describe("crash notices", () => {
     ]);
     const fixes = crashFixes({ ...failure, kind: "missingDep", other: "cogwork" }, r, null);
     expect(fixes.map((f) => f.kind)).toEqual(["turnOn", "turnOff"]);
-    expect(crashFixes(failure, r, null).map((f) => f.kind)).toEqual(["update", "turnOff"]);
+    // A library that didn't load: turning it off surely helps, so it leads; the update is a try.
+    const loadFixes = crashFixes(failure, r, null);
+    expect(loadFixes.map((f) => f.kind)).toEqual(["turnOff", "update"]);
+    expect(loadFixes[1]).toMatchObject({ kind: "update", tentative: true });
+    // A build for another version: the update is the fix, and leads.
+    expect(crashFixes({ ...failure, kind: "wrongVersion" }, r, null)).toMatchObject([{ kind: "update", tentative: false }, { kind: "turnOff" }]);
   });
 
   it("offer installing a missing dependency the catalogue has", () => {

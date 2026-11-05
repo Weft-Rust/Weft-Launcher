@@ -417,7 +417,7 @@ button:disabled { cursor: not-allowed; }
 .mod-row {
   display: grid; grid-template-columns: 48px minmax(0, 1fr) auto;
   grid-template-areas: "icon title actions" "icon meta actions";
-  align-items: center; gap: 0 12px; padding: 4px 8px 4px 12px;
+  align-items: center; gap: 0 8px; padding: 4px 4px 4px 8px;
 }
 .mod-row.wide { grid-template-areas: "icon title actions" "icon meta meta"; }
 .mod-row > .mod-icon { grid-area: icon; align-self: start; }
@@ -452,8 +452,8 @@ button:disabled { cursor: not-allowed; }
 .btn-flat.chip:disabled { box-shadow: none; }
 .mod-actions { grid-area: actions; display: flex; align-items: center; gap: 8px; }
 /* Narrow blocks, so the name and its tier keep the room. */
-.mod-actions :is(.btn-small, .toggle) { --side: 10px; }
-.mod-actions .toggle { gap: 6px; }
+.mod-actions :is(.btn-small, .toggle) { --side: 8px; }
+.mod-actions .toggle { gap: 4px; }
 .mod-actions .progress-container { width: 200px; }
 .mod-card-foot .progress-container { width: 160px; }
 .progress-container.compact .progress-label { margin-top: 0; }
