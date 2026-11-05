@@ -44,6 +44,27 @@ test.describe("launch safety", () => {
     await expect(page.locator(".mod-failure")).toHaveCount(0);
   });
 
+  const CRASHES = [
+    { kind: "wrongName", title: "My Tweak stopped Weft from starting: its file has the wrong name.", fix: "Turn off My Tweak" },
+    { kind: "notAMod", title: "oldtweak stopped Weft from starting: it isn't a Weft mod.", fix: "Open mods folder" },
+    { kind: "initPanicked", title: "Cogwork crashed while Weft was starting.", fix: "Turn off Cogwork" },
+    { kind: "exit", title: "Game closed with error (code 1)", fix: null },
+  ];
+  for (const c of CRASHES) {
+    test(`a ${c.kind} crash says what happened, with the log a click away`, async ({ page }) => {
+      await open(page, `scenario=crash&crash=${c.kind}`);
+      await page.locator(".btn-play").click();
+      const notice = page.locator(".mod-failure");
+      await expect(notice).toBeVisible({ timeout: 10_000 });
+      await expect(notice.locator(".mod-failure-title")).toHaveText(c.title);
+      await expect(notice.locator("button", { hasText: "Open log" })).toHaveCount(1);
+      await expect(notice.locator("button", { hasText: "Dismiss" })).toHaveCount(1);
+      if (c.fix) await expect(notice.locator("button").first()).toHaveText(c.fix);
+      else await expect(notice.locator(".mod-failure-actions > button")).toHaveCount(0);
+      await expectWhole(page, `${c.kind} crash`);
+    });
+  }
+
   test("a crash notice for a mod with a copy in the player's folder stays until that copy goes", async ({ page }) => {
     await open(page, "scenario=crash&shadow=structures");
     await page.locator(".btn-play").click();
@@ -413,6 +434,8 @@ test.describe("operations", () => {
     await d.locator(".dialog-actions .btn-primary").click();
     // As the backend works: the build asked for first, then what it needs. File 1 of 2.
     await expect(d.locator(".progress-label")).toHaveText(/^File 1 of 2: Lanterns, downloading \d+%/);
+    // Heard once per file and step, with no number and no stray "%".
+    await expect(d.locator(".progress-container [aria-live]")).toHaveText("File 1 of 2: Lanterns, downloading");
     await d.locator(".progress-cancel").click();
     await expect(d.getByTestId("cancelled-note")).toHaveText("Cancelled. Nothing was changed.", { timeout: 15_000 });
     await expect(d.locator(".inline-error, [role=alert]")).toHaveCount(0);
@@ -457,6 +480,24 @@ test.describe("announcements", () => {
 });
 
 test.describe("remove and undo", () => {
+  test("a double-click on Remove asks, and doesn't remove", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    const row = page.locator(".mod-row", { hasText: "Showcase" });
+    await row.locator(".delete-btn").dblclick();
+    await page.waitForTimeout(300);
+    await expect(row).toHaveCount(1);
+    await expect(row.locator(".delete-btn")).toHaveClass(/confirming/);
+    await expect(spoken(page)).toContainText("Showcase");
+  });
+
+  test("the Installed tab says which version its count is for", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    const n = await page.locator(".mod-row").count();
+    await expect(page.getByRole("tab", { name: `Installed in v26.11.1: ${n} mods` })).toHaveCount(1);
+  });
+
   test("Remove says what it did, Undo puts it back, and focus stays on a row", async ({ page }) => {
     await open(page, "scenario=mods");
     await goToTab(page, MODS_TAB);
@@ -864,11 +905,20 @@ test.describe("network down is not index down", () => {
     await expect(page.locator(".mods-panel").getByText("needs internet").first()).toBeVisible();
   });
 
-  test("an index that can't be reached while a source answers never says the internet is down", async ({ page }) => {
+  test("an index the server doesn't have never says the internet is down", async ({ page }) => {
     await open(page, "scenario=indexdown");
     await goToTab(page, MODS_TAB);
     await browse(page);
-    await expect(page.locator(".banners")).toContainText("Index unreachable");
+    await expect(page.locator(".banners")).toContainText("No mod index: no Reviewed mods");
+    await expect(page.locator(".banners")).not.toContainText("unreachable");
+    await expect(page.locator(".mods-panel")).not.toContainText("needs internet");
+  });
+
+  test("an index that can't be reached while a source answers is unreachable, but downloads still work", async ({ page }) => {
+    await open(page, "scenario=mods&index=unreachable");
+    await goToTab(page, MODS_TAB);
+    await browse(page);
+    await expect(page.locator(".banners")).toContainText("Index unreachable: no Reviewed mods");
     await expect(page.locator(".mods-panel")).not.toContainText("needs internet");
   });
 });

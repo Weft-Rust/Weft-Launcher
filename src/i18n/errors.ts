@@ -5,6 +5,7 @@ import type { ErrorCode } from '../mods/types';
 // new code fails `tsc` until it has a message; `npm run check:i18n` checks every locale has it.
 export const ERROR_KEY: Record<ErrorCode, MessageKey> = {
   Network: 'errors.network',
+  HttpStatus: 'errors.httpStatus',
   Io: 'errors.io',
   Serde: 'errors.serialization',
   InvalidHeader: 'errors.httpHeader',

@@ -26,7 +26,7 @@ export const SCENARIOS: Scenario[] = [
   { name: "knownfile", description: "From file picks a zip that is a catalogued build (Cogwork 0.2.0).", flags: { file: "known" } },
   { name: "revoked", description: "The installed Cogwork build has been pulled from the index.", flags: { revoked: "cogwork" } },
   { name: "ratelimited", description: "GitHub rate-limits the source; its last mods are shown.", flags: { source: "ratelimited" } },
-  { name: "indexdown", description: "The index has never been reached, so there are no Reviewed mods.", flags: { index: "unavailable" } },
+  { name: "indexdown", description: "There is no index to fetch (the server answers 404) and none saved, so there are no Reviewed mods.", flags: { index: "unavailable" } },
   { name: "stale", description: "The index verifies, but its signature is over 30 days old.", flags: { index: "stale" } },
   { name: "invalid", description: "The new index's signature doesn't verify; the last good one is shown.", flags: { index: "invalid" } },
   { name: "rollback", description: "The new index is older than one already accepted, so it is refused; the last good one is shown.", flags: { index: "rollback" } },
@@ -65,8 +65,9 @@ export interface Flag {
 export const FLAGS: Flag[] = [
   {
     name: "index",
-    values: ["fresh", "stale", "cached", "unavailable", "invalid", "rollback", "unsaved"],
-    description: "State of the signed mod index; `unsaved` is fresh but couldn't be saved to disk (`cacheError`).",
+    values: ["fresh", "stale", "cached", "unavailable", "unreachable", "invalid", "rollback", "unsaved"],
+    description:
+      "State of the signed mod index; `unavailable` is none saved and the server answers 404 (`HttpStatus`), `unreachable` none saved and no network to it; `unsaved` is fresh but couldn't be saved to disk (`cacheError`).",
   },
   { name: "source", values: ["ok", "notfound", "ratelimited", "offline"], description: "State of the added GitHub source." },
   {

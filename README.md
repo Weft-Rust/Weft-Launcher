@@ -77,7 +77,7 @@ Pick a state with `?scenario=` and adjust it with flags, which combine: `?scenar
 | `knownfile` | From file picks a zip that is a catalogued build (Cogwork 0.2.0). | `file=known` |
 | `revoked` | The installed Cogwork build has been pulled from the index. | `revoked=cogwork` |
 | `ratelimited` | GitHub rate-limits the source; its last mods are shown. | `source=ratelimited` |
-| `indexdown` | The index has never been reached, so there are no Reviewed mods. | `index=unavailable` |
+| `indexdown` | There is no index to fetch (the server answers 404) and none saved, so there are no Reviewed mods. | `index=unavailable` |
 | `stale` | The index verifies, but its signature is over 30 days old. | `index=stale` |
 | `invalid` | The new index's signature doesn't verify; the last good one is shown. | `index=invalid` |
 | `rollback` | The new index is older than one already accepted, so it is refused; the last good one is shown. | `index=rollback` |
@@ -89,7 +89,7 @@ Pick a state with `?scenario=` and adjust it with flags, which combine: `?scenar
 
 | Flag | Values | Effect |
 |---|---|---|
-| `index` | `fresh`, `stale`, `cached`, `unavailable`, `invalid`, `rollback`, `unsaved` | State of the signed mod index; `unsaved` is fresh but couldn't be saved to disk (`cacheError`). |
+| `index` | `fresh`, `stale`, `cached`, `unavailable`, `unreachable`, `invalid`, `rollback`, `unsaved` | State of the signed mod index; `unavailable` is none saved and the server answers 404 (`HttpStatus`), `unreachable` none saved and no network to it; `unsaved` is fresh but couldn't be saved to disk (`cacheError`). |
 | `source` | `ok`, `notfound`, `ratelimited`, `offline` | State of the added GitHub source. |
 | `nomods` | `noReleases`, `noModFiles`, `unreadable`, `noDigest`, `disagrees`, `invalid` | GitHub answers for the added source, but it has no usable mods, for this reason. |
 | `race` | `stale`, `error` | The first catalogue refresh is slow and answers last: with an older catalogue (`stale`) or an error (`error`). The page keeps the newer answer. |

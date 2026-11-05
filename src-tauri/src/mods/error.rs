@@ -116,7 +116,13 @@ impl ModsError {
         use ErrorCode as C;
         use ModsError::*;
         match self {
-            Network(_) | Http { .. } => C::Network,
+            Network(_) => C::Network,
+            // A gateway that couldn't reach what is behind it: as good as unreachable.
+            Http {
+                status: 502..=504, ..
+            } => C::Network,
+            // Otherwise the server answered: the network is up, so never "offline".
+            Http { .. } => C::HttpStatus,
             Io(e) if is_disk_full(e) => C::DiskFull,
             Io(_) => C::Io,
             Serde(_) => C::Serde,
@@ -200,6 +206,21 @@ mod tests {
     use reqwest::StatusCode;
 
     #[test]
+    fn an_answer_with_an_error_status_is_not_offline() {
+        let http = |status| {
+            ModsError::Http {
+                status,
+                url: "https://zorro909.github.io/weft-mods-index/v1/index.json".into(),
+            }
+            .code()
+        };
+        assert_eq!(http(404), ErrorCode::HttpStatus);
+        assert_eq!(http(403), ErrorCode::HttpStatus);
+        assert_eq!(http(500), ErrorCode::HttpStatus);
+        assert_eq!(http(503), ErrorCode::Network);
+    }
+
+    #[test]
     fn download_failures_keep_their_meaning() {
         let url = "https://github.com/a/b/releases/download/t/x.zip";
         let code = |e: DownloadError| AppError::from(ModsError::from_download(e, url)).code;
@@ -218,6 +239,10 @@ mod tests {
         assert_eq!(
             code(DownloadError::Status(StatusCode::BAD_GATEWAY)),
             ErrorCode::Network
+        );
+        assert_eq!(
+            code(DownloadError::Status(StatusCode::INTERNAL_SERVER_ERROR)),
+            ErrorCode::HttpStatus
         );
         assert_eq!(code(DownloadError::TooLarge(10)), ErrorCode::ModTooLarge);
         assert_eq!(

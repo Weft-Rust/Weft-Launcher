@@ -26,6 +26,7 @@ macro_rules! error_codes {
 error_codes! {
     // Shared
     Network,
+    HttpStatus,
     Io,
     DiskFull,
     Serde,

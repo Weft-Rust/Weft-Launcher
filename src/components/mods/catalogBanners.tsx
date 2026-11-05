@@ -9,7 +9,7 @@ import { ErrorDetails } from "../ErrorText";
 type T = (key: MessageKey, ...args: string[]) => string;
 
 /** Why a refresh failed, by what the player can do about it. */
-function cause(code: ErrorCode | undefined): "rate" | "gone" | "invalid" | "disk" | "network" {
+function cause(code: ErrorCode | undefined): "rate" | "gone" | "invalid" | "disk" | "server" | "network" {
   switch (code) {
     case "ModSourceRateLimited":
     case "RateLimited":
@@ -24,6 +24,9 @@ function cause(code: ErrorCode | undefined): "rate" | "gone" | "invalid" | "disk
     case "Io":
     case "CreateDir":
       return "disk";
+    // It answered: never said as offline.
+    case "HttpStatus":
+      return "server";
     default:
       return "network";
   }
@@ -35,6 +38,7 @@ const SOURCE_SHORT: Record<ReturnType<typeof cause>, MessageKey> = {
   gone: "mods.sourceCauseGone",
   invalid: "mods.sourceCauseInvalid",
   disk: "mods.sourceCauseDisk",
+  server: "mods.sourceCauseServer",
   network: "mods.sourceCauseNetwork",
 };
 
@@ -43,6 +47,7 @@ const SOURCE_CAUSE: Record<ReturnType<typeof cause>, MessageKey> = {
   gone: "mods.sourceErrGone",
   invalid: "mods.sourceErrInvalid",
   disk: "mods.sourceErrDisk",
+  server: "mods.sourceErrServer",
   network: "mods.sourceErrNetwork",
 };
 
@@ -68,7 +73,9 @@ export function indexProblem(index: Catalog["index"], t: T, formatDay: (iso: str
         ? t("mods.indexRollback")
         : cause(code) === "disk"
           ? t("mods.indexDisk")
-          : t("mods.indexUnreachable");
+          : cause(code) === "server"
+            ? t("mods.indexServerError")
+            : t("mods.indexUnreachable");
   // Say why, also when there is nothing saved to show instead.
   if (index.freshness === "unavailable" || !index.generated) return `${t("mods.indexUnavailable")} ${why}`;
   return `${t("mods.indexShowingFrom", formatDay(index.generated))} ${why}`;

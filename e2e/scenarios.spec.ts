@@ -128,7 +128,8 @@ const CHECKS: Record<string, Checks> = {
       const lead = page.locator(".banner.compact");
       await expect(lead).toHaveClass(/warn/);
       await expect(lead.locator(".banner-actions button")).toHaveCount(1);
-      if (en) await expect(lead).toContainText("Index unreachable: no Reviewed mods");
+      // Pages answered 404: the network works, so it never says unreachable or offline.
+      if (en) await expect(lead).toContainText("No mod index: no Reviewed mods");
       await expect(page.locator(".mod-card .trust-reviewed")).toHaveCount(0);
     },
   },

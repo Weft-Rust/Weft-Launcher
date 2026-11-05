@@ -210,7 +210,7 @@ const INDEX_DATE = indexFlag === "fresh" ? "2026-11-04T18:00:00Z" : "2026-11-02T
 const err = (code: ErrorCode, detail: string | null = null): AppErrorPayload => ({ code, detail });
 
 const catalog: Catalog = {
-  mods: allMods.filter((m) => !(indexFlag === "unavailable" && m.origin.kind === "index")),
+  mods: allMods.filter((m) => !((indexFlag === "unavailable" || indexFlag === "unreachable") && m.origin.kind === "index")),
   revoked: [],
   index:
     indexFlag === "stale"
@@ -218,7 +218,16 @@ const catalog: Catalog = {
       : indexFlag === "cached"
         ? { freshness: "cached", generated: INDEX_DATE, signedAt: INDEX_DATE, error: err("Network", "offline"), cacheError: null }
         : indexFlag === "unavailable"
-          ? { freshness: "unavailable", generated: null, signedAt: null, error: err("Network", "offline"), cacheError: null }
+          ? // Pages answered 404: the network is up, there is just no index there (yet).
+            {
+              freshness: "unavailable",
+              generated: null,
+              signedAt: null,
+              error: err("HttpStatus", "Unexpected HTTP status 404 for https://zorro909.github.io/weft-mods-index/v1/index.json"),
+              cacheError: null,
+            }
+          : indexFlag === "unreachable"
+            ? { freshness: "unavailable", generated: null, signedAt: null, error: err("Network", "dns error: failed to lookup address information"), cacheError: null }
           : indexFlag === "invalid"
             ? { freshness: "cached", generated: INDEX_DATE, signedAt: INDEX_DATE, error: err("IndexSignatureInvalid", "signature by an unknown key"), cacheError: null }
             : indexFlag === "rollback"

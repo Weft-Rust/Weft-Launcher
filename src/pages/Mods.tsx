@@ -291,7 +291,13 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
       <div className="mods-toolbar">
         <div className="switch" role="tablist" aria-label={t("mods.viewsLabel", tag)}>
           {VIEWS.map((v) => (
-            <button key={v} {...tabs.tab(v)} className={view === v ? "on" : ""}>
+            <button
+              key={v}
+              {...tabs.tab(v)}
+              className={view === v ? "on" : ""}
+              // The count alone says nothing heard out of context: which version, and of what.
+              aria-label={v === "installed" && count > 0 ? tn("mods.tabInstalledLabel", count, tag) : undefined}
+            >
               {t(v === "installed" ? "mods.tabInstalled" : "mods.tabBrowse")}
               {v === "installed" && count > 0 && <span className="count">{count}</span>}
             </button>
