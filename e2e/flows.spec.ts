@@ -45,7 +45,8 @@ test.describe("launch safety", () => {
   });
 
   const CRASHES = [
-    { kind: "wrongName", title: "My Tweak stopped Weft from starting: its file has the wrong name.", fix: "Turn off My Tweak" },
+    // My Tweak is a file from the player's computer: another file is its fix, and leads.
+    { kind: "wrongName", title: "My Tweak stopped Weft from starting: its file has the wrong name.", fix: "Replace My Tweak from file…" },
     { kind: "notAMod", title: "oldtweak stopped Weft from starting: it isn't a Weft mod.", fix: "Open mods folder" },
     { kind: "initPanicked", title: "Cogwork crashed while Weft was starting.", fix: "Turn off Cogwork" },
     { kind: "exit", title: "Game closed with error (code 1)", fix: "Turn off all mods for v26.11.1" },
@@ -63,6 +64,24 @@ test.describe("launch safety", () => {
       await expectWhole(page, `${c.kind} crash`);
     });
   }
+
+  test("a crash of a mod from a file offers another file, in the From file dialog", async ({ page }) => {
+    await open(page, "scenario=crash&crash=wrongVersion");
+    await page.locator(".btn-play").click();
+    const notice = page.locator(".mod-failure");
+    const replace = notice.locator("button[data-fix=replaceFile]");
+    await expect(replace).toHaveText("Replace My Tweak from file…", { timeout: 10_000 });
+    await expect(replace).toHaveClass(/btn-primary/);
+    await expect(notice.locator("button").first()).toHaveText("Replace My Tweak from file…");
+    // The log and Dismiss come after the fixes, apart, as links.
+    await expect(notice.locator(".mod-failure-quiet .link-btn")).toHaveCount(2);
+    await replace.click();
+    const d = page.locator(dialog);
+    await expect(d).toBeVisible();
+    await expect(d).toContainText("mytweak.zip");
+    await page.keyboard.press("Escape");
+    await expect(d).toHaveCount(0);
+  });
 
   test("a crash that names no mod offers trying without mods, with Undo", async ({ page }) => {
     await open(page, "scenario=crash&crash=exit");

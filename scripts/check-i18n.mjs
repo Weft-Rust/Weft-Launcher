@@ -165,8 +165,10 @@ const GLOSSARY = [
   // The tier's own word (capitalised in English), and what it means: someone reviewed exactly this file.
   { en: /\bReviewed\b|reviewed exactly/, term: { ru: "одобр", "pt-BR": "revis", es: "revis" }, not: TIER_FORMS },
   { en: /\brevok|\brevocation/i, term: { ru: "отозв", "pt-BR": "retirad", es: "retirad" } },
+  // One word for a build its author marks as not final, on the version list and in Mods alike.
+  { en: /\bprerelease/i, term: { ru: "предрелиз", "pt-BR": "pré-lançamento", es: "preversi" } },
 ];
-const FORBIDDEN = { ru: [/отзыв/i, /неизвестн\S* файл/i] };
+const FORBIDDEN = { ru: [/отзыв/i, /неизвестн\S* файл/i], en: [/\bpre-release/i], es: [/preliminar/i] };
 const flat = Object.fromEntries(locales.map((l) => [l, flatten(load(l))]));
 for (const [key, english] of Object.entries(flat.en)) {
   for (const { en: pattern, term, not = {} } of GLOSSARY) {

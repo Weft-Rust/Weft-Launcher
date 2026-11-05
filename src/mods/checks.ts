@@ -4,6 +4,7 @@
 import { formatList, type MessageKey, type Msg } from "../i18n";
 import type { AppErrorPayload, CatalogVersion, CopyPreview, FileInspection, InstallPlan, ModProgress, Trust } from "./types";
 import { shortCommit, shortSha } from "./select";
+import { unreachable } from "../utils/never";
 
 /** "same": nothing to check, because nothing changes (a mod a copy leaves as it is). */
 export type CheckState = "yes" | "no" | "unknown" | "same";
@@ -111,6 +112,8 @@ function buildRecordCheck(v: CatalogVersion, workflow: Arg): CheckRow {
       };
     case "none":
       return { id: "provenance", state: "unknown", title: { key: "mods.ckNoBuild" }, detail: { key: "mods.ckNoBuildDetail" }, aside: true };
+    default:
+      return unreachable(v.buildRecord);
   }
 }
 
@@ -212,9 +215,28 @@ export function withProblem(problem: AppErrorPayload | null, rows: CheckRow[]): 
   return [{ id: "problem", state: "no", title: { key: "mods.ckWontInstall", args: [{ error: problem }] } }, ...rows];
 }
 
+const TIER_RANK: Record<Trust, number> = { reviewed: 2, unreviewed: 1, unverified: 0 };
+
+/**
+ * An update to a build of a lower tier than the one installed (Reviewed → Unreviewed): the first
+ * row, so the drop is said in words above everything else, not only by the badge.
+ */
+export function tierDropCheck(plan: InstallPlan): CheckRow | null {
+  const r = plan.replaces;
+  if (!r || TIER_RANK[plan.target.trust] >= TIER_RANK[r.trust]) return null;
+  return {
+    id: "tierDrop",
+    state: "no",
+    said: "mods.ckTierDropSaid",
+    title: { key: "mods.ckTierDrop", args: [{ trust: r.trust }, { trust: plan.target.trust }] },
+  };
+}
+
 /** Everything the install and update dialogs show, from the backend's plan. */
 export function installChecks(plan: InstallPlan, v: CatalogVersion, ctx: InstallCheckContext): CheckRow[] {
   const rows: CheckRow[] = [];
+  const drop = tierDropCheck(plan);
+  if (drop) rows.push(drop);
   rows.push(...evidenceChecks(v, ctx.indexFrom ?? null));
   rows.push(abiCheck(plan, v, ctx));
   rows.push(...planDepChecks(plan, v.deps, ctx));
@@ -268,14 +290,17 @@ export function activeStep<P extends Pick<ModProgress, "sha256">>(entries: P[]):
   return entries[entries.length - 1];
 }
 
-/** The lines under the checks that say what an update replaces, including a change of tier. */
+/**
+ * The lines under the checks that say what an update replaces, including a rise in tier (a drop
+ * is the first check row instead: tierDropCheck).
+ */
 export function replaceNotes(plan: InstallPlan): RichMsg[] {
   const r = plan.replaces;
   if (!r) return [];
   const notes: RichMsg[] = [];
   const old = r.version ?? shortSha(r.sha256);
   notes.push(
-    r.trust !== plan.target.trust
+    r.trust !== plan.target.trust && !tierDropCheck(plan)
       ? { key: "mods.ckReplacesTrust", args: [old, { trust: r.trust }, { trust: plan.target.trust }] }
       : { key: "mods.ckReplaces", args: [old] }
   );

@@ -10,6 +10,9 @@ import { Announce } from "../Announce";
 import { announce } from "../LiveRegion";
 import { ErrorText } from "../ErrorText";
 import { InstallDialog } from "./InstallDialog";
+import { FileInstallDialog } from "./FileInstallDialog";
+import { pickModFile } from "./pickModFile";
+import { unreachable } from "../../utils/never";
 
 /** A build to review in the install dialog, opened from a fix button. */
 export interface ReviewRequest {
@@ -23,18 +26,28 @@ export interface ReviewRequest {
  */
 export function useReviewDialog(tag: string | null) {
   const { catalog } = useMods();
+  const { t } = useI18n();
   const [request, setRequest] = useState<ReviewRequest | null>(null);
+  /** A zip from the player's computer, in the From file dialog: what replaces a file mod. */
+  const [filePath, setFilePath] = useState<string | null>(null);
   /** An update for an installed mod: its catalogue entry, if the catalogue still has it. */
   const openUpdate = (mod: InstalledMod, sha256: string) => {
     const entry = catalogModFor(catalog, mod);
     if (entry) setRequest({ mod: entry, sha256 });
   };
   const canUpdate = (mod: InstalledMod) => !!catalogModFor(catalog, mod);
+  /** Asks for a zip and shows it in the From file dialog; throws what the picker threw. */
+  const openFile = async () => {
+    const path = await pickModFile(t("mods.fileFilter"));
+    if (path) setFilePath(path);
+  };
   const dialog =
     request && tag ? (
       <InstallDialog tag={tag} mod={request.mod} initialSha={request.sha256} allowPrerelease onClose={() => setRequest(null)} />
+    ) : filePath && tag ? (
+      <FileInstallDialog tag={tag} path={filePath} onClose={() => setFilePath(null)} />
     ) : null;
-  return { openUpdate, canUpdate, openInstall: (mod: CatalogMod, sha256: string) => setRequest({ mod, sha256 }), dialog };
+  return { openUpdate, canUpdate, openInstall: (mod: CatalogMod, sha256: string) => setRequest({ mod, sha256 }), openFile, dialog };
 }
 
 export type Review = ReturnType<typeof useReviewDialog>;
@@ -65,6 +78,14 @@ export function useFix(tag: string, review: Review) {
     if (fix.kind === "update") {
       const mod = profile(tag)?.mods.find((m) => m.id === fix.id);
       return mod && review.openUpdate(mod, fix.sha256);
+    }
+    if (fix.kind === "replaceFile") {
+      try {
+        await review.openFile();
+      } catch (err) {
+        setError(showError(err));
+      }
+      return;
     }
     if (fix.kind === "showFolder") {
       // Only the player can remove their own file; the launcher looks again when they're back.
@@ -107,6 +128,10 @@ export function FixButtons({ tag, fixes, locked, review, apply, flat = false }: 
         return fix.tentative ? t("mods.tryUpdate", fix.version) : t("mods.update", fix.version);
       case "showFolder":
         return t("mods.showFolderFix", fix.file);
+      case "replaceFile":
+        return t("mods.replaceFromFile", fix.name);
+      default:
+        return unreachable(fix);
     }
   };
   const disabled = (fix: Fix) => {
@@ -115,7 +140,7 @@ export function FixButtons({ tag, fixes, locked, review, apply, flat = false }: 
     const mod = profile(tag)?.mods.find((m) => m.id === fix.id);
     return !mod || !review.canUpdate(mod);
   };
-  const primary = (fix: Fix) => fix.kind === "update" || fix.kind === "install" || fix.kind === "showFolder";
+  const primary = (fix: Fix) => fix.kind === "update" || fix.kind === "install" || fix.kind === "showFolder" || fix.kind === "replaceFile";
   return (
     <>
       {fixes.map((fix) => (

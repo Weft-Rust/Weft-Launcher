@@ -588,7 +588,9 @@ button:disabled { cursor: not-allowed; }
 .mod-failure-title { color: var(--r3); }
 .mod-failure-line { color: var(--g5); font-size: 16px; overflow-wrap: anywhere; }
 .mod-failure-why { color: var(--pale); }
-.mod-failure-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.mod-failure-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+/* Looking at the log and putting the notice away: links after the fixes, apart from them. */
+.mod-failure-quiet { display: flex; align-items: center; gap: 8px; margin-left: auto; color: var(--g5); }
 .mods-page .mod-failure { max-width: none; margin: 0 0 8px; }
 .mods-line .truncate { min-width: 0; max-width: 520px; }
 .blockers { display: grid; gap: 8px; justify-content: stretch; }

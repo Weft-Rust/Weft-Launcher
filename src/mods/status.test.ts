@@ -219,6 +219,20 @@ describe("crash notices", () => {
     expect(crashFixes({ ...failure, kind: "wrongVersion" }, r, null)).toMatchObject([{ kind: "update", tentative: false }, { kind: "turnOff" }]);
   });
 
+  it("offer another file for a mod from the player's computer, where a build would be the fix", () => {
+    const mine = installed("structures", { origin: { kind: "file", name: "structures.zip" }, trust: "unverified" });
+    const r = report([mine]);
+    // Built for another version, or named wrong: another file is the fix, and leads.
+    expect(crashFixes({ ...failure, kind: "wrongVersion" }, r, null).map((f) => f.kind)).toEqual(["replaceFile", "turnOff"]);
+    expect(crashFixes({ kind: "wrongName", modId: "structures", crate: "x", line: "x" }, r, null).map((f) => f.kind)).toEqual(["replaceFile", "turnOff"]);
+    // A library that didn't load: turning it off surely helps; another file is a try.
+    expect(crashFixes(failure, r, null).map((f) => f.kind)).toEqual(["turnOff", "replaceFile"]);
+    // What it needs is missing: another file of it doesn't help.
+    expect(crashFixes({ ...failure, kind: "missingDep", dependency: "cogwork" }, r, null).map((f) => f.kind)).not.toContain("replaceFile");
+    // A catalogued mod gets its update, never a file.
+    expect(crashFixes({ ...failure, kind: "wrongVersion" }, report([installed("structures")]), null).map((f) => f.kind)).toEqual(["turnOff"]);
+  });
+
   it("offer installing a missing dependency the catalogue has", () => {
     const cogwork = catalogMod("cogwork", [build("0.2.0")]);
     const fixes = crashFixes({ ...failure, kind: "missingDep", dependency: "cogwork" }, report([installed("structures")]), catalog([cogwork]));

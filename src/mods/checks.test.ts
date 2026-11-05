@@ -12,6 +12,7 @@ import {
   installOutcome,
   pinCheck,
   replaceNotes,
+  tierDropCheck,
   weakerDeps,
   type CheckRow,
 } from "./checks";
@@ -258,15 +259,27 @@ describe("consentChanges", () => {
 });
 
 describe("replaceNotes", () => {
-  it("says when an update changes the tier and that an off mod stays off", () => {
+  it("says when an update raises the tier and that an off mod stays off", () => {
     const notes = replaceNotes(
       plan({
-        target: { ...plan().target, trust: "unreviewed" },
-        replaces: { version: "0.1.2", sha256: "o".repeat(64), trust: "reviewed", enabled: false },
+        target: { ...plan().target, trust: "reviewed" },
+        replaces: { version: "0.1.2", sha256: "o".repeat(64), trust: "unreviewed", enabled: false },
       })
     );
-    expect(notes[0]).toEqual({ key: "mods.ckReplacesTrust", args: ["0.1.2", { trust: "reviewed" }, { trust: "unreviewed" }] });
+    expect(notes[0]).toEqual({ key: "mods.ckReplacesTrust", args: ["0.1.2", { trust: "unreviewed" }, { trust: "reviewed" }] });
     expect(notes[1]).toEqual({ key: "mods.ckReplacesOff" });
+  });
+
+  it("leaves a drop in tier to the first check row, and says it once", () => {
+    const dropping = plan({
+      target: { ...plan().target, trust: "unreviewed" },
+      replaces: { version: "0.1.2", sha256: "o".repeat(64), trust: "reviewed", enabled: true },
+    });
+    expect(replaceNotes(dropping)).toEqual([{ key: "mods.ckReplaces", args: ["0.1.2"] }]);
+    const rows = installChecks(dropping, build("0.4.0", { trust: "unreviewed" }), ctx);
+    expect(rows[0]).toMatchObject({ id: "tierDrop", state: "no", title: { key: "mods.ckTierDrop", args: [{ trust: "reviewed" }, { trust: "unreviewed" }] } });
+    expect(tierDropCheck(plan({ replaces: { version: "0.1.2", sha256: "o".repeat(64), trust: "unreviewed", enabled: true } }))).toBeNull();
+    expect(tierDropCheck(plan())).toBeNull();
   });
 
   it("is a plain note when the tier stays", () => {

@@ -39,7 +39,7 @@
   "instanceCardTitle": "Instance",
   "versionLabel": "Version",
   "gameFolderTitle": "Game folder",
-  "prereleaseBadge": "Pre-release",
+  "prereleaseBadge": "Prerelease",
   "heroBadge": "VERSION {0} · READY",
   "heroBadgePlaying": "VERSION {0} · PLAYING",
   "errors": {
@@ -510,7 +510,10 @@
     "copyEvidenceFor": "What is known of {0}",
     "copyNoEvidence": "The catalogue no longer lists this build",
     "copyIntro_one": "Copying adds {n} mod to {0}. Nothing {0} has now is removed or replaced.",
-    "copyIntro_other": "Copying adds {n} mods to {0}. Nothing {0} has now is removed or replaced."
+    "copyIntro_other": "Copying adds {n} mods to {0}. Nothing {0} has now is removed or replaced.",
+    "ckTierDrop": "Was {0}, this build is {1}",
+    "ckTierDropSaid": "Lower tier",
+    "replaceFromFile": "Replace {0} from file…"
   },
   "sizeUnits": {
     "B": "B",

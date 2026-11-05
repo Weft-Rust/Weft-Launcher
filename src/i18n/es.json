@@ -39,7 +39,7 @@
   "instanceCardTitle": "Instancia",
   "versionLabel": "Versión",
   "gameFolderTitle": "Carpeta del juego",
-  "prereleaseBadge": "Preliminar",
+  "prereleaseBadge": "Preversión",
   "heroBadge": "VERSIÓN {0} · LISTO",
   "heroBadgePlaying": "VERSIÓN {0} · JUGANDO",
   "errors": {
@@ -542,7 +542,10 @@
     "copyNoEvidence": "El catálogo ya no incluye esta versión",
     "copyIntro_one": "Copiar añade {n} mod a {0}. Nada de lo que {0} tiene ahora se quita ni se reemplaza.",
     "copyIntro_many": "Copiar añade {n} mods a {0}. Nada de lo que {0} tiene ahora se quita ni se reemplaza.",
-    "copyIntro_other": "Copiar añade {n} mods a {0}. Nada de lo que {0} tiene ahora se quita ni se reemplaza."
+    "copyIntro_other": "Copiar añade {n} mods a {0}. Nada de lo que {0} tiene ahora se quita ni se reemplaza.",
+    "ckTierDrop": "Era {0}; esta versión es {1}",
+    "ckTierDropSaid": "Nivel más bajo",
+    "replaceFromFile": "Reemplazar {0} con un archivo…"
   },
   "sizeUnits": {
     "B": "B",

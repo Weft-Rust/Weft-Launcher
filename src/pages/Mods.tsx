@@ -1,5 +1,4 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
-import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { useI18n } from "../i18n/useI18n";
 import { showError, type Shown } from "../i18n/errors";
 import { bannerPlan } from "../mods/banners";
@@ -17,6 +16,7 @@ import { VersionSelect } from "../components/VersionSelect";
 import { InstalledList } from "../components/mods/InstalledList";
 import { BrowseList } from "../components/mods/BrowseList";
 import { FileInstallDialog } from "../components/mods/FileInstallDialog";
+import { pickModFile } from "../components/mods/pickModFile";
 import { SourcesDialog } from "../components/mods/SourcesDialog";
 import { CopyDialog } from "../components/mods/CopyDialog";
 import { BannerStack, Toasts, type BannerItem } from "../components/mods/BannerStack";
@@ -98,12 +98,8 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
 
   const pickFile = async () => {
     try {
-      const path = await openFileDialog({
-        multiple: false,
-        directory: false,
-        filters: [{ name: t("mods.fileFilter"), extensions: ["zip"] }],
-      });
-      if (typeof path === "string") setFilePath(path);
+      const path = await pickModFile(t("mods.fileFilter"));
+      if (path) setFilePath(path);
     } catch (err) {
       setRowError(showError(err));
     }

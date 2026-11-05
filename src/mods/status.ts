@@ -17,10 +17,7 @@ import type {
   ProfileReport,
   ShadowedMod,
 } from "./types";
-
-function unreachable(x: never): never {
-  throw new Error(`unhandled: ${String(x)}`);
-}
+import { unreachable } from "../utils/never";
 
 export type NameOf = (id: string) => string;
 
@@ -177,7 +174,9 @@ export type Fix =
   | { kind: "turnOn"; id: string; name: string }
   | { kind: "install"; id: string; name: string; mod: CatalogMod; sha256: string }
   /** `tentative`: nothing says the update fixes this (a library that didn't load); offered as "Try". */
-  | { kind: "update"; id: string; name: string; version: string; sha256: string; tentative?: boolean };
+  | { kind: "update"; id: string; name: string; version: string; sha256: string; tentative?: boolean }
+  /** A mod from the player's computer: no newer build to fetch, but another file can replace it. */
+  | { kind: "replaceFile"; id: string; name: string };
 
 /** What gets each dependency that isn't on back on, where something can. */
 function depFixes(states: Map<string, DepState>): Fix[] {
@@ -257,6 +256,7 @@ export function blockers(report: ProfileReport | undefined, name: NameOf, catalo
     if (mod.update) {
       fixes.push({ kind: "update", id: mod.id, name: mod.name, version: mod.update.version, sha256: mod.update.sha256 });
     }
+    if (why === "wrongVersion" && mod.origin.kind === "file") fixes.push({ kind: "replaceFile", id: mod.id, name: mod.name });
     fixes.push({ kind: "turnOff", id: mod.id, name: mod.name });
     return [{ mod, reasons, fixes, quote }];
   });
@@ -285,8 +285,12 @@ export function crashFixes(failure: ModFailure | null, report: ProfileReport | u
     mod?.update && (sure || guess.includes(failure.kind))
       ? { kind: "update", id: mod.id, name: mod.name, version: mod.update.version, sha256: mod.update.sha256, tentative: !sure }
       : null;
+  // A file from the player's computer has no newer build here; another file is its update.
+  const replaceable: FailureKind[] = ["wrongVersion", "wrongName", ...guess];
+  const replace: Fix | null =
+    !update && mod?.origin.kind === "file" && replaceable.includes(failure.kind) ? { kind: "replaceFile", id: mod.id, name: mod.name } : null;
   const off: Fix | null = mod?.enabled ? { kind: "turnOff", id: mod.id, name: mod.name } : null;
-  for (const f of sure ? [update, off] : [off, update]) if (f) fixes.push(f);
+  for (const f of sure || failure.kind === "wrongName" ? [update ?? replace, off] : [off, update ?? replace]) if (f) fixes.push(f);
   return fixes;
 }
 

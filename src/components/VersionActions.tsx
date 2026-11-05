@@ -10,6 +10,7 @@ import { LaunchRefusal } from "./LaunchRefusal";
 import { announce } from "./LiveRegion";
 import { BlockerPanel, useReviewDialog } from "./mods/ModFixes";
 import { ModFailureNotice } from "./mods/ModFailureNotice";
+import { unreachable } from "../utils/never";
 
 interface VersionActionsProps {
   release: {
@@ -73,6 +74,8 @@ export function VersionActions({ release, installedVersion, onFixMods }: Version
         return t("progressExtracting");
       case "finalizing":
         return t("progressFinalizing");
+      default:
+        return unreachable(current.stage);
     }
   };
 

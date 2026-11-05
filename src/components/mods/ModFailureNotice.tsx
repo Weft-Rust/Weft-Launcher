@@ -133,10 +133,11 @@ export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNotice
         )}
         {/* Quieter than the fixes: looking at the log and putting the notice away. */}
         <span className="mod-failure-quiet">
-          <button className="btn-flat" onClick={() => attempt(() => modsApi.openLog(crash.tag))}>
+          <button className="link-btn" onClick={() => attempt(() => modsApi.openLog(crash.tag))}>
             {t("openLogButton")}
           </button>
-          <button className="btn-flat" onClick={clearCrash}>
+          <span aria-hidden="true">·</span>
+          <button className="link-btn" onClick={clearCrash}>
             {t("mods.dismiss")}
           </button>
         </span>
