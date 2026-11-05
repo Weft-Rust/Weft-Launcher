@@ -71,6 +71,15 @@ pub enum ModsError {
     /// `mods.lock.json` can't be used as it is.
     #[error("Mod set unreadable: {0}")]
     LockInvalid(String),
+    /// The player cancelled the operation; nothing was changed.
+    #[error("Cancelled")]
+    Cancelled,
+    /// A build's download URL isn't its GitHub release asset.
+    #[error("Refused download URL: {0}")]
+    UrlRefused(String),
+    /// A mod icon that isn't a PNG.
+    #[error("Not a PNG icon: {0}")]
+    IconInvalid(String),
 }
 
 impl From<ArchiveProblem> for ModsError {
@@ -132,7 +141,10 @@ impl ModsError {
             VersionNotInstalled(_) => C::NotInstalled,
             GameRunning(_) => C::GameRunning,
             ChangedMeanwhile(_) => C::ModChangedMeanwhile,
-            LockInvalid(_) => C::Io,
+            LockInvalid(_) => C::ModLockInvalid,
+            Cancelled => C::ModCancelled,
+            UrlRefused(_) => C::ModUrlRefused,
+            IconInvalid(_) => C::ModIconInvalid,
         }
     }
 }
@@ -146,7 +158,7 @@ impl From<ModsError> for AppError {
             Io(e) => Some(e.to_string()),
             Serde(e) => Some(e.to_string()),
             Http { status, url } => Some(format!("HTTP {status} ({url})")),
-            RateLimited | SourceRateLimited | IndexRollback | FileChanged => None,
+            RateLimited | SourceRateLimited | IndexRollback | FileChanged | Cancelled => None,
             ArchiveInvalid(p) => Some(p.to_string()),
             Sha256Mismatch { expected, actual } => {
                 Some(format!("expected {expected}, got {actual}"))
@@ -168,7 +180,9 @@ impl From<ModsError> for AppError {
             | IdReserved(d)
             | VersionNotInstalled(d)
             | GameRunning(d)
-            | ChangedMeanwhile(d) => Some(d),
+            | ChangedMeanwhile(d)
+            | UrlRefused(d)
+            | IconInvalid(d) => Some(d),
             LockInvalid(d) => Some(format!("mods.lock.json: {d}")),
         };
         AppError::new(code, detail)

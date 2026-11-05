@@ -9,7 +9,8 @@ use super::archive::{self, ArchiveInfo, MAX_FILE_BYTES};
 use super::catalog::{Catalog, CatalogVersion, Origin, Trust};
 use super::error::ModsError;
 use super::index::{Platform, RESERVED_ID};
-use super::profile::{Lock, LockEntry, now};
+use super::plan::{Consent, plan_token, resolve};
+use super::profile::{Fit, Lock, LockEntry, now};
 use crate::download::sha256_file;
 use crate::error::AppError;
 
@@ -18,7 +19,8 @@ use crate::error::AppError;
 pub struct CatalogMatch {
     pub key: String,
     pub name: String,
-    pub fits_version: bool,
+    /// Whether the build is for the version's mod interface; `None` when that is unknown.
+    pub fits_version: Option<bool>,
     /// The catalogue entry: trust, review, provenance and whether it was verified.
     pub build: CatalogVersion,
 }
@@ -40,11 +42,20 @@ pub struct FileInspection {
     pub revoked_reason: Option<String>,
     /// The installed version of a mod with the same id, which this file would replace.
     pub replaces: Option<String>,
+    /// Pass to `install_mod_file`: the digest of what installing this file means.
+    pub plan_token: String,
 }
 
-/// The file's size, or `ModTooLarge`.
+/// The file's size, or `ModTooLarge`. Only a regular file (or a link to one): a device or a
+/// pipe has no size worth trusting and may never end.
 pub fn checked_size(path: &Path) -> Result<u64, ModsError> {
-    let size = std::fs::metadata(path)?.len();
+    let meta = std::fs::metadata(path)?;
+    if !meta.is_file() {
+        return Err(ModsError::ArchiveInvalid(
+            super::archive::ArchiveProblem::NotZip("not a regular file".into()),
+        ));
+    }
+    let size = meta.len();
     if size > MAX_FILE_BYTES {
         return Err(ModsError::TooLarge("larger than 512 MB".into()));
     }
@@ -86,12 +97,25 @@ pub fn inspect(
         .as_ref()
         .map(|a| archive::read_lang(path, &a.id))
         .unwrap_or_default();
-    let catalog_match = catalog.find(&sha256).map(|(m, v)| CatalogMatch {
+    let found = catalog.find(&sha256);
+    let catalog_match = found.map(|(m, v)| CatalogMatch {
         key: m.key.clone(),
         name: m.name.clone(),
-        fits_version: abi == Some(v.abi.as_str()),
+        fits_version: abi.map(|a| a == v.abi),
         build: v.clone(),
     });
+    let plan_token = match (found, abi) {
+        (Some((m, v)), Some(abi)) => {
+            let fit = Fit { abi, platform };
+            let res = resolve(catalog, lock, vec![(m.clone(), v.clone())], fit);
+            plan_token(Some(abi), lock, &res)
+        }
+        (Some((m, _)), None) => Consent::unverified(None, &m.id, &sha256, false).token(),
+        (None, _) => {
+            let id = archive.as_ref().map_or("", |a| a.id.as_str());
+            file_token(abi, id, &sha256, lock)
+        }
+    };
     let replaces = archive
         .as_ref()
         .and_then(|a| lock.get(&a.id))
@@ -109,8 +133,16 @@ pub fn inspect(
         revoked_reason: catalog.revocation(&sha256).map(|r| r.reason.clone()),
         catalog_match,
         replaces,
+        plan_token,
         sha256,
     })
+}
+
+/// The token of installing a file that isn't in the catalogue into `lock`: it replaces a mod
+/// with its id and keeps that one on or off, else it is on.
+pub fn file_token(abi: Option<&str>, id: &str, sha256: &str, lock: &Lock) -> String {
+    let on = lock.get(id).is_none_or(|e| e.enabled);
+    Consent::unverified(abi, id, sha256, on).token()
 }
 
 /// The lock entry of a file that isn't in the catalogue: Unverified, named by what its language
@@ -184,13 +216,24 @@ mod tests {
         assert_eq!(got.name.as_deref(), Some("Cogwork"));
         assert_eq!(got.replaces.as_deref(), Some("0.1.0"));
         let found = got.catalog_match.unwrap();
-        assert!(found.fits_version);
+        assert_eq!(found.fits_version, Some(true));
         assert_eq!(found.build.trust, Trust::Reviewed);
         assert_eq!(found.build.version, "0.2.0");
 
         let elsewhere = inspect(&path, &c, Some("0000000000000000"), None, &lock(vec![])).unwrap();
         assert!(!elsewhere.fits_system);
-        assert!(!elsewhere.catalog_match.unwrap().fits_version);
+        assert_eq!(elsewhere.catalog_match.unwrap().fits_version, Some(false));
+
+        // Contract R4 §5: an unknown interface is unknown, never "no".
+        let unknown = inspect(&path, &c, None, LINUX, &installed).unwrap();
+        assert_eq!(unknown.catalog_match.unwrap().fits_version, None);
+
+        // A device or a pipe is never read as a mod.
+        #[cfg(unix)]
+        assert!(matches!(
+            checked_size(Path::new("/dev/zero")),
+            Err(ModsError::ArchiveInvalid(_))
+        ));
     }
 
     #[test]

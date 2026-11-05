@@ -37,6 +37,7 @@ export const COMMANDS = {
   restoreMod: "restore_mod",
   previewCopyModProfile: "preview_copy_mod_profile",
   copyModProfile: "copy_mod_profile",
+  cancelModOperation: "cancel_mod_operation",
   getModIcon: "get_mod_icon",
   openPlayerModsFolder: "open_player_mods_folder",
 } as const;
@@ -68,14 +69,15 @@ export interface CommandSignatures {
   remove_mod_source: { args: { repo: string }; result: Array<string> };
   get_mod_profile: { args: { tag: string }; result: ProfileReport };
   plan_mod_install: { args: { tag: string; sha256: string }; result: InstallPlan };
-  install_mod: { args: { tag: string; sha256: string }; result: ChangeResult };
+  install_mod: { args: { tag: string; sha256: string; planToken: string; operationId: string }; result: ChangeResult };
   inspect_mod_file: { args: { tag: string; path: string }; result: FileInspection };
-  install_mod_file: { args: { tag: string; path: string; sha256: string }; result: ChangeResult };
+  install_mod_file: { args: { tag: string; path: string; sha256: string; planToken: string; operationId: string }; result: ChangeResult };
   set_mod_enabled: { args: { tag: string; id: string; enabled: boolean }; result: ChangeResult };
   remove_mod: { args: { tag: string; id: string }; result: ChangeResult };
-  restore_mod: { args: { tag: string; id: string }; result: ChangeResult };
+  restore_mod: { args: { tag: string; id: string; operationId: string }; result: ChangeResult };
   preview_copy_mod_profile: { args: { from: string; to: string }; result: CopyPreview };
-  copy_mod_profile: { args: { from: string; to: string }; result: CopyResult };
+  copy_mod_profile: { args: { from: string; to: string; planToken: string; operationId: string }; result: CopyResult };
+  cancel_mod_operation: { args: { operationId: string }; result: boolean };
   get_mod_icon: { args: { url: string }; result: string };
   open_player_mods_folder: { args: Record<string, never>; result: void };
 }

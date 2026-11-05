@@ -50,8 +50,11 @@ pub async fn install_mod(
     app: AppHandle,
     tag: String,
     sha256: String,
+    plan_token: String,
+    operation_id: String,
 ) -> Result<ChangeResult, AppError> {
-    Ok(service::install(&Ctx::of(&app)?, &tag, &sha256).await?)
+    let ctx = Ctx::of(&app)?;
+    Ok(service::install(&ctx, &tag, &sha256, &plan_token, &operation_id).await?)
 }
 
 #[tauri::command]
@@ -69,8 +72,11 @@ pub async fn install_mod_file(
     tag: String,
     path: String,
     sha256: String,
+    plan_token: String,
+    operation_id: String,
 ) -> Result<ChangeResult, AppError> {
-    Ok(service::install_file(&Ctx::of(&app)?, &tag, &path, &sha256).await?)
+    let ctx = Ctx::of(&app)?;
+    Ok(service::install_file(&ctx, &tag, &path, &sha256, &plan_token, &operation_id).await?)
 }
 
 #[tauri::command]
@@ -93,8 +99,9 @@ pub async fn restore_mod(
     app: AppHandle,
     tag: String,
     id: String,
+    operation_id: String,
 ) -> Result<ChangeResult, AppError> {
-    Ok(service::restore(&Ctx::of(&app)?, &tag, &id).await?)
+    Ok(service::restore(&Ctx::of(&app)?, &tag, &id, &operation_id).await?)
 }
 
 #[tauri::command]
@@ -111,8 +118,18 @@ pub async fn copy_mod_profile(
     app: AppHandle,
     from: String,
     to: String,
+    plan_token: String,
+    operation_id: String,
 ) -> Result<CopyResult, AppError> {
-    Ok(service::copy(&Ctx::of(&app)?, &from, &to).await?)
+    let ctx = Ctx::of(&app)?;
+    Ok(service::copy(&ctx, &from, &to, &plan_token, &operation_id).await?)
+}
+
+/// Stops an install, copy, file install or restore until it starts writing; it then fails with
+/// `ModCancelled` and changes nothing. False when no such operation is under way any more.
+#[tauri::command]
+pub async fn cancel_mod_operation(app: AppHandle, operation_id: String) -> Result<bool, AppError> {
+    Ok(Ctx::of(&app)?.operations.cancel(&operation_id))
 }
 
 /// A mod icon as a `data:` URL: the page may not load images from the network.

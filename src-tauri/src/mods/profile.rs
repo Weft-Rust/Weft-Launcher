@@ -3,7 +3,7 @@
 //! the status of each mod, what would block the game, which update fits, and revocations.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use ts_rs::TS;
 
 use super::catalog::{Catalog, CatalogMod, CatalogVersion, Origin, Trust};
@@ -48,8 +48,9 @@ pub struct LockEntry {
 #[serde(rename_all = "camelCase")]
 pub struct Revocation {
     pub reason: String,
-    /// RFC 3339 time the launcher applied it.
-    pub at: String,
+    /// RFC 3339 time the launcher applied it; unknown in lock files that never said.
+    #[serde(default)]
+    pub at: Option<String>,
 }
 
 impl LockEntry {
@@ -210,6 +211,63 @@ pub struct InstalledMod {
     pub update: Option<UpdateView>,
 }
 
+/// Why a mod in `ProfileReport.blocking` stops the game.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum BlockingReason {
+    WrongVersion,
+    MissingDeps,
+    /// Revoked, but still in the version's folder: the game that is running now started with
+    /// it, and it is turned off once that game stops.
+    Revoked,
+    /// Revoked, and a file with its id in the player's own folder would load in its place.
+    ShadowedRevoked,
+}
+
+/// What the launcher's copy of a shadowed mod is.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum Managed {
+    On,
+    Off,
+    Revoked,
+}
+
+/// A file in the player's own mods folder with the id of a mod in this set. The engine loads
+/// the first copy of an id it finds and searches the launcher's folder first, so this one loads
+/// whenever the launcher's copy is off or revoked.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ShadowedMod {
+    pub id: String,
+    pub file: String,
+    pub managed: Managed,
+}
+
+/// One entry of the player's own mods folder, and the mod id the engine would give it: the
+/// stem of `<id>.zip`, or a folder's name. `None` for anything the engine skips.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayerFile {
+    pub file: String,
+    pub id: Option<String>,
+}
+
+impl PlayerFile {
+    /// As `crates/engine/src/modloader.rs` `discover` names it.
+    pub fn new(file: &str, is_dir: bool) -> PlayerFile {
+        let zip_stem = file
+            .len()
+            .checked_sub(4)
+            .filter(|&at| file.is_char_boundary(at) && file[at..].eq_ignore_ascii_case(".zip"))
+            .map(|at| &file[..at]);
+        let id = if is_dir { Some(file) } else { zip_stem };
+        PlayerFile {
+            file: file.to_string(),
+            id: id.filter(|i| !i.is_empty()).map(str::to_string),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileReport {
@@ -217,10 +275,18 @@ pub struct ProfileReport {
     pub version_abi: Option<String>,
     pub abi_error: Option<AppError>,
     pub mods: Vec<InstalledMod>,
-    /// Ids of turned-on mods that would stop the game from starting.
+    /// Ids of mods that would stop the game from starting: turned-on mods that can't load, and
+    /// revoked mods a file in the player's folder would stand in for.
     pub blocking: Vec<String>,
+    /// Why each of `blocking` blocks.
+    pub blocking_reasons: BTreeMap<String, BlockingReason>,
     /// What sits in the player's own Weft mods folder. Loads into every version, unchecked.
     pub unmanaged: Vec<String>,
+    /// Files there with the id of a mod in this set.
+    pub shadowed: Vec<ShadowedMod>,
+    /// Ids of revoked mods still on, because the version's game is running: they are turned
+    /// off when it stops.
+    pub revocations_pending: Vec<String>,
 }
 
 /// What a build must match to be used here: the version's mod interface and this system.
@@ -315,7 +381,7 @@ pub fn report(
     abi_error: Option<AppError>,
     catalog: &Catalog,
     platform: Option<Platform>,
-    unmanaged: Vec<String>,
+    unmanaged: Vec<PlayerFile>,
 ) -> ProfileReport {
     let enabled: BTreeSet<&str> = lock
         .mods
@@ -325,7 +391,9 @@ pub fn report(
         .collect();
     let fit = version_abi.as_deref().map(|abi| Fit { abi, platform });
     let mut mods = Vec::new();
-    let mut blocking = Vec::new();
+    let mut reasons: Vec<(String, BlockingReason)> = Vec::new();
+    let mut pending = Vec::new();
+    let mut shadowed = Vec::new();
     for entry in &lock.mods {
         let revoked = entry.revoked_reason(catalog);
         let missing: Vec<String> = entry
@@ -354,8 +422,32 @@ pub fn report(
         } else {
             ModStatus::Ready
         };
-        if matches!(status, ModStatus::WrongVersion | ModStatus::MissingDeps) {
-            blocking.push(entry.id.clone());
+        let shadow = unmanaged
+            .iter()
+            .find(|f| f.id.as_deref() == Some(entry.id.as_str()));
+        if let Some(f) = shadow {
+            shadowed.push(ShadowedMod {
+                id: entry.id.clone(),
+                file: f.file.clone(),
+                managed: match (revoked.is_some(), entry.enabled) {
+                    (true, _) => Managed::Revoked,
+                    (false, true) => Managed::On,
+                    (false, false) => Managed::Off,
+                },
+            });
+        }
+        if revoked.is_some() && entry.enabled {
+            pending.push(entry.id.clone());
+        }
+        let reason = match status {
+            ModStatus::Revoked if shadow.is_some() => Some(BlockingReason::ShadowedRevoked),
+            ModStatus::Revoked if entry.enabled => Some(BlockingReason::Revoked),
+            ModStatus::WrongVersion => Some(BlockingReason::WrongVersion),
+            ModStatus::MissingDeps => Some(BlockingReason::MissingDeps),
+            _ => None,
+        };
+        if let Some(reason) = reason {
+            reasons.push((entry.id.clone(), reason));
         }
         mods.push(InstalledMod {
             update: update_for(entry, fit, catalog),
@@ -371,8 +463,11 @@ pub fn report(
         version_abi,
         abi_error,
         mods,
-        blocking,
-        unmanaged,
+        blocking: reasons.iter().map(|(id, _)| id.clone()).collect(),
+        blocking_reasons: reasons.into_iter().collect(),
+        unmanaged: unmanaged.into_iter().map(|f| f.file).collect(),
+        shadowed,
+        revocations_pending: pending,
     }
 }
 
@@ -386,7 +481,7 @@ pub fn apply_revocations(lock: &mut Lock, catalog: &Catalog) -> bool {
         {
             m.revoked = Some(Revocation {
                 reason: r.reason.clone(),
-                at: now(),
+                at: Some(now()),
             });
             changed = true;
         }

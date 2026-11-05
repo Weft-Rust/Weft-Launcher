@@ -5,6 +5,6 @@
  */
 export type Revocation = { reason: string, 
 /**
- * RFC 3339 time the launcher applied it.
+ * RFC 3339 time the launcher applied it; unknown in lock files that never said.
  */
-at: string, };
+at: string | null, };

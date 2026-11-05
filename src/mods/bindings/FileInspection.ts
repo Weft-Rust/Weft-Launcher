@@ -15,4 +15,8 @@ name: string | null, summary: string | null, fitsSystem: boolean, catalogMatch: 
 /**
  * The installed version of a mod with the same id, which this file would replace.
  */
-replaces: string | null, };
+replaces: string | null, 
+/**
+ * Pass to `install_mod_file`: the digest of what installing this file means.
+ */
+planToken: string, };

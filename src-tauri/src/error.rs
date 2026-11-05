@@ -78,6 +78,10 @@ error_codes! {
     ModTooLarge,
     ModIdReserved,
     ModChangedMeanwhile,
+    ModCancelled,
+    ModLockInvalid,
+    ModUrlRefused,
+    ModIconInvalid,
 }
 
 impl std::fmt::Display for ErrorCode {

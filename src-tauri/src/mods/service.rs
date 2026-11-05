@@ -3,8 +3,15 @@
 //!
 //! - Every change to a profile or the store happens under `ModsLock`, so two clicks never write
 //!   `mods.lock.json` at once. Downloads happen before taking it.
-//! - An install resolves what it needs, downloads it, then takes the lock and checks again
-//!   against the latest profile and catalogue before writing anything (see [`commit`]).
+//! - The consent boundary is the plan the player reviewed. `plan`, `copy_preview` and
+//!   `inspect_file` hand the page a `planToken` ([`plan::Consent`]); `install`, `copy` and
+//!   `install_file` take it back. The token is recomputed from the current catalogue, profile
+//!   and ABI before anything is downloaded and again under the lock at commit; when it differs,
+//!   the command fails with `ModChangedMeanwhile` and writes nothing (see [`commit`]).
+//! - Each of those commands, and `restore`, runs as an [`Operation`] with the page's id: its
+//!   progress carries that id, and `cancel_mod_operation` stops it until it starts writing.
+//! - Nothing rewrites a version's `mods/` folder while its game runs. Revocations that arrive
+//!   meanwhile are reported as pending and applied when it stops ([`apply_pending`]).
 //! - Hashing and copying files run off the async runtime ([`blocking`]).
 
 use std::path::PathBuf;
@@ -16,16 +23,16 @@ use tokio::sync::OwnedMutexGuard;
 use super::abi::{abi_for_tag, cached_abi};
 use super::archive::current_platform;
 use super::catalog::{self, Catalog, CatalogMod, CatalogVersion, IndexStatus, SourceResult};
-use super::context::{Ctx, blocking, check_sha, ensure_installed};
+use super::context::{Ctx, Operation, Step, blocking, check_sha, ensure_installed};
 use super::error::ModsError;
 use super::index::{self, IndexCache, IndexState, RESERVED_ID};
 use super::inspect::{self, FileInspection};
 use super::install::{self, ProgressStage};
 use super::paths::{Paths, write_atomic};
 use super::plan::{
-    self, ChangeResult, CopyOutcome, CopyPreview, CopyResult, InstallPlan, Resolution,
+    self, ChangeResult, CopyOutcome, CopyPreview, CopyResult, InstallPlan, Resolution, plan_token,
 };
-use super::profile::{self, Fit, Lock, ProfileReport};
+use super::profile::{self, Fit, Lock, PlayerFile, ProfileReport};
 use super::sources::{self, SourceFetch};
 use super::store::{self, Removed, Reservation};
 use crate::download::{read_capped, sha256_file};
@@ -136,7 +143,7 @@ pub async fn fetch_icon(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, 
         .await?
         .ok_or_else(|| ModsError::TooLarge("icon over 512 KB".into()))?;
     if !bytes.starts_with(PNG_MAGIC) {
-        return Err(ModsError::TooLarge("icon is not a PNG".into()));
+        return Err(ModsError::IconInvalid(url.to_string()));
     }
     Ok(bytes)
 }
@@ -230,21 +237,29 @@ pub async fn require_abi(paths: &Paths, catalog: &Catalog, tag: &str) -> Result<
     }
 }
 
-/// Mods the player put into their own Weft folder, which every version loads.
-async fn unmanaged(paths: &Paths) -> Vec<String> {
+/// What the player put into their own Weft mods folder, which every version loads after the
+/// launcher's. Only listed, never changed.
+async fn unmanaged(paths: &Paths) -> Vec<PlayerFile> {
     let Some(folder) = crate::launch::find_game_folder_in(&paths.logs_dir()).await else {
         return Vec::new();
     };
-    let Ok(entries) = std::fs::read_dir(folder.join("mods")) else {
+    player_files(&folder.join("mods"))
+}
+
+pub fn player_files(dir: &std::path::Path) -> Vec<PlayerFile> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
-    let mut names: Vec<String> = entries
+    let mut files: Vec<PlayerFile> = entries
         .flatten()
-        .map(|e| e.file_name().to_string_lossy().to_string())
-        .filter(|n| !n.starts_with('.'))
+        .map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            PlayerFile::new(&name, e.path().is_dir())
+        })
+        .filter(|f| !f.file.starts_with('.'))
         .collect();
-    names.sort();
-    names
+    files.sort_by(|a, b| a.file.cmp(&b.file));
+    files
 }
 
 pub async fn build_report(
@@ -298,20 +313,42 @@ async fn save(
     Ok(())
 }
 
-/// The version's mod set, with revocations applied.
+/// Records and applies the catalogue's revocations to the version's mod set, unless its game
+/// is running: then the lock and the folder stay as the game started with them, and the report
+/// lists the revoked mods as pending. The caller holds `ModsLock`.
+async fn apply_revocations(ctx: &Ctx, tag: &str, catalog: &Catalog) -> Result<Lock, ModsError> {
+    let lock = store::read_lock(&ctx.paths, tag)?;
+    let mut applied = lock.clone();
+    if !profile::apply_revocations(&mut applied, catalog) {
+        return Ok(lock);
+    }
+    if ctx.is_running(tag) {
+        return Ok(lock);
+    }
+    store::write_lock(&ctx.paths, tag, &applied)?;
+    reconcile(ctx, tag, &applied).await?;
+    Ok(applied)
+}
+
+/// The version's mod set, with revocations applied (or pending, while its game runs).
 pub async fn profile(ctx: &Ctx, tag: &str) -> Result<ProfileReport, ModsError> {
     ensure_installed(&ctx.paths, tag)?;
     let catalog = current_catalog(ctx).await?;
     let lock = {
         let _held = ctx.lock_mods().await;
-        let mut lock = store::read_lock(&ctx.paths, tag)?;
-        if profile::apply_revocations(&mut lock, &catalog) {
-            store::write_lock(&ctx.paths, tag, &lock)?;
-            reconcile(ctx, tag, &lock).await?;
-        }
-        lock
+        apply_revocations(ctx, tag, &catalog).await?
     };
     Ok(build_report(ctx, tag, &lock, &catalog, true).await)
+}
+
+/// After the version's game stopped: the revocations that waited for it.
+pub async fn apply_pending(ctx: &Ctx, tag: &str) -> Result<(), ModsError> {
+    if ensure_installed(&ctx.paths, tag).is_err() {
+        return Ok(());
+    }
+    let catalog = current_catalog(ctx).await?;
+    let _held = ctx.lock_mods().await;
+    apply_revocations(ctx, tag, &catalog).await.map(|_| ())
 }
 
 /// What `install` would do with this build, without doing it.
@@ -328,7 +365,8 @@ pub async fn plan(ctx: &Ctx, tag: &str, sha256: &str) -> Result<InstallPlan, Mod
 // ---------------------------------------------------------------------------------------------
 // Installing: stage, fetch, commit
 
-/// An install resolved against the profile as it was, with its builds reserved.
+/// An install resolved against the profile as it was, with its builds reserved, and the token
+/// of what it does.
 pub struct Staged {
     tag: String,
     catalog: Catalog,
@@ -337,6 +375,22 @@ pub struct Staged {
     snapshot: Lock,
     res: Resolution,
     held: Vec<Reservation>,
+    pub token: String,
+}
+
+fn plan_changed() -> ModsError {
+    ModsError::ChangedMeanwhile("what this does changed since it was shown".into())
+}
+
+impl Staged {
+    /// `ModChangedMeanwhile` unless this is the plan the player agreed to.
+    pub fn agree(&self, plan_token: &str) -> Result<(), ModsError> {
+        if self.token == plan_token {
+            Ok(())
+        } else {
+            Err(plan_changed())
+        }
+    }
 }
 
 /// Resolves what `wanted` needs. `held` are reservations the caller already took.
@@ -350,6 +404,7 @@ pub fn stage(
 ) -> Result<Staged, ModsError> {
     let snapshot = store::read_lock(&ctx.paths, tag)?;
     let res = plan::resolve(&catalog, &snapshot, wanted.clone(), Fit::here(&abi));
+    let token = plan_token(Some(&abi), &snapshot, &res);
     held.extend(
         res.picks
             .iter()
@@ -363,16 +418,35 @@ pub fn stage(
         snapshot,
         res,
         held,
+        token,
     })
 }
 
+fn step<'a>(op: &'a Operation, picks: &'a [(CatalogMod, CatalogVersion)], i: usize) -> Step<'a> {
+    Step {
+        op,
+        index: i + 1,
+        count: picks.len(),
+        sha256: &picks[i].1.sha256,
+        mod_id: &picks[i].0.id,
+    }
+}
+
 /// Downloads every build the install needs into the store, unless it is there and intact.
-pub async fn fetch(ctx: &Ctx, staged: &Staged) -> Result<(), ModsError> {
+pub async fn fetch(ctx: &Ctx, staged: &Staged, op: &Operation) -> Result<(), ModsError> {
     let platform = Fit::here(&staged.abi).platform;
-    for (m, v) in &staged.res.picks {
-        install::fetch_to_store(&ctx.paths, m, v, platform, |stage, percent| {
-            ctx.emit(&v.sha256, &m.id, stage, percent)
-        })
+    let picks = &staged.res.picks;
+    for (i, (m, v)) in picks.iter().enumerate() {
+        let at = step(op, picks, i);
+        install::fetch_to_store(
+            &ctx.paths,
+            m,
+            v,
+            platform,
+            op,
+            ctx.checks_urls(),
+            |stage, percent| ctx.emit(at, stage, percent),
+        )
         .await?;
     }
     Ok(())
@@ -381,10 +455,10 @@ pub async fn fetch(ctx: &Ctx, staged: &Staged) -> Result<(), ModsError> {
 /// Writes a downloaded install into the profile. Under `ModsLock`, it first checks that what
 /// the player agreed to still holds: the game version is still installed and not running, the
 /// wanted builds are still in the latest catalogue and none of the builds is revoked there, and
-/// resolving again against the latest profile
-/// needs nothing more and changes nothing else. Otherwise `ModChangedMeanwhile`, and nothing is
-/// written.
-pub async fn commit(ctx: &Ctx, staged: Staged) -> Result<ChangeResult, ModsError> {
+/// resolving again against the latest profile and catalogue gives the same plan token.
+/// Otherwise `ModChangedMeanwhile` (`ModCancelled` if the operation was cancelled), and nothing
+/// is written.
+pub async fn commit(ctx: &Ctx, staged: Staged, op: &Operation) -> Result<ChangeResult, ModsError> {
     let Staged {
         tag,
         catalog,
@@ -393,8 +467,10 @@ pub async fn commit(ctx: &Ctx, staged: Staged) -> Result<ChangeResult, ModsError
         snapshot,
         res,
         held,
+        token,
     } = staged;
     let _guard = ctx.lock_mods().await;
+    op.check()?;
     let changed = ModsError::ChangedMeanwhile;
     if ensure_installed(&ctx.paths, &tag).is_err() {
         return Err(changed(format!("{tag} was removed")));
@@ -422,9 +498,13 @@ pub async fn commit(ctx: &Ctx, staged: Staged) -> Result<ChangeResult, ModsError
     let mut lock = store::read_lock(&ctx.paths, &tag)?;
     let now = plan::resolve(&catalog, &lock, wanted, Fit::here(&abi));
     plan::still_holds((&snapshot, &res), (&lock, &now)).map_err(changed)?;
+    if plan_token(Some(&abi), &lock, &now) != token {
+        return Err(plan_changed());
+    }
 
-    for (m, v) in &now.picks {
-        ctx.emit(&v.sha256, &m.id, ProgressStage::Installing, 100);
+    op.start_writing()?;
+    for i in 0..now.picks.len() {
+        ctx.emit(step(op, &now.picks, i), ProgressStage::Installing, 100);
     }
     let done = plan::commit(&mut lock, &now);
     save(ctx, &tag, &lock, None, held).await?;
@@ -437,6 +517,29 @@ pub async fn commit(ctx: &Ctx, staged: Staged) -> Result<ChangeResult, ModsError
     })
 }
 
+/// Downloads and commits a staged install. A cancelled one also takes the builds it already
+/// stored along, so it leaves no trace.
+async fn finish(ctx: &Ctx, staged: Staged, op: &Operation) -> Result<ChangeResult, ModsError> {
+    let result = match fetch(ctx, &staged, op).await {
+        Ok(()) => commit(ctx, staged, op).await,
+        Err(e) => {
+            drop(staged);
+            Err(e)
+        }
+    };
+    if matches!(result, Err(ModsError::Cancelled)) {
+        let _held = ctx.lock_mods().await;
+        ctx.collect_garbage().await;
+    }
+    result
+}
+
+/// The operations a command takes for an install it agreed to.
+pub struct Agreed<'a> {
+    pub plan_token: &'a str,
+    pub op: &'a Operation,
+}
+
 async fn run_install(
     ctx: &Ctx,
     tag: &str,
@@ -444,16 +547,24 @@ async fn run_install(
     abi: String,
     wanted: Vec<(CatalogMod, CatalogVersion)>,
     held: Vec<Reservation>,
+    agreed: Agreed<'_>,
 ) -> Result<ChangeResult, ModsError> {
     let staged = stage(ctx, tag, catalog, abi, wanted, held)?;
-    fetch(ctx, &staged).await?;
-    commit(ctx, staged).await
+    staged.agree(agreed.plan_token)?;
+    finish(ctx, staged, agreed.op).await
 }
 
-/// Installs the catalogue build with this hash, and what it needs. Installing another build of
-/// an installed mod replaces it and keeps it on or off as it was; a mod that needs something
-/// missing is installed turned off.
-pub async fn install(ctx: &Ctx, tag: &str, sha256: &str) -> Result<ChangeResult, ModsError> {
+/// Installs the catalogue build with this hash, and what it needs, as planned by [`plan`] with
+/// `plan_token`. Installing another build of an installed mod replaces it and keeps it on or off
+/// as it was; a mod that needs something missing, at any depth, is installed turned off.
+pub async fn install(
+    ctx: &Ctx,
+    tag: &str,
+    sha256: &str,
+    plan_token: &str,
+    operation_id: &str,
+) -> Result<ChangeResult, ModsError> {
+    let op = ctx.operations.begin(operation_id)?;
     ensure_installed(&ctx.paths, tag)?;
     let sha = check_sha(sha256)?;
     ctx.ensure_not_running(tag)?;
@@ -464,7 +575,11 @@ pub async fn install(ctx: &Ctx, tag: &str, sha256: &str) -> Result<ChangeResult,
         .ok_or_else(|| ModsError::NotInCatalog(sha.clone()))?;
     let abi = require_abi(&ctx.paths, &catalog, tag).await?;
     plan::check_installable(&catalog, &m, &v, Fit::here(&abi))?;
-    run_install(ctx, tag, catalog, abi, vec![(m, v)], Vec::new()).await
+    let agreed = Agreed {
+        plan_token,
+        op: &op,
+    };
+    run_install(ctx, tag, catalog, abi, vec![(m, v)], Vec::new(), agreed).await
 }
 
 /// What the launcher can tell about a zip from the player's computer, before installing it.
@@ -478,15 +593,20 @@ pub async fn inspect_file(ctx: &Ctx, tag: &str, path: &str) -> Result<FileInspec
         .await
 }
 
-/// Installs a zip from the player's computer. `sha256` is what `inspect_file` showed, so a file
-/// swapped in between is refused. A file that is in the catalogue installs from these same
-/// bytes, with the catalogue's metadata, trust and dependencies; anything else is Unverified.
+/// Installs a zip from the player's computer. `sha256` and `plan_token` are what
+/// `inspect_file` showed, so a file swapped in between, or a plan that changed, is refused. A
+/// file that is in the catalogue installs from these same bytes, with the catalogue's metadata,
+/// trust and dependencies; anything else is Unverified. Either way, revocations are checked
+/// again under the lock before anything is written, by the file's hash.
 pub async fn install_file(
     ctx: &Ctx,
     tag: &str,
     path: &str,
     sha256: &str,
+    plan_token: &str,
+    operation_id: &str,
 ) -> Result<ChangeResult, ModsError> {
+    let op = ctx.operations.begin(operation_id)?;
     ensure_installed(&ctx.paths, tag)?;
     let sha = check_sha(sha256)?;
     ctx.ensure_not_running(tag)?;
@@ -504,33 +624,77 @@ pub async fn install_file(
 
     if let Some((m, v)) = catalog.find(&sha).map(|(m, v)| (m.clone(), v.clone())) {
         let abi = require_abi(&ctx.paths, &catalog, tag).await?;
-        let fit = Fit::here(&abi);
-        plan::check_installable(&catalog, &m, &v, fit)?;
-        admit(Some(m.id.clone()), fit.platform).await?;
-        return run_install(ctx, tag, catalog, abi, vec![(m, v)], vec![hold]).await;
+        let platform = Fit::here(&abi).platform;
+        plan::check_installable(&catalog, &m, &v, Fit::here(&abi))?;
+        let staged = stage(ctx, tag, catalog, abi, vec![(m.clone(), v)], vec![hold])?;
+        staged.agree(plan_token)?;
+        let at = step(&op, &staged.res.picks, 0);
+        ctx.emit(at, ProgressStage::Verifying, 0);
+        admit(Some(m.id.clone()), platform).await?;
+        ctx.emit(at, ProgressStage::Verifying, 100);
+        return finish(ctx, staged, &op).await;
     }
 
+    let (abi, _) = version_abi(&ctx.paths, &catalog, tag, true).await;
+    let at = Step {
+        op: &op,
+        index: 1,
+        count: 1,
+        sha256: &sha,
+        mod_id: "",
+    };
+    ctx.emit(at, ProgressStage::Verifying, 0);
     let info = admit(None, current_platform()).await?;
     if info.id == RESERVED_ID {
         return Err(ModsError::IdReserved(info.id));
     }
+    let at = Step {
+        mod_id: &info.id,
+        ..at
+    };
+    ctx.emit(at, ProgressStage::Verifying, 100);
     let mut entry = inspect::local_entry(&info, &ctx.paths.store_object(&sha), &source, &sha)?;
 
-    let _guard = ctx.lock_mods().await;
-    if ensure_installed(&ctx.paths, tag).is_err() {
-        return Err(ModsError::ChangedMeanwhile(format!("{tag} was removed")));
+    let guard = ctx.lock_mods().await;
+    let result = async {
+        op.check()?;
+        if ensure_installed(&ctx.paths, tag).is_err() {
+            return Err(ModsError::ChangedMeanwhile(format!("{tag} was removed")));
+        }
+        if ctx.is_running(tag) {
+            return Err(ModsError::ChangedMeanwhile(format!("{tag} was started")));
+        }
+        // A revocation that arrived while the file was copied and hashed.
+        let latest = ctx.held_catalog().unwrap_or(catalog);
+        if let Some(r) = latest.revocation(&sha) {
+            return Err(ModsError::Revoked(r.reason.clone()));
+        }
+        let mut lock = store::read_lock(&ctx.paths, tag)?;
+        if inspect::file_token(abi.as_deref(), &info.id, &sha, &lock) != plan_token {
+            return Err(plan_changed());
+        }
+        op.start_writing()?;
+        ctx.emit(at, ProgressStage::Installing, 100);
+        entry.enabled = lock.get(&entry.id).is_none_or(|e| e.enabled);
+        lock.put(entry);
+        save(ctx, tag, &lock, None, vec![hold]).await?;
+        Ok((lock, latest))
     }
-    if ctx.is_running(tag) {
-        return Err(ModsError::ChangedMeanwhile(format!("{tag} was started")));
+    .await;
+    match result {
+        Ok((lock, latest)) => {
+            drop(guard);
+            Ok(ChangeResult {
+                installed: vec![info.id],
+                ..change_result(ctx, tag, &lock, &latest).await
+            })
+        }
+        Err(e) => {
+            // The copy in the store is nobody's now.
+            ctx.collect_garbage().await;
+            Err(e)
+        }
     }
-    let mut lock = store::read_lock(&ctx.paths, tag)?;
-    entry.enabled = lock.get(&entry.id).is_none_or(|e| e.enabled);
-    lock.put(entry);
-    save(ctx, tag, &lock, None, vec![hold]).await?;
-    Ok(ChangeResult {
-        installed: vec![info.id],
-        ..change_result(ctx, tag, &lock, &catalog).await
-    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -588,7 +752,13 @@ pub async fn remove(ctx: &Ctx, tag: &str, id: &str) -> Result<ChangeResult, Mods
 /// Puts the most recently removed mod back exactly as it was: the same build, on or off as it
 /// was, and the mods its removal turned off on again. `ModNotInstalled` when that isn't
 /// possible any more: the version changed since, or the store file is gone or changed.
-pub async fn restore(ctx: &Ctx, tag: &str, id: &str) -> Result<ChangeResult, ModsError> {
+pub async fn restore(
+    ctx: &Ctx,
+    tag: &str,
+    id: &str,
+    operation_id: &str,
+) -> Result<ChangeResult, ModsError> {
+    let op = ctx.operations.begin(operation_id)?;
     ensure_installed(&ctx.paths, tag)?;
     ctx.ensure_not_running(tag)?;
     let catalog = current_catalog(ctx).await?;
@@ -606,11 +776,21 @@ pub async fn restore(ctx: &Ctx, tag: &str, id: &str) -> Result<ChangeResult, Mod
         ctx.paths.store_object(&removed.entry.sha256),
         removed.entry.sha256.clone(),
     );
+    let at = Step {
+        op: &op,
+        index: 1,
+        count: 1,
+        sha256: &removed.entry.sha256,
+        mod_id: &removed.entry.id,
+    };
+    ctx.emit(at, ProgressStage::Verifying, 0);
     let intact =
         blocking(move || Ok(sha256_file(&stored).is_ok_and(|actual| actual == sha))).await?;
     if !intact {
         return Err(gone());
     }
+    op.start_writing()?;
+    ctx.emit(at, ProgressStage::Installing, 100);
     lock.put(removed.entry);
     let mut also_enabled = Vec::new();
     for dep in &removed.also_disabled {
@@ -661,11 +841,21 @@ pub async fn copy_preview(ctx: &Ctx, from: &str, to: &str) -> Result<CopyPreview
     Ok(copy_inputs(ctx, from, to).await?.preview)
 }
 
-/// Brings the turned-on mods of one version to another, each as the build made for the new one.
-/// Mods the new version already has are left as they are.
-pub async fn copy(ctx: &Ctx, from: &str, to: &str) -> Result<CopyResult, ModsError> {
+/// Brings the turned-on mods of one version to another, each as the build made for the new one,
+/// as previewed with `plan_token`. Mods the new version already has are left as they are.
+pub async fn copy(
+    ctx: &Ctx,
+    from: &str,
+    to: &str,
+    plan_token: &str,
+    operation_id: &str,
+) -> Result<CopyResult, ModsError> {
+    let op = ctx.operations.begin(operation_id)?;
     ctx.ensure_not_running(to)?;
     let inputs = copy_inputs(ctx, from, to).await?;
+    if inputs.preview.plan_token != plan_token {
+        return Err(plan_changed());
+    }
     let left_behind = inputs
         .preview
         .items
@@ -681,6 +871,10 @@ pub async fn copy(ctx: &Ctx, from: &str, to: &str) -> Result<CopyResult, ModsErr
         let lock = store::read_lock(&ctx.paths, to)?;
         change_result(ctx, to, &lock, &inputs.catalog).await
     } else {
+        let agreed = Agreed {
+            plan_token,
+            op: &op,
+        };
         run_install(
             ctx,
             to,
@@ -688,6 +882,7 @@ pub async fn copy(ctx: &Ctx, from: &str, to: &str) -> Result<CopyResult, ModsErr
             inputs.abi,
             inputs.picks,
             Vec::new(),
+            agreed,
         )
         .await?
     };
@@ -722,14 +917,16 @@ pub enum LaunchPlan {
     Blocked(Vec<String>),
 }
 
+/// Blockers come first: the player's own folder loads even without `--mods`, so a revoked mod
+/// shadowed there blocks with nothing on.
 pub fn launch_plan(lock: &Lock, report: &ProfileReport) -> LaunchPlan {
-    if !lock.mods.iter().any(|m| m.enabled) {
-        return LaunchPlan::NoMods;
+    if !report.blocking.is_empty() {
+        return LaunchPlan::Blocked(report.blocking.iter().map(|id| lock.name_of(id)).collect());
     }
-    if report.blocking.is_empty() {
+    if lock.mods.iter().any(|m| m.enabled) {
         LaunchPlan::Mods
     } else {
-        LaunchPlan::Blocked(report.blocking.iter().map(|id| lock.name_of(id)).collect())
+        LaunchPlan::NoMods
     }
 }
 
@@ -753,6 +950,7 @@ impl LaunchMods {
 pub async fn prepare_launch(ctx: &Ctx, tag: &str) -> Result<LaunchMods, ModsError> {
     let catalog = current_catalog(ctx).await?;
     let held = ctx.lock_mods().await;
+    ctx.ensure_not_running(tag)?;
     let mut lock = store::read_lock(&ctx.paths, tag)?;
     if profile::apply_revocations(&mut lock, &catalog) {
         store::write_lock(&ctx.paths, tag, &lock)?;

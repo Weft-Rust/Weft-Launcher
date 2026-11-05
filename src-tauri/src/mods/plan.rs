@@ -2,8 +2,12 @@
 //! brings over, and what turning a mod on or off or removing it does to the others. Nothing here
 //! touches the disk or the network; `service.rs` does that around these.
 //!
-//! An installed mod that needs something no build provides is installed turned off, so an
-//! install never stops Play from working.
+//! Dependencies resolve through the whole graph: through the builds an install picks and
+//! through installed mods alike. A wanted mod that needs something no build provides, at any
+//! depth, is installed turned off, so an install never stops Play from working.
+//!
+//! What the player reviews is bound by a [`Consent`] token: the backend recomputes it before
+//! downloading and again at commit, and refuses (`ModChangedMeanwhile`) when it differs.
 
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -13,6 +17,7 @@ use super::catalog::{Catalog, CatalogMod, CatalogVersion, Origin, Trust};
 use super::error::ModsError;
 use super::index::{Channel, RESERVED_ID};
 use super::profile::{BUILTIN, Fit, Lock, LockEntry, ProfileReport, best_version, fitting};
+use crate::download::sha256_hex;
 use crate::error::AppError;
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -63,11 +68,16 @@ pub struct InstallPlan {
     pub enable: Vec<String>,
     /// Dependency ids with no fitting, non-revoked build.
     pub missing: Vec<String>,
-    /// Whether the target is on after this install: it is new or on now, and nothing is
-    /// missing. With something missing it is installed turned off.
+    /// Whether the target is on after this install: it is new or on now, and nothing it needs,
+    /// at any depth, is missing. With something missing it is installed turned off. False when
+    /// the version's mod interface is unknown: then nothing can be resolved.
     pub turns_on: bool,
+    /// Whether the target is built for the version's mod interface; `None` when that is unknown.
+    pub fits_version: Option<bool>,
     /// Why the install would fail, if it would.
     pub problem: Option<AppError>,
+    /// Pass to `install_mod`: the digest of what this plan asks the player to agree to.
+    pub plan_token: String,
 }
 
 /// What a change did, with the profile as it is now. All lists hold mod ids.
@@ -143,15 +153,24 @@ pub struct Resolution {
     pub wanted: Vec<String>,
     /// The wanted builds first, then the dependencies they pull in.
     pub picks: Vec<(CatalogMod, CatalogVersion)>,
+    /// Installed mods the graph goes through, on or off, with what they need.
+    pub installed: Vec<(String, Vec<String>)>,
     /// Installed dependencies that are off and would be turned on.
     pub enable: Vec<String>,
     pub missing: Vec<String>,
 }
 
-/// The requested builds plus whatever they need that isn't on yet. A dependency comes from the
-/// index first, then from the same source as the mod that needs it. An installed dependency
-/// that is revoked or built for another version doesn't count, and a revoked build is never
-/// picked: with nothing else, the dependency is missing.
+/// A mod the resolution walks through: a build it picks, or an installed mod.
+enum Node {
+    Pick(CatalogMod, CatalogVersion),
+    Have(String),
+}
+
+/// The requested builds plus whatever they need that isn't on yet, through the whole graph. A
+/// dependency that is installed, fits and isn't revoked is used (and turned on if off), and what
+/// it needs is resolved in turn. Otherwise it comes from the index first, then from the same
+/// source as the mod that needs it, and a revoked build is never picked: with nothing else, the
+/// dependency is missing.
 pub fn resolve(
     catalog: &Catalog,
     lock: &Lock,
@@ -161,18 +180,38 @@ pub fn resolve(
     let mut res = Resolution {
         wanted: wanted.iter().map(|(m, _)| m.id.clone()).collect(),
         picks: Vec::new(),
+        installed: Vec::new(),
         enable: Vec::new(),
         missing: Vec::new(),
     };
-    let mut todo: std::collections::VecDeque<_> = wanted.into();
-    while let Some((m, v)) = todo.pop_front() {
-        if res.picks.iter().any(|(p, _)| p.id == m.id) {
+    let node_id = |n: &Node| match n {
+        Node::Pick(m, _) => m.id.clone(),
+        Node::Have(id) => id.clone(),
+    };
+    let mut todo: std::collections::VecDeque<Node> =
+        wanted.into_iter().map(|(m, v)| Node::Pick(m, v)).collect();
+    while let Some(node) = todo.pop_front() {
+        let id = node_id(&node);
+        if res.picks.iter().any(|(p, _)| p.id == id) || res.installed.iter().any(|(i, _)| *i == id)
+        {
             continue;
         }
-        for dep in &v.deps {
+        let (deps, origin, channel) = match &node {
+            Node::Pick(m, v) => (v.deps.clone(), m.origin.clone(), v.channel),
+            Node::Have(id) => {
+                let e = lock.get(id).expect("an installed node is in the lock");
+                (
+                    e.deps.clone(),
+                    e.origin.clone(),
+                    e.channel.unwrap_or(Channel::Release),
+                )
+            }
+        };
+        for dep in &deps {
             if BUILTIN.contains(&dep.as_str())
                 || res.picks.iter().any(|(p, _)| &p.id == dep)
-                || todo.iter().any(|(p, _)| &p.id == dep)
+                || res.installed.iter().any(|(i, _)| i == dep)
+                || todo.iter().any(|n| &node_id(n) == dep)
                 || res.missing.contains(dep)
             {
                 continue;
@@ -184,34 +223,51 @@ pub fn resolve(
                 if !have.enabled && !res.enable.contains(dep) {
                     res.enable.push(dep.clone());
                 }
+                todo.push_back(Node::Have(dep.clone()));
                 continue;
             }
             let mut keys = vec![format!("index:{dep}")];
-            if let Origin::Source { repo } = &m.origin {
+            if let Origin::Source { repo } = &origin {
                 keys.push(format!("source:{repo}:{dep}"));
             }
             match keys
                 .iter()
-                .find_map(|k| best_version(catalog, k, fit, v.channel))
+                .find_map(|k| best_version(catalog, k, fit, channel))
             {
-                Some((dm, dv)) => todo.push_back((dm.clone(), dv.clone())),
+                Some((dm, dv)) => todo.push_back(Node::Pick(dm.clone(), dv.clone())),
                 None => res.missing.push(dep.clone()),
             }
         }
-        res.picks.push((m, v));
+        match node {
+            Node::Pick(m, v) => res.picks.push((m, v)),
+            Node::Have(id) => res.installed.push((id, deps)),
+        }
     }
     res
 }
 
 impl Resolution {
+    /// What `id` needs: its picked build's dependencies, else the installed mod's.
     fn deps_of(&self, id: &str) -> &[String] {
         self.picks
             .iter()
             .find(|(m, _)| m.id == id)
-            .map_or(&[], |(_, v)| v.deps.as_slice())
+            .map(|(_, v)| v.deps.as_slice())
+            .or_else(|| {
+                self.installed
+                    .iter()
+                    .find(|(i, _)| i == id)
+                    .map(|(_, d)| d.as_slice())
+            })
+            .unwrap_or(&[])
     }
 
-    /// Whether `id`, through the builds this resolution picks, needs something missing.
+    /// Whether the graph goes through `id`, as a pick or an installed mod.
+    fn has_node(&self, id: &str) -> bool {
+        self.picks.iter().any(|(m, _)| m.id == id) || self.installed.iter().any(|(i, _)| i == id)
+    }
+
+    /// Whether `id`, through the whole graph, needs something missing.
     fn needs_missing(&self, id: &str) -> bool {
         let mut seen = BTreeSet::new();
         let mut todo = vec![id.to_string()];
@@ -261,10 +317,8 @@ pub fn outcome(lock: &Lock, res: &Resolution) -> Outcome {
             continue;
         }
         for dep in res.deps_of(&id) {
-            if res.picks.iter().any(|(m, _)| &m.id == dep) {
+            if res.has_node(dep) {
                 todo.push(dep.clone());
-            } else if res.enable.contains(dep) {
-                on.insert(dep.clone());
             }
         }
     }
@@ -314,6 +368,102 @@ pub fn commit(lock: &mut Lock, res: &Resolution) -> Committed {
     }
 }
 
+/// What the player agrees to when confirming a plan, as the backend can recompute it: every
+/// build that will be installed (hash and trust), every mod that ends up on, what is turned on,
+/// what is installed off, what is missing, and the version's mod interface. Its [`token`]
+/// (`planToken`) is opaque to the page.
+///
+/// [`token`]: Consent::token
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Consent {
+    abi: Option<String>,
+    wanted: Vec<String>,
+    builds: Vec<String>,
+    on: Vec<String>,
+    enable: Vec<String>,
+    installed_off: Vec<String>,
+    missing: Vec<String>,
+}
+
+fn sorted(mut v: Vec<String>) -> Vec<String> {
+    v.sort();
+    v.dedup();
+    v
+}
+
+impl Consent {
+    pub fn of(abi: Option<&str>, res: &Resolution, out: &Outcome) -> Consent {
+        Consent {
+            abi: abi.map(str::to_string),
+            wanted: sorted(res.wanted.clone()),
+            builds: sorted(
+                res.picks
+                    .iter()
+                    .map(|(m, v)| build_text(&m.id, &v.sha256, v.trust))
+                    .collect(),
+            ),
+            on: out.on.iter().cloned().collect(),
+            enable: sorted(out.enable.clone()),
+            installed_off: sorted(out.installed_off.clone()),
+            missing: sorted(res.missing.clone()),
+        }
+    }
+
+    /// A file that isn't in the catalogue: one Unverified build, on or off.
+    pub fn unverified(abi: Option<&str>, id: &str, sha256: &str, on: bool) -> Consent {
+        Consent {
+            abi: abi.map(str::to_string),
+            wanted: vec![id.to_string()],
+            builds: vec![build_text(id, sha256, Trust::Unverified)],
+            on: if on { vec![id.to_string()] } else { Vec::new() },
+            enable: Vec::new(),
+            installed_off: Vec::new(),
+            missing: Vec::new(),
+        }
+    }
+
+    pub fn token(&self) -> String {
+        let list = |v: &[String]| v.join(",");
+        let text = format!(
+            "weft-plan/1\nabi={}\nwanted={}\nbuilds={}\non={}\nenable={}\noff={}\nmissing={}\n",
+            self.abi.as_deref().unwrap_or("?"),
+            list(&self.wanted),
+            list(&self.builds),
+            list(&self.on),
+            list(&self.enable),
+            list(&self.installed_off),
+            list(&self.missing),
+        );
+        sha256_hex(text.as_bytes())
+    }
+}
+
+fn build_text(id: &str, sha256: &str, trust: Trust) -> String {
+    format!("{id}={}:{trust:?}", sha256.to_ascii_lowercase())
+}
+
+/// The token of a resolution, with the version's mod interface.
+pub fn plan_token(abi: Option<&str>, lock: &Lock, res: &Resolution) -> String {
+    Consent::of(abi, res, &outcome(lock, res)).token()
+}
+
+/// The token of a plan that can't be resolved, because the version's mod interface is unknown.
+fn unresolved_token(m: &CatalogMod, v: &CatalogVersion) -> String {
+    let res = Resolution {
+        wanted: vec![m.id.clone()],
+        picks: vec![(m.clone(), v.clone())],
+        installed: Vec::new(),
+        enable: Vec::new(),
+        missing: Vec::new(),
+    };
+    let out = Outcome {
+        on: BTreeSet::new(),
+        enable: Vec::new(),
+        installed_off: Vec::new(),
+    };
+    Consent::of(None, &res, &out).token()
+}
+
 /// Whether a resolution made before a download still describes what committing now would do.
 /// `before` is the lock and resolution the player agreed to; `now` the same against the latest
 /// lock and catalogue. It holds when nothing more needs downloading, nothing more is turned on,
@@ -360,12 +510,14 @@ pub fn plan_install(
     });
     let mut plan = InstallPlan {
         target: PlanItem::of(m, v),
-        turns_on: replaces.as_ref().is_none_or(|r| r.enabled),
+        turns_on: false,
         replaces,
         install: Vec::new(),
         enable: Vec::new(),
         missing: Vec::new(),
+        fits_version: fit.map(|f| v.abi == f.abi),
         problem: None,
+        plan_token: unresolved_token(m, v),
     };
     let Some(fit) = fit else {
         plan.problem = Some(ModsError::AbiUnavailable(tag.to_string()).into());
@@ -373,6 +525,7 @@ pub fn plan_install(
     };
     let res = resolve(catalog, lock, vec![(m.clone(), v.clone())], fit);
     let out = outcome(lock, &res);
+    plan.plan_token = Consent::of(Some(fit.abi), &res, &out).token();
     plan.install = res
         .picks
         .iter()
@@ -492,6 +645,8 @@ pub struct CopyPreview {
     pub installed_off: Vec<String>,
     /// Ids of dependencies nothing provides for `to`: why `installed_off` are off.
     pub missing: Vec<String>,
+    /// Pass to `copy_mod_profile`: the digest of what this preview asks the player to agree to.
+    pub plan_token: String,
 }
 
 /// What copying the turned-on mods of `from` into `to` would bring over, each as the build made
@@ -544,6 +699,7 @@ pub fn copy_preview(
             .filter(|(m, _)| !res.wanted.contains(&m.id))
             .map(|(m, v)| PlanItem::of(m, v))
             .collect(),
+        plan_token: Consent::of(Some(fit.abi), &res, &out).token(),
         enable: out.enable,
         installed_off: out.installed_off,
         missing: res.missing.clone(),
@@ -1081,7 +1237,7 @@ mod tests {
         pulled.enabled = false;
         pulled.revoked = Some(super::super::profile::Revocation {
             reason: "deletes saves".into(),
-            at: "2026-11-05T00:00:00Z".into(),
+            at: Some("2026-11-05T00:00:00Z".into()),
         });
         let mut needs = entry("needs", &["pulled"], Some(ABI));
         needs.enabled = false;

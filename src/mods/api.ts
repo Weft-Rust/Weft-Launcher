@@ -32,17 +32,23 @@ export const modsApi = {
   catalog: (forceRefresh: boolean) => call(COMMANDS.listModCatalog, { forceRefresh }),
   profile: (tag: string) => call(COMMANDS.getModProfile, { tag }),
   plan: (tag: string, sha256: string) => call(COMMANDS.planModInstall, { tag, sha256 }),
-  install: (tag: string, sha256: string) => call(COMMANDS.installMod, { tag, sha256 }),
+  /** `planToken` is the reviewed plan's; `ModChangedMeanwhile` when what it would do changed. */
+  install: (tag: string, sha256: string, planToken: string, operationId: string) =>
+    call(COMMANDS.installMod, { tag, sha256, planToken, operationId }),
   inspectFile: (tag: string, path: string) => call(COMMANDS.inspectModFile, { tag, path }),
-  installFile: (tag: string, path: string, sha256: string) =>
-    call(COMMANDS.installModFile, { tag, path, sha256 }),
+  installFile: (tag: string, path: string, sha256: string, planToken: string, operationId: string) =>
+    call(COMMANDS.installModFile, { tag, path, sha256, planToken, operationId }),
   setEnabled: (tag: string, id: string, enabled: boolean) =>
     call(COMMANDS.setModEnabled, { tag, id, enabled }),
   remove: (tag: string, id: string) => call(COMMANDS.removeMod, { tag, id }),
   /** Undoes the most recent `remove` for this version; `ModNotInstalled` once it can't. */
-  restore: (tag: string, id: string) => call(COMMANDS.restoreMod, { tag, id }),
+  restore: (tag: string, id: string, operationId: string) =>
+    call(COMMANDS.restoreMod, { tag, id, operationId }),
   previewCopy: (from: string, to: string) => call(COMMANDS.previewCopyModProfile, { from, to }),
-  copyProfile: (from: string, to: string) => call(COMMANDS.copyModProfile, { from, to }),
+  copyProfile: (from: string, to: string, planToken: string, operationId: string) =>
+    call(COMMANDS.copyModProfile, { from, to, planToken, operationId }),
+  /** Aborts that operation's downloads; it then fails with `ModCancelled`. False when it had already ended or started writing. */
+  cancel: (operationId: string) => call(COMMANDS.cancelModOperation, { operationId }),
   sources: () => call(COMMANDS.getModSources, {}),
   addSource: (repo: string) => call(COMMANDS.addModSource, { repo }),
   removeSource: (repo: string) => call(COMMANDS.removeModSource, { repo }),

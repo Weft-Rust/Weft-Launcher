@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_opener::{Error as OpenerError, OpenerExt};
 use thiserror::Error;
 use tokio::fs;
@@ -313,9 +313,9 @@ async fn start_game(
     let stdout_log = tokio::spawn(copy_to_log(stdout, log_stdout, "stdout"));
     let stderr_log = tokio::spawn(copy_to_log(stderr, log_stderr, "stderr"));
 
-    let _ = app_handle.emit(
-        crate::ipc::GAME_STATE,
-        GameStateEvent {
+    crate::ipc::emit_game_state(
+        app_handle,
+        &GameStateEvent {
             tag: tag.to_string(),
             state: GameState::Running,
             exit_code: None,
@@ -336,15 +336,17 @@ async fn start_game(
         let _ = tokio::time::timeout(Duration::from_secs(2), logs).await;
 
         games.0.lock().unwrap().remove(&tag);
+        // Revocations that arrived while it ran turn those mods off now.
+        crate::mods::after_game(&app_handle, &tag).await;
         let crashed = status.is_some_and(|s| !s.success());
         let mod_failure = if crashed {
             mod_failure_since(&log_path, log_start).await
         } else {
             None
         };
-        let _ = app_handle.emit(
-            crate::ipc::GAME_STATE,
-            GameStateEvent {
+        crate::ipc::emit_game_state(
+            &app_handle,
+            &GameStateEvent {
                 tag,
                 state: GameState::Stopped,
                 exit_code: status.and_then(|s| s.code()),

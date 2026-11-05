@@ -18,4 +18,8 @@ installedOff: Array<string>,
 /**
  * Ids of dependencies nothing provides for `to`: why `installed_off` are off.
  */
-missing: Array<string>, };
+missing: Array<string>, 
+/**
+ * Pass to `copy_mod_profile`: the digest of what this preview asks the player to agree to.
+ */
+planToken: string, };

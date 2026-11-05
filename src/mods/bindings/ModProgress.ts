@@ -4,4 +4,12 @@ import type { ProgressStage } from "./ProgressStage";
 /**
  * The `mod-progress` event.
  */
-export type ModProgress = { sha256: string, modId: string, stage: ProgressStage, percent: number, };
+export type ModProgress = { 
+/**
+ * The id the page gave the operation this file belongs to.
+ */
+operationId: string, sha256: string, modId: string, stage: ProgressStage, percent: number, 
+/**
+ * This file's place in the operation, 1-based: file `index` of `count`.
+ */
+index: number, count: number, };

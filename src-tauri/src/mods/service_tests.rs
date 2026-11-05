@@ -12,6 +12,7 @@ use super::context::{Ctx, tests::with_version};
 use super::error::ModsError;
 use super::index::{Channel, WeftAbi};
 use super::install::ProgressStage;
+use super::plan::ChangeResult;
 use super::profile::tests::{ABI, build, catalog, catalog_mod};
 use super::profile::{Lock, ModStatus};
 use super::service::{self, LaunchPlan};
@@ -179,6 +180,22 @@ fn setup(tmp: &tempfile::TempDir) -> (Ctx, World) {
     (ctx, world)
 }
 
+fn next_op() -> String {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static N: AtomicUsize = AtomicUsize::new(0);
+    format!("op-{}", N.fetch_add(1, Ordering::Relaxed))
+}
+
+/// Installs as the page does: plans, then installs with that plan's token.
+async fn install(ctx: &Ctx, sha: &str) -> Result<ChangeResult, ModsError> {
+    let plan = service::plan(ctx, TAG, sha).await?;
+    service::install(ctx, TAG, sha, &plan.plan_token, &next_op()).await
+}
+
+async fn restore(ctx: &Ctx, id: &str) -> Result<ChangeResult, ModsError> {
+    service::restore(ctx, TAG, id, &next_op()).await
+}
+
 fn build_mut<'a>(catalog: &'a mut Catalog, id: &str) -> &'a mut CatalogVersion {
     &mut catalog
         .mods
@@ -212,7 +229,7 @@ fn an_install_downloads_checks_and_commits() {
     let seen = stages.clone();
     let ctx = ctx.with_progress(move |p| seen.lock().unwrap().push((p.mod_id, p.stage)));
 
-    let done = run(service::install(&ctx, TAG, &world.sha("cogwork"))).unwrap();
+    let done = run(install(&ctx, &world.sha("cogwork"))).unwrap();
     assert_eq!(done.installed, ["cogwork", "showcase"]);
     assert!(done.installed_off.is_empty() && done.undo.is_none());
     assert_eq!(handed_to_game(&ctx), ["cogwork.zip", "showcase.zip"]);
@@ -242,7 +259,7 @@ fn a_tampered_download_never_reaches_the_store() {
     let ctx = with_version(tmp.path(), TAG);
     ctx.hold_catalog(catalog);
 
-    let err = run(service::install(&ctx, TAG, &world.sha("showcase"))).unwrap_err();
+    let err = run(install(&ctx, &world.sha("showcase"))).unwrap_err();
     assert!(matches!(err, ModsError::Sha256Mismatch { .. }), "{err:?}");
     assert!(!ctx.paths.store_object(&world.sha("showcase")).exists());
     let leftovers = std::fs::read_dir(ctx.paths.downloads_dir())
@@ -263,7 +280,7 @@ fn a_download_larger_than_announced_is_stopped() {
         build_mut(&mut catalog, "showcase").url = format!("{base}/showcase.zip");
         let ctx = with_version(tmp.path(), TAG);
         ctx.hold_catalog(catalog);
-        let err = run(service::install(&ctx, TAG, &world.sha("showcase"))).unwrap_err();
+        let err = run(install(&ctx, &world.sha("showcase"))).unwrap_err();
         assert!(matches!(err, ModsError::TooLarge(_)), "{err:?}");
         assert!(!ctx.paths.store_object(&world.sha("showcase")).exists());
     }
@@ -284,7 +301,7 @@ fn a_stored_file_with_the_right_hash_is_still_checked() {
     let sha = showcase.sha256.clone();
     ctx.hold_catalog(catalog);
 
-    let err = run(service::install(&ctx, TAG, &sha)).unwrap_err();
+    let err = run(install(&ctx, &sha)).unwrap_err();
     assert!(matches!(err, ModsError::ArchiveInvalid(_)), "{err:?}");
     assert!(lock_of(&ctx).mods.is_empty());
 }
@@ -299,7 +316,7 @@ fn a_missing_dependency_installs_the_mod_turned_off() {
     assert!(!plan.turns_on);
     assert_eq!(plan.missing, ["signals"]);
 
-    let done = run(service::install(&ctx, TAG, &world.sha("railways"))).unwrap();
+    let done = run(install(&ctx, &world.sha("railways"))).unwrap();
     assert_eq!(done.installed_off, ["railways"]);
     assert_eq!(done.missing, ["signals"]);
     assert!(!lock_of(&ctx).get("railways").unwrap().enabled);
@@ -317,10 +334,11 @@ mod meanwhile {
         let tmp = tempfile::tempdir().unwrap();
         let (ctx, world) = setup(&tmp);
         let world = world.stored(&ctx);
-        run(service::install(&ctx, TAG, &world.sha("showcase"))).unwrap();
+        run(install(&ctx, &world.sha("showcase"))).unwrap();
         let before = std::fs::read(ctx.paths.lock_file(TAG).unwrap()).unwrap();
 
         let (m, v) = world.catalog.find(&world.sha("cogwork")).unwrap();
+        let op = ctx.operations.begin("refused").unwrap();
         let staged = service::stage(
             &ctx,
             TAG,
@@ -330,9 +348,9 @@ mod meanwhile {
             Vec::new(),
         )
         .unwrap();
-        run(service::fetch(&ctx, &staged)).unwrap();
+        run(service::fetch(&ctx, &staged, &op)).unwrap();
         change(&ctx, &world);
-        let err = run(service::commit(&ctx, staged)).unwrap_err();
+        let err = run(service::commit(&ctx, staged, &op)).unwrap_err();
         if ctx.paths.lock_file(TAG).unwrap().exists() {
             let after = std::fs::read(ctx.paths.lock_file(TAG).unwrap()).unwrap();
             let unchanged = after == before || !String::from_utf8_lossy(&after).contains("cogwork");
@@ -405,6 +423,7 @@ mod meanwhile {
         let (ctx, world) = setup(&tmp);
         let (m, v) = world.catalog.find(&world.sha("cogwork")).unwrap();
         let wanted = vec![(m.clone(), v.clone())];
+        let op = ctx.operations.begin("nothing-changed").unwrap();
         let staged = service::stage(
             &ctx,
             TAG,
@@ -414,8 +433,8 @@ mod meanwhile {
             Vec::new(),
         )
         .unwrap();
-        run(service::fetch(&ctx, &staged)).unwrap();
-        let done = run(service::commit(&ctx, staged)).unwrap();
+        run(service::fetch(&ctx, &staged, &op)).unwrap();
+        let done = run(service::commit(&ctx, staged, &op)).unwrap();
         assert_eq!(done.installed, ["cogwork", "showcase"]);
     }
 }
@@ -425,7 +444,7 @@ fn remove_can_be_undone_until_the_next_change() {
     let tmp = tempfile::tempdir().unwrap();
     let (ctx, world) = setup(&tmp);
     let world = world.stored(&ctx);
-    run(service::install(&ctx, TAG, &world.sha("cogwork"))).unwrap();
+    run(install(&ctx, &world.sha("cogwork"))).unwrap();
     let showcase_before = lock_of(&ctx).get("showcase").unwrap().clone();
 
     let done = run(service::remove(&ctx, TAG, "showcase")).unwrap();
@@ -437,7 +456,7 @@ fn remove_can_be_undone_until_the_next_change() {
     );
     assert_eq!(handed_to_game(&ctx), Vec::<String>::new());
 
-    let done = run(service::restore(&ctx, TAG, "showcase")).unwrap();
+    let done = run(restore(&ctx, "showcase")).unwrap();
     assert!(done.undo.is_none());
     assert_eq!(done.also_enabled, ["cogwork"]);
     let lock = lock_of(&ctx);
@@ -447,7 +466,7 @@ fn remove_can_be_undone_until_the_next_change() {
     assert_eq!(showcase.installed_at, showcase_before.installed_at);
     assert_eq!(handed_to_game(&ctx), ["cogwork.zip", "showcase.zip"]);
     assert!(matches!(
-        run(service::restore(&ctx, TAG, "showcase")),
+        run(restore(&ctx, "showcase")),
         Err(ModsError::NotInstalled(_))
     ));
 
@@ -455,7 +474,7 @@ fn remove_can_be_undone_until_the_next_change() {
     run(service::remove(&ctx, TAG, "showcase")).unwrap();
     run(service::set_enabled(&ctx, TAG, "cogwork", false)).unwrap();
     assert!(matches!(
-        run(service::restore(&ctx, TAG, "showcase")),
+        run(restore(&ctx, "showcase")),
         Err(ModsError::NotInstalled(_))
     ));
     assert!(!ctx.paths.store_object(&world.sha("showcase")).exists());
@@ -466,16 +485,16 @@ fn undo_needs_the_same_bytes() {
     let tmp = tempfile::tempdir().unwrap();
     let (ctx, world) = setup(&tmp);
     let world = world.stored(&ctx);
-    run(service::install(&ctx, TAG, &world.sha("showcase"))).unwrap();
+    run(install(&ctx, &world.sha("showcase"))).unwrap();
     run(service::set_enabled(&ctx, TAG, "showcase", false)).unwrap();
     run(service::remove(&ctx, TAG, "showcase")).unwrap();
     assert!(matches!(
-        run(service::restore(&ctx, TAG, "cogwork")),
+        run(restore(&ctx, "cogwork")),
         Err(ModsError::NotInstalled(_))
     ));
     std::fs::write(ctx.paths.store_object(&world.sha("showcase")), b"changed").unwrap();
     assert!(matches!(
-        run(service::restore(&ctx, TAG, "showcase")),
+        run(restore(&ctx, "showcase")),
         Err(ModsError::NotInstalled(_))
     ));
     std::fs::write(
@@ -483,7 +502,7 @@ fn undo_needs_the_same_bytes() {
         &world.showcase,
     )
     .unwrap();
-    run(service::restore(&ctx, TAG, "showcase")).unwrap();
+    run(restore(&ctx, "showcase")).unwrap();
     assert!(
         !lock_of(&ctx).get("showcase").unwrap().enabled,
         "back as it was: off"
@@ -499,7 +518,7 @@ fn prepare_launch_needs_neither_tauri_nor_the_network() {
     let installer = with_version(tmp.path(), TAG);
     installer.hold_catalog(world.catalog.clone());
     let world = world.stored(&installer);
-    run(service::install(&installer, TAG, &world.sha("cogwork"))).unwrap();
+    run(install(&installer, &world.sha("cogwork"))).unwrap();
     // A fresh start: no catalogue held, no index cached, no ABI cached.
     let ctx = Ctx::new(installer.paths.clone());
 
@@ -528,7 +547,7 @@ fn prepare_launch_needs_neither_tauri_nor_the_network() {
     let mut lock = lock_of(&ctx);
     lock.get_mut("showcase").unwrap().revoked = Some(super::profile::Revocation {
         reason: "deletes saves".into(),
-        at: String::new(),
+        at: None,
     });
     store::write_lock(&ctx.paths, TAG, &lock).unwrap();
     let err = run(service::prepare_launch(&ctx, TAG)).err().unwrap();
@@ -551,7 +570,7 @@ fn the_launch_plan() {
     revoked.enabled = false;
     revoked.revoked = Some(super::profile::Revocation {
         reason: "x".into(),
-        at: String::new(),
+        at: None,
     });
     let cases: Vec<(&str, Lock, LaunchPlan)> = vec![
         ("nothing installed", lock(vec![]), LaunchPlan::NoMods),
@@ -596,7 +615,7 @@ fn forgetting_a_version_waits_for_the_mods_lock() {
     let tmp = tempfile::tempdir().unwrap();
     let (ctx, world) = setup(&tmp);
     let world = world.stored(&ctx);
-    run(service::install(&ctx, TAG, &world.sha("showcase"))).unwrap();
+    run(install(&ctx, &world.sha("showcase"))).unwrap();
     run(async {
         let held = ctx.lock_mods().await;
         let waited = tokio::time::timeout(
@@ -638,9 +657,10 @@ mod icons {
         let client = service::http().unwrap();
         let get = |p: &str| run(service::fetch_icon(&client, &format!("{base}{p}")));
         assert_eq!(get("/small.png").unwrap().len(), 1000);
-        for bad in ["/big.png", "/big-unannounced.png", "/not.png"] {
+        for bad in ["/big.png", "/big-unannounced.png"] {
             assert!(matches!(get(bad), Err(ModsError::TooLarge(_))), "{bad}");
         }
+        assert!(matches!(get("/not.png"), Err(ModsError::IconInvalid(_))));
         assert!(matches!(
             get("/gone.png"),
             Err(ModsError::Http { status: 404, .. })

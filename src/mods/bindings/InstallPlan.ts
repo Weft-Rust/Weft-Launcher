@@ -20,11 +20,20 @@ enable: Array<string>,
  */
 missing: Array<string>, 
 /**
- * Whether the target is on after this install: it is new or on now, and nothing is
- * missing. With something missing it is installed turned off.
+ * Whether the target is on after this install: it is new or on now, and nothing it needs,
+ * at any depth, is missing. With something missing it is installed turned off. False when
+ * the version's mod interface is unknown: then nothing can be resolved.
  */
 turnsOn: boolean, 
 /**
+ * Whether the target is built for the version's mod interface; `None` when that is unknown.
+ */
+fitsVersion: boolean | null, 
+/**
  * Why the install would fail, if it would.
  */
-problem: AppErrorPayload | null, };
+problem: AppErrorPayload | null, 
+/**
+ * Pass to `install_mod`: the digest of what this plan asks the player to agree to.
+ */
+planToken: string, };

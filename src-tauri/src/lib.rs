@@ -38,6 +38,7 @@ pub fn run() {
         .manage(mods::catalog::CatalogState::default())
         .manage(mods::ModsLock::default())
         .manage(mods::store::Reservations::default())
+        .manage(mods::Operations::default())
         .setup(|app| {
             install::sweep_leftovers(app.handle());
             Ok(())
@@ -65,6 +66,7 @@ pub fn run() {
             mods::commands::restore_mod,
             mods::commands::preview_copy_mod_profile,
             mods::commands::copy_mod_profile,
+            mods::commands::cancel_mod_operation,
             mods::commands::get_mod_icon,
             mods::commands::open_player_mods_folder
         ])

@@ -33,7 +33,7 @@ mod doc_tests;
 #[cfg(test)]
 mod service_tests;
 
-pub use context::{Ctx, ModsLock};
+pub use context::{Ctx, ModsLock, Operations};
 pub use paths::Paths;
 pub use service::LaunchMods;
 
@@ -45,6 +45,15 @@ pub async fn prepare_launch(
     tag: &str,
 ) -> Result<LaunchMods, crate::error::AppError> {
     Ok(service::prepare_launch(&Ctx::of(app)?, tag).await?)
+}
+
+/// Once a version's game has stopped: what was held back while it ran (revocations) is applied.
+pub async fn after_game(app: &AppHandle, tag: &str) {
+    if let Ok(ctx) = Ctx::of(app)
+        && let Err(e) = service::apply_pending(&ctx, tag).await
+    {
+        eprintln!("mods: couldn't apply what waited for {tag} to stop: {e}");
+    }
 }
 
 /// A deleted game version takes its mod set along, under the mods lock.
