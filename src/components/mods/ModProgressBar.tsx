@@ -1,15 +1,44 @@
+import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n/useI18n";
-import type { ModProgress, ProgressStage } from "../../mods/types";
+import type { UiProgress, UiStage } from "../../mods/types";
 import type { MessageKey } from "../../i18n";
 
-const STEP: Record<ProgressStage, MessageKey> = {
+/** What is shown: "downloading 40%" has the percent in it, the others don't. */
+const STEP: Record<UiStage, MessageKey> = {
+  preparing: "mods.stepPreparing",
   downloading: "mods.stepDownloading",
   verifying: "mods.stepVerifying",
   installing: "mods.stepInstalling",
 };
+/** What is said, once per step: never a number, so nothing like a lone "%" is left behind. */
+const SPOKEN: Record<UiStage, MessageKey> = { ...STEP, downloading: "mods.stepDownloadingSpoken" };
+
+/** The check of a file stays on screen at least this long, so the player sees it happen. */
+export const VERIFY_DWELL_MS = 400;
+
+/**
+ * The stage to show: the newest, except that a check is held for VERIFY_DWELL_MS once it starts,
+ * however quickly the backend moves on. Only what is drawn waits; the operation doesn't.
+ */
+function useDwell(stage: UiStage): UiStage {
+  const [shown, setShown] = useState(stage);
+  const since = useRef(0);
+  useEffect(() => {
+    if (stage === shown) return;
+    if (stage === "verifying") since.current = Date.now();
+    const wait = shown === "verifying" ? VERIFY_DWELL_MS - (Date.now() - since.current) : 0;
+    if (wait <= 0) {
+      setShown(stage);
+      return;
+    }
+    const timer = setTimeout(() => setShown(stage), wait);
+    return () => clearTimeout(timer);
+  }, [stage, shown]);
+  return shown;
+}
 
 interface ModProgressBarProps {
-  progress: ModProgress | undefined;
+  progress: UiProgress | undefined;
   /** The name of the mod `progress` is about. */
   name: string;
   /** Offered while the operation can still stop: until its files are being installed. */
@@ -25,14 +54,15 @@ interface ModProgressBarProps {
  */
 export function ModProgressBar({ progress, name, onCancel, cancelling = false, compact = false }: ModProgressBarProps) {
   const { t } = useI18n();
-  const stage = progress?.stage ?? "downloading";
-  const percent = stage === "downloading" ? (progress?.percent ?? 0) : 100;
+  const stage = useDwell(progress?.stage ?? "preparing");
+  const percent = stage === "downloading" ? (progress?.percent ?? 0) : stage === "preparing" ? 0 : 100;
   const count = progress?.count ?? 1;
   const index = progress?.index ?? 1;
+  const whole = (step: string) => (count > 1 ? t("mods.progressOf", String(index), String(count), name, step) : t("mods.progressOne", name, step));
   const step = t(STEP[stage], String(percent));
-  const label = count > 1 ? t("mods.progressOf", String(index), String(count), name, step) : t("mods.progressOne", name, step);
+  const label = whole(step);
   // Said on each new file and step, not on each percent.
-  const spoken = count > 1 ? t("mods.progressOf", String(index), String(count), name, t(STEP[stage], "")) : t("mods.progressOne", name, t(STEP[stage], ""));
+  const spoken = whole(t(SPOKEN[stage]));
   const canCancel = !!onCancel && stage !== "installing";
   return (
     <div className={`progress-container${compact ? " compact" : ""}`} data-stage={stage}>
@@ -49,8 +79,8 @@ export function ModProgressBar({ progress, name, onCancel, cancelling = false, c
       <span className="progress-label" aria-hidden="true">
         {compact ? step : label}
       </span>
-      <span className="sr-only" aria-live="polite">
-        {spoken.replace(/[\s,:]+$/, "")}
+      <span className="sr-only progress-spoken" aria-live="polite">
+        {spoken}
       </span>
     </div>
   );

@@ -3,7 +3,7 @@ import { useI18n } from "../../i18n/useI18n";
 import type { Shown } from "../../i18n/errors";
 import { useMods } from "../../hooks/useMods";
 import { usePlan } from "../../hooks/usePlan";
-import type { CopyItem, CopyPreview, CopyResult, ModProgress, Trust } from "../../mods/types";
+import type { CopyItem, CopyPreview, CopyResult, Trust, UiProgress } from "../../mods/types";
 import { activeStep, consentChanges, copyConsentView, type CheckState, type ConsentView } from "../../mods/checks";
 import { COPY_OUTCOME, copyConsent } from "../../mods/copyPlan";
 import { networkDown } from "../../mods/select";
@@ -52,7 +52,7 @@ export function CopyDialog({ tag, donors, onClose }: CopyDialogProps) {
   const consent = preview ? copyConsent(preview, target) : null;
   const toInstall = consent?.items ?? [];
   const events = progressOf(op);
-  const byId = (id: string): ModProgress | undefined => events.find((p) => p.modId === id && p.sha256 !== "");
+  const byId = (id: string): UiProgress | undefined => events.find((p) => p.modId === id && p.sha256 !== "");
   const step = activeStep(events);
   const changes = changedFrom && preview && request.ready ? consentChanges(changedFrom, copyConsentView(preview), name) : null;
   const offline = networkDown(catalog, catalogError);
@@ -206,7 +206,7 @@ function ExtraList({
   progressFor,
 }: {
   rows: { id: string; state: CheckState; text: string; trust?: Trust }[];
-  progressFor?: (id: string) => ModProgress | undefined;
+  progressFor?: (id: string) => UiProgress | undefined;
 }) {
   return (
     <ul className="checks copy-list">
@@ -238,7 +238,7 @@ function CopyList({
   items: CopyItem[];
   tag: string;
   done?: boolean;
-  progressFor?: (id: string) => ModProgress | undefined;
+  progressFor?: (id: string) => UiProgress | undefined;
 }) {
   const { t } = useI18n();
   return (

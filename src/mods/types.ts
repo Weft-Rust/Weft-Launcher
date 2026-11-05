@@ -9,3 +9,12 @@ import type { ErrorCode } from "./bindings";
  * build knows: a thrown Error, or a code from a newer backend. Its detail says what there is.
  */
 export type UiError = { code: ErrorCode | "Unknown"; detail: string | null };
+
+import type { ModProgress, ProgressStage } from "./bindings";
+
+/**
+ * Frontend only: a step of a running operation. `preparing` is the moment before the backend's
+ * first event, when nothing is being downloaded yet; the backend's own stages follow.
+ */
+export type UiStage = ProgressStage | "preparing";
+export type UiProgress = Omit<ModProgress, "stage"> & { stage: UiStage };

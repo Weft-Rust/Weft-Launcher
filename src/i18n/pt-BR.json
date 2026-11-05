@@ -415,6 +415,8 @@
     "changedOther": "O plano mudou. Olhe de novo antes de confirmar.",
     "ckSame": "Sem mudança",
     "stepDownloading": "baixando {0}%",
+    "stepPreparing": "preparando",
+    "stepDownloadingSpoken": "baixando",
     "stepVerifying": "conferindo o arquivo",
     "stepInstalling": "instalando",
     "progressOf": "Arquivo {0} de {1}: {2}, {3}",

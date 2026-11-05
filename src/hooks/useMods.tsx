@@ -21,9 +21,9 @@ import type {
   CopyResult,
   FileInspection,
   InstallPlan,
-  ModProgress,
   ProfileReport,
   UiError,
+  UiProgress,
 } from "../mods/types";
 import { showError, type Shown } from "../i18n/errors";
 import { tm } from "../i18n";
@@ -61,7 +61,7 @@ interface ModsContextValue {
   isBusy: (tag: string, modId: string) => boolean;
   isCopying: (tag: string) => boolean;
   /** The progress events of a running operation, in the order they came (contract R4 §3). */
-  progressOf: (op: Operation) => ModProgress[];
+  progressOf: (op: Operation) => UiProgress[];
   /** Asks the backend to stop a running operation; it then ends as "cancelled". */
   cancel: (op: Operation) => Promise<void>;
   isCancelling: (op: Operation) => boolean;
@@ -143,6 +143,8 @@ export interface FirstFile {
   sha256: string;
   modId: string;
   count: number;
+  /** A file already on the player's computer: its first step is checking it, not a download. */
+  local?: boolean;
 }
 
 /**
@@ -152,7 +154,7 @@ export interface FirstFile {
  * progress goes with it.
  */
 function useOperations() {
-  const [progress, setProgress] = useState<Record<string, ModProgress[]>>({});
+  const [progress, setProgress] = useState<Record<string, UiProgress[]>>({});
   const [running, setRunning] = useState<Record<string, { op: Operation; operationId: string; cancelling: boolean }>>({});
   const live = useRef<Map<string, string>>(new Map());
 
@@ -183,12 +185,13 @@ function useOperations() {
     const operationId = newOperationId();
     live.current.set(key, operationId);
     setRunning((r) => ({ ...r, [key]: { op, operationId, cancelling: false } }));
-    // The first file shows as waiting at once, before its first event.
-    const waiting: ModProgress = {
+    // The first file shows at once, before its first event: getting ready, or being checked when
+    // it is a file the player picked. Never "downloading" before anything is.
+    const waiting: UiProgress = {
       operationId,
       sha256: first?.sha256 ?? "",
       modId: first?.modId ?? (op.kind === "mod" ? op.id : ""),
-      stage: "downloading",
+      stage: first?.local ? "verifying" : "preparing",
       percent: 0,
       index: 1,
       count: Math.max(1, first?.count ?? 1),
@@ -359,7 +362,7 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       return run(
         { kind: "mod", tag, id: modId },
         // The file itself is checked first, then what it needs is fetched.
-        { sha256: inspection.sha256, modId, count: (plan?.install.length ?? 0) + 1 },
+        { sha256: inspection.sha256, modId, count: (plan?.install.length ?? 0) + 1, local: true },
         (operationId) => modsApi.installFile(tag, path, inspection.sha256, inspection.planToken, operationId),
         (r) => pushNotice(tag, describeChange(r, modId, tag, namer(r)))
       );

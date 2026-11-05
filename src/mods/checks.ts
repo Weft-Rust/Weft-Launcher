@@ -228,7 +228,7 @@ export function weakerDeps(plan: InstallPlan, ctx: Pick<InstallCheckContext, "na
  * Events come in the order the backend works, so a file that finished checking and waits for
  * the final install never hides the one now downloading.
  */
-export function activeStep(entries: ModProgress[]): ModProgress | undefined {
+export function activeStep<P extends Pick<ModProgress, "sha256">>(entries: P[]): P | undefined {
   return entries[entries.length - 1];
 }
 

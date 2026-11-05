@@ -5,6 +5,7 @@ import {
   fittingVersions,
   installedFor,
   keepOrder,
+  networkDown,
   parseRepo,
   sameRepo,
   sortInstalled,
@@ -115,5 +116,35 @@ describe("copyDonors", () => {
     const profiles = { v3: report([installed("a")]), v2: report([]), v1: report([installed("b")]) };
     expect(copyDonors(["v3", "v2", "v1"], "v3", profiles)).toEqual(["v1"]);
     expect(copyDonors(["v3", "v2", "v1"], "v2", profiles)).toEqual(["v3", "v1"]);
+  });
+});
+
+describe("networkDown", () => {
+  const net = { code: "Network", detail: "offline" } as const;
+  const fresh = { repo: "a/b", mods: 1, freshness: "fresh", checked: "2026-11-04T00:00:00Z", error: null, noMods: null } as const;
+  const offline = { ...fresh, freshness: "cached", error: net } as const;
+  const indexDown = { freshness: "unavailable", generated: null, signedAt: null, error: net } as const;
+
+  it("is down when the catalogue itself couldn't be fetched for want of a connection", () => {
+    expect(networkDown(null, net)).toBe(true);
+    expect(networkDown(null, { code: "Io" })).toBe(false);
+  });
+
+  it("is down when every origin failed with Network", () => {
+    expect(networkDown(catalog([], { index: indexDown, sources: [offline] }), null)).toBe(true);
+    expect(networkDown(catalog([], { index: indexDown }), null)).toBe(true);
+  });
+
+  it("is not down when only the index is unreachable and a source answered", () => {
+    expect(networkDown(catalog([], { index: indexDown, sources: [fresh] }), null)).toBe(false);
+  });
+
+  it("is not down when a failing source got a reply (a rate limit is an answer)", () => {
+    const limited = { ...fresh, freshness: "cached", error: { code: "ModSourceRateLimited", detail: null } } as const;
+    expect(networkDown(catalog([], { index: indexDown, sources: [limited] }), null)).toBe(false);
+  });
+
+  it("is not down when the index answered and only a source lost its connection", () => {
+    expect(networkDown(catalog([], { sources: [offline] }), null)).toBe(false);
   });
 });

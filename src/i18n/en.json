@@ -396,6 +396,8 @@
     "changedOther": "The plan changed. Look again before you confirm.",
     "ckSame": "No change",
     "stepDownloading": "downloading {0}%",
+    "stepPreparing": "getting ready",
+    "stepDownloadingSpoken": "downloading",
     "stepVerifying": "checking the file",
     "stepInstalling": "installing",
     "progressOf": "File {0} of {1}: {2}, {3}",

@@ -167,12 +167,19 @@ export function parseRepo(input: string): string | null {
 }
 
 /**
- * Whether the network was down at the last look: the catalogue couldn't be refreshed for want of
- * a connection, or the index or a source showed its saved copy for that reason. A download needs
- * it, so install buttons say so.
+ * Whether the network was down at the last look, so a download would fail for want of a
+ * connection. True when the catalogue couldn't be refreshed for that reason, or when an origin
+ * failed with `Network` and no origin got an answer at all.
+ *
+ * One origin failing is not the network failing: when a source just answered (or failed with a
+ * reply, like a rate limit), the index being unreachable is the index host's trouble, and builds
+ * still download from GitHub. Install buttons then don't claim to need internet.
  */
 export function networkDown(catalog: Catalog | null, catalogError: { code: string } | null): boolean {
   if (catalogError?.code === "Network") return true;
   if (!catalog) return false;
-  return catalog.index.error?.code === "Network" || catalog.sources.some((s) => s.error?.code === "Network");
+  const origins = [catalog.index.error, ...catalog.sources.map((s) => s.error)];
+  const lostConnection = origins.some((e) => e?.code === "Network");
+  const answered = origins.some((e) => !e || e.code !== "Network");
+  return lostConnection && !answered;
 }

@@ -433,6 +433,8 @@
     "changedOther": "План изменился. Посмотрите ещё раз, прежде чем подтвердить.",
     "ckSame": "Без изменений",
     "stepDownloading": "загрузка {0}%",
+    "stepPreparing": "подготовка",
+    "stepDownloadingSpoken": "загрузка",
     "stepVerifying": "проверка файла",
     "stepInstalling": "установка",
     "progressOf": "Файл {0} из {1}: {2}, {3}",
