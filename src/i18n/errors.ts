@@ -53,6 +53,7 @@ export const ERROR_KEY: Record<ErrorCode, MessageKey> = {
   ModTooLarge: 'errors.modTooLarge',
   ModIdReserved: 'errors.modIdReserved',
   ModChangedMeanwhile: 'errors.modChangedMeanwhile',
+  ModCancelled: 'errors.modCancelled',
 };
 
 export function isErrorCode(code: unknown): code is ErrorCode {
@@ -63,20 +64,43 @@ export function errorKey(code: ErrorCode): MessageKey {
   return ERROR_KEY[code];
 }
 
+/** A failure as the player sees it: a translated sentence, and what the backend said, if anything more. */
+export interface Shown {
+  message: string;
+  /**
+   * The backend's own words (an OS error, a parser's complaint), in English. Never spliced into the
+   * sentence; shown behind "Details", for the player to search for or report.
+   */
+  detail: string | null;
+}
+
 /**
- * A failure as a sentence. A known code gets its message; anything else (an "Unknown" from
- * asAppError, a code this build doesn't know, a thrown Error) says so and keeps what detail there
- * is, rather than passing for a known failure.
+ * A failure as a sentence. A message with a `{0}` takes the detail when the backend sends a name
+ * there (a mod, a version, a repo); every other detail is kept apart, for "Details". Anything
+ * this build doesn't know says so, with what there is as its detail.
  */
-export function translateError(err: unknown): string {
-  if (err === null || err === undefined) return '';
+export function showError(err: unknown): Shown {
+  if (err === null || err === undefined) return { message: '', detail: null };
   if (typeof err === 'object' && !(err instanceof Error)) {
     const { code, detail } = err as { code?: unknown; detail?: unknown };
-    const text = typeof detail === 'string' ? detail : '';
-    if (isErrorCode(code)) return t(ERROR_KEY[code], text);
-    if (typeof code === 'string' && code !== 'Unknown') return t('errors.unknown', text ? `${code}: ${text}` : code);
-    return text ? t('errors.unknown', text) : t('errors.unknownBare');
+    const text = typeof detail === 'string' && detail.trim() ? detail : null;
+    if (isErrorCode(code)) {
+      const key = ERROR_KEY[code];
+      if (takesDetail(key)) return { message: t(key, text ?? ''), detail: null };
+      return { message: t(key), detail: text };
+    }
+    const raw = typeof code === 'string' && code !== 'Unknown' ? (text ? `${code}: ${text}` : code) : text;
+    return { message: t('errors.unknownBare'), detail: raw };
   }
   const text = err instanceof Error ? err.message : String(err);
-  return text ? t('errors.unknown', text) : t('errors.unknownBare');
+  return { message: t('errors.unknownBare'), detail: text || null };
+}
+
+/** The sentence alone, where there is no room for Details (a check row, a banner line). */
+export function translateError(err: unknown): string {
+  return showError(err).message;
+}
+
+function takesDetail(key: MessageKey): boolean {
+  return t(key, '\u0000').includes('\u0000');
 }

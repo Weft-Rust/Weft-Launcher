@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
-import { translateError } from "../i18n/errors";
+import { showError, type Shown } from "../i18n/errors";
 import { launcherApi, listenTo } from "../mods/api";
 import { EVENTS } from "../mods/ipc";
 import type { InstalledVersion, InstallProgress } from "../mods/types";
@@ -12,7 +12,7 @@ interface InstallContextValue {
   loaded: boolean;
   progress: Record<string, InstallProgress>;
   busy: Record<string, boolean>;
-  errors: Record<string, string>;
+  errors: Record<string, Shown>;
   install: (tag: string, assetUrl: string, assetName: string, expectedSha256: string | null) => Promise<void>;
   remove: (tag: string) => Promise<void>;
 }
@@ -30,7 +30,7 @@ export function InstallProvider({ children }: { children: ReactNode }) {
   const [loaded, setLoaded] = useState(false);
   const [progress, setProgress] = useState<Record<string, InstallProgress>>({});
   const [busy, setBusy] = useState<Record<string, boolean>>({});
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Record<string, Shown>>({});
 
   const refreshInstalled = useCallback(async () => {
     try {
@@ -69,7 +69,7 @@ export function InstallProvider({ children }: { children: ReactNode }) {
         await work();
         await refreshInstalled();
       } catch (err) {
-        setErrors((prev) => ({ ...prev, [tag]: translateError(err) }));
+        setErrors((prev) => ({ ...prev, [tag]: showError(err) }));
       } finally {
         setBusy((prev) => without(prev, tag));
         setProgress((prev) => without(prev, tag));
