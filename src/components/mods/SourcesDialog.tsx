@@ -168,8 +168,10 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
       <p className="dialog-summary">{t("mods.sourcesIntro")}</p>
       <ul className="source-list">
         <li className="source-row">
-          <IndexBadge index={index} />
-          <span className="source-name">{t("mods.sourcesIndex")}</span>
+          <span className="source-title">
+            <span className="source-name">{t("mods.sourcesIndex")}</span>
+            <IndexBadge index={index} />
+          </span>
           <span className={`source-meta${index?.error || index?.freshness === "stale" ? " bad" : ""}`} data-testid="index-meta">
             {indexMeta}
             {index?.error && showError(index.error).detail && (
@@ -197,8 +199,10 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
           const none = !!s && !s.error && s.mods === 0 && !!s.noMods;
           return (
             <li className={`source-row${asking ? " confirming" : ""}`} key={repo} data-repo={repo}>
-              <span className="badge channel">{t("mods.sourceBadgeRepo")}</span>
-              <Truncate className="source-name" text={repo} />
+              <span className="source-title">
+                <Truncate className="source-name" text={repo} />
+                <span className="badge channel">{t("mods.sourceBadgeRepo")}</span>
+              </span>
               <span className={`source-meta${s?.error ? " bad" : none ? " warn" : ""}`} data-testid="source-meta">
                 {s?.error ? sourceProblem(s, t, formatDay) : sourceMeta(s, catalogLoading, t, tn, formatDay)}
                 {none && (

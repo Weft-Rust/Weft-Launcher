@@ -6,7 +6,9 @@
 //   Intl.PluralRules says (Russian: one, few, many, other), or has one it doesn't use;
 // - code under src/ uses a message key that en.json doesn't have;
 // - an error code the backend can send has no `errors.*` message, going by the generated
-//   ErrorCode union in src/mods/bindings/ErrorCode.ts.
+//   ErrorCode union in src/mods/bindings/ErrorCode.ts;
+// - a message names a trust tier or a revocation in English but not with that language's term
+//   for it, or uses a word the glossary rules out (Russian «отзыв» reads as "review").
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -124,6 +126,28 @@ for (const code of codes) {
 for (const code of Object.keys(mapping)) {
   if (!codes.has(code)) problems.push(`src/i18n/errors.ts: ${code} is not an ErrorCode the backend sends`);
 }
+
+// The trust words, one term per language: a player learns them from the badges, so every message
+// that names one says it the same way. Stems, compared without case, so inflected forms pass.
+const GLOSSARY = [
+  { en: /\bunverified\b/i, term: { ru: "без проверки", "pt-BR": "não verificad", es: "sin verificar" } },
+  { en: /\bunreviewed\b|nobody reviewed/i, term: { ru: "не провер", "pt-BR": "revis", es: "revis" } },
+  { en: /\brevok|\brevocation/i, term: { ru: "отозв", "pt-BR": "retirad", es: "retirad" } },
+];
+const FORBIDDEN = { ru: [/отзыв/i, /неизвестн\S* файл/i] };
+const flat = Object.fromEntries(locales.map((l) => [l, flatten(load(l))]));
+for (const [key, english] of Object.entries(flat.en)) {
+  for (const { en: pattern, term } of GLOSSARY) {
+    if (!pattern.test(english)) continue;
+    for (const [locale, stem] of Object.entries(term)) {
+      const text = flat[locale][key];
+      if (text !== undefined && !text.toLowerCase().includes(stem)) problems.push(`${locale}: ${key} should say "${stem}…" for "${english.match(pattern)[0]}"`);
+    }
+  }
+}
+for (const [locale, words] of Object.entries(FORBIDDEN))
+  for (const [key, text] of Object.entries(flat[locale]))
+    for (const word of words) if (word.test(text)) problems.push(`${locale}: ${key} uses ${word}, which the glossary rules out`);
 
 if (problems.length) {
   console.error(problems.join("\n"));

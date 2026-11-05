@@ -22,7 +22,7 @@ export function TrustBadge({ trust }: { trust: Trust }) {
   return (
     <span className={`badge trust-${trust}`} title={t(HINT[trust])}>
       <PixelIcon rows={GLYPH[trust]} />
-      {t(TRUST_LABEL[trust])}
+      <span className="badge-text">{t(TRUST_LABEL[trust])}</span>
     </span>
   );
 }
@@ -36,7 +36,7 @@ export function RevokedBadge({ reason }: { reason: string | null }) {
   return (
     <span className="badge revoked" title={t("mods.badgeRevokedHint", (reason ?? "").trim() || t("mods.noReason"))}>
       <PixelIcon rows={CROSS} />
-      {t("mods.badgeRevoked")}
+      <span className="badge-text">{t("mods.badgeRevoked")}</span>
     </span>
   );
 }
@@ -46,7 +46,7 @@ export function ChannelBadge({ channel }: { channel: Channel | null }) {
   if (!channel || channel === "release") return null;
   return (
     <span className="badge channel">
-      {t(channel === "experimental" ? "mods.badgeExperimental" : "mods.badgePrerelease")}
+      <span className="badge-text">{t(channel === "experimental" ? "mods.badgeExperimental" : "mods.badgePrerelease")}</span>
     </span>
   );
 }

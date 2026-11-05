@@ -396,7 +396,11 @@ button:disabled { cursor: not-allowed; }
 .mod-main { min-width: 0; }
 /* One line: the name gives way first (with its full text a hover or Tab away), never the row height. */
 .mod-title { display: flex; align-items: center; gap: 12px; min-width: 0; overflow: hidden; }
-.mod-title > :not(.mod-name) { flex: none; }
+/* The name is what the player goes by, so the badges give way first: their words shorten (the
+   icon stays, and the tier is in the hover and the dialogs), then the name. */
+.mod-title > .badge { flex: 0 1000 auto; min-width: 36px; overflow: hidden; }
+.mod-title > .badge.channel { min-width: 24px; }
+.mod-title .badge-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .mod-name { font-size: 24px; line-height: 32px; color: var(--a3); }
 .mod-version { color: var(--g5); }
 .mod-meta { margin-top: 0; color: var(--g5); line-height: 24px; }
@@ -405,7 +409,10 @@ button:disabled { cursor: not-allowed; }
 .update-btn-row { display: inline-flex; align-items: center; gap: 8px; }
 .update-btn-row .pixel-icon { margin-top: 0; }
 .mod-meta.bad .mod-meta-text { color: var(--r3); }
-.mod-title .mod-name { flex: 0 1 auto; max-width: 100%; }
+/* It never shrinks a fraction (that would cut a name that fits); it stops where the badges keep
+   their icons. */
+.mod-title > .mod-name.truncate { flex: 0 0 auto; max-width: calc(100% - 48px); }
+.mod-title:has(> .badge.channel) > .mod-name.truncate { max-width: calc(100% - 84px); }
 .mod-actions { display: flex; align-items: center; gap: 8px; }
 .mod-actions .progress-container { width: 200px; }
 .mod-card-foot .progress-container { width: 160px; }
@@ -490,19 +497,20 @@ button:disabled { cursor: not-allowed; }
 .typed-confirm strong { color: var(--a3); }
 .typed-confirm .text-input { flex: 1 1 160px; height: 36px; }
 .source-list { display: grid; gap: 4px; margin-top: 16px; }
-.source-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "badge name retry action" "meta meta meta meta"; gap: 0 12px; align-items: center; padding: 8px 12px; background: var(--ink); }
+.source-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "name retry action" "meta meta meta"; gap: 0 12px; align-items: center; padding: 8px 12px; background: var(--ink); }
 .source-row-retry { grid-area: retry; }
 .source-actions { grid-area: action; display: flex; align-items: center; gap: 12px; }
 .source-detail { color: var(--g5); overflow-wrap: anywhere; }
 .source-refresh { display: block; }
-.source-row .badge { grid-area: badge; }
-.source-name { grid-area: name; overflow-wrap: anywhere; }
+/* The name, then what kind of source it is; the badge goes under the name when both don't fit. */
+.source-title { grid-area: name; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
+.source-name { overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
 /* Under the name and the buttons, across the row: a cause in Russian has room to say itself. */
 .source-meta { grid-area: meta; color: var(--g5); line-height: 24px; margin-top: 4px; }
 .source-meta.bad { color: var(--r3); }
 .source-row > button { grid-area: action; }
 .source-name.truncate { display: block; }
-.source-row.confirming { grid-template-areas: "badge name name name" "meta meta meta meta" "confirm confirm confirm confirm"; }
+.source-row.confirming { grid-template-areas: "name name name" "meta meta meta" "confirm confirm confirm"; }
 .source-confirm { grid-area: confirm; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-top: 8px; color: var(--a3); line-height: 24px; }
 .source-confirm-actions { display: flex; gap: 8px; }
 .source-error { grid-column: 1 / -1; margin-top: 8px; }
@@ -583,5 +591,4 @@ button:disabled { cursor: not-allowed; }
 .check-same .check-mark { background: var(--g2); color: var(--pale); }
 .version-note { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px 12px; }
 .filters { padding-right: 4px; }
-.mod-title .badge { flex: none; }
 .mod-meta .mod-version { color: var(--g5); }

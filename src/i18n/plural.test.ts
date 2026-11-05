@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fill, initI18n, pluralKey, tn, t } from "./index";
+import { fill, formatDay, initI18n, pluralKey, tn, t } from "./index";
 import en from "./en.json";
 import ru from "./ru.json";
 import ptBR from "./pt-BR.json";
@@ -78,13 +78,16 @@ describe("locale files", () => {
 
   it("use the Russian glossary for the tiers, everywhere", () => {
     const mods = (ru as unknown as { mods: Record<string, string> }).mods;
-    expect([mods.badgeReviewed, mods.badgeUnreviewed, mods.badgeUnverified]).toEqual(["Проверен", "Не проверен", "Неизвестный"]);
+    // "Неизвестный" (unknown) read like the "?" of a check nobody could make; «Без проверки» is the tier.
+    expect([mods.badgeReviewed, mods.badgeUnreviewed, mods.badgeUnverified]).toEqual(["Проверен", "Не проверен", "Без проверки"]);
     // "Одобрен" was the old word for Reviewed; one word per tier, so it pairs with "Не проверен".
     // "Не верифицирован" read as a synonym of "Не проверен", not as the weaker tier.
     const all = JSON.stringify(ru);
     expect(all).not.toMatch(/[Оо]добр/);
     expect(all).not.toMatch(/верифиц/);
-    expect(mods.fileUnverifiedTitle).toMatch(/неизвестный файл/);
+    expect(mods.fileUnverifiedTitle).toMatch(/без проверки/);
+    // «Отзыв» also means a review: a revocation is always «отозван…».
+    expect(all).not.toMatch(/[Оо]тзыв/);
     // A copy leaves the mods where they were: «Скопировать», never «Перенести» (move).
     expect(all).not.toMatch(/[Пп]еренес|[Пп]еренос/);
     // Only the words: a key may still be called "digest".
@@ -108,5 +111,24 @@ describe("locale files", () => {
         expect(value, `${locale} ${key}`).not.toMatch(/(?<!\.)\.\.(?!\.)|[!?:]\.|\s[.,:;]/);
       }
     }
+  });
+});
+
+describe("formatDay", () => {
+  // Messages end "… from {0}." or go on with "{0}: …", so a date that ends in its own dot reads "нояб..".
+  it("never ends in a dot of its own, this year or an earlier one", () => {
+    const now = new Date("2026-11-05T12:00:00Z");
+    for (const locale of ["en", "ru", "pt-BR", "es"] as const) {
+      initI18n(locale);
+      for (const iso of ["2026-11-03T12:00:00Z", "2025-11-03T12:00:00Z"]) {
+        const day = formatDay(iso, now);
+        expect(day, `${locale} ${iso}`).not.toMatch(/\.$/);
+        expect(day, `${locale} ${iso}`).toMatch(/3/);
+      }
+    }
+    initI18n("ru");
+    expect(formatDay("2026-11-03T12:00:00Z", now)).toBe("3 ноября");
+    expect(formatDay("2025-11-03T12:00:00Z", now)).toBe("3 нояб. 2025");
+    initI18n("en");
   });
 });

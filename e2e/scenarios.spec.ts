@@ -124,7 +124,7 @@ const CHECKS: Record<string, Checks> = {
       const lead = page.locator(".banner.compact");
       await expect(lead).toHaveClass(/warn/);
       await expect(lead.locator(".banner-actions button")).toHaveCount(1);
-      if (en) await expect(lead).toContainText("Reviewed mods are unavailable");
+      if (en) await expect(lead).toContainText("Reviewed mods unavailable");
       await expect(page.locator(".mod-card .trust-reviewed")).toHaveCount(0);
     },
   },

@@ -126,9 +126,16 @@ export function formatDay(iso: string | null | undefined, now: Date = new Date()
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const year = d.getFullYear() === now.getFullYear() ? undefined : 'numeric';
-  // Russian short months end in a dot ("нояб."), which reads as a full stop before one.
-  const month = currentLocale === 'ru' ? 'long' : 'short';
-  return d.toLocaleDateString(currentLocale, { day: 'numeric', month, year });
+  // Messages put their own punctuation after a date, so it never ends in a dot of its own:
+  // a short month that is an abbreviation ("нояб.", "nov.") gives way to the long one, and a
+  // trailing marker after the year (Russian "г.") is left off.
+  const day = (month: 'short' | 'long') => {
+    const parts = new Intl.DateTimeFormat(currentLocale, { day: 'numeric', month, year }).formatToParts(d);
+    while (parts.length && parts[parts.length - 1].type === 'literal') parts.pop();
+    return parts.map((p) => p.value).join('');
+  };
+  const short = day('short');
+  return short.endsWith('.') ? day('long') : short;
 }
 
 export function formatSize(bytes: number): string {
