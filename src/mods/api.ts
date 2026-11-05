@@ -1,11 +1,27 @@
 // Every backend command goes through `call`, typed by the generated `CommandSignatures`: a renamed
 // command or argument, or a changed result, fails to compile here instead of failing at runtime.
-// A rejected promise carries an AppErrorPayload; `asAppError` says "Unknown" for anything else.
+// A command that fails rejects with a CommandError, always: the backend's AppErrorPayload as it
+// was, or "Unknown" with what there was for anything else (`asAppError`), so no caller is handed
+// a bare string or an unknown shape.
 
 import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
 import { listen, type EventCallback, type UnlistenFn } from "@tauri-apps/api/event";
 import type { CommandSignatures, EventPayloads } from "./bindings/commands";
 import { COMMANDS } from "./ipc";
+import { asAppError } from "../i18n/errors";
+import type { ErrorCode, UiError } from "./types";
+
+/** How every backend command fails: an Error, with the code and detail of the payload. */
+export class CommandError extends Error implements UiError {
+  readonly code: ErrorCode | "Unknown";
+  readonly detail: string | null;
+  constructor(readonly command: string, e: UiError) {
+    super(e.detail ? `${command}: ${e.code}: ${e.detail}` : `${command}: ${e.code}`);
+    this.name = "CommandError";
+    this.code = e.code;
+    this.detail = e.detail;
+  }
+}
 
 export type CommandArgs<K extends keyof CommandSignatures> = CommandSignatures[K]["args"];
 export type CommandResult<K extends keyof CommandSignatures> = CommandSignatures[K]["result"];
@@ -15,7 +31,9 @@ export function call<K extends keyof CommandSignatures>(
   cmd: K,
   args: CommandSignatures[K]["args"],
 ): Promise<CommandSignatures[K]["result"]> {
-  return invoke<CommandSignatures[K]["result"]>(cmd, args as InvokeArgs);
+  return invoke<CommandSignatures[K]["result"]>(cmd, args as InvokeArgs).catch((err: unknown) => {
+    throw err instanceof CommandError ? err : new CommandError(cmd, asAppError(err));
+  });
 }
 
 /** Listens to a backend event with its generated payload type. */
@@ -78,4 +96,4 @@ export const launcherApi = {
 };
 
 /** Whatever a command rejected with, as a `UiError`: one parser, in `i18n/errors`. */
-export { asAppError } from "../i18n/errors";
+export { asAppError };
