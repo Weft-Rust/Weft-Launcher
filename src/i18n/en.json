@@ -522,7 +522,7 @@
     "checksPassed_other": "{n} checks passed",
     "checksShow": "Show",
     "checksHide": "Hide",
-    "checksShowValues": "Show full values"
+    "checksShowDetails": "Show details"
   },
   "sizeUnits": {
     "B": "B",

@@ -555,7 +555,7 @@
     "checksPassed_other": "{n} verificações aprovadas",
     "checksShow": "Mostrar",
     "checksHide": "Ocultar",
-    "checksShowValues": "Mostrar valores completos"
+    "checksShowDetails": "Mostrar detalhes"
   },
   "sizeUnits": {
     "B": "B",

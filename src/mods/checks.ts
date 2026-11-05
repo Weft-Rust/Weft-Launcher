@@ -36,6 +36,11 @@ export interface CheckRow {
    * nobody reviewed hasn't failed anything, it is Unreviewed.
    */
   said?: MessageKey;
+  /**
+   * The detail says again what the title, or the dialog's warning, already says: it folds with
+   * the checks that passed, so what is new stays in view in a small window.
+   */
+  aside?: boolean;
 }
 
 const sha = (s: string) => ({ code: s, short: shortSha(s) });
@@ -64,6 +69,8 @@ export function buildChecks(v: CatalogVersion, indexFrom: string | null = null):
       said: "mods.badgeUnreviewed",
       title: { key: "mods.ckNotIndex" },
       detail: { key: "mods.ckNotIndexDetail", args: [v.sourceRepo] },
+      // Every dialog showing this row warns, above it, whose repo it is and that nobody reviewed it.
+      aside: true,
     });
   }
   // The file name shows; the whole path is a hover or a Tab away, so two workflows of the same name differ.
@@ -103,7 +110,7 @@ function buildRecordCheck(v: CatalogVersion, workflow: Arg): CheckRow {
         detail: { key: "mods.ckBuiltClaimedDetail", args: [p?.repo ?? v.sourceRepo, commit(v.sourceCommit), workflow] },
       };
     case "none":
-      return { id: "provenance", state: "unknown", title: { key: "mods.ckNoBuild" }, detail: { key: "mods.ckNoBuildDetail" } };
+      return { id: "provenance", state: "unknown", title: { key: "mods.ckNoBuild" }, detail: { key: "mods.ckNoBuildDetail" }, aside: true };
   }
 }
 

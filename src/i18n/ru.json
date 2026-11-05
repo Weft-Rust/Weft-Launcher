@@ -588,7 +588,7 @@
     "checksPassed_other": "{n} проверки пройдено",
     "checksShow": "Показать",
     "checksHide": "Скрыть",
-    "checksShowValues": "Показать полные значения"
+    "checksShowDetails": "Подробнее"
   },
   "sizeUnits": {
     "B": "Б",

@@ -211,6 +211,15 @@ const COPY_FROM: Record<(typeof LOCALES)[number], string> = {
   ru: "Скопировать моды из…",
 };
 
+/** Shown check rows (and the passed-checks line) of the open dialog that need a scroll to see. */
+const checksBelowFold = (page: Page) =>
+  page.evaluate(() => {
+    const body = document.querySelector("[role=dialog] .dialog-body")!.getBoundingClientRect();
+    return [...document.querySelectorAll<HTMLElement>("[role=dialog] .check:not([hidden])")]
+      .filter((c) => c.getBoundingClientRect().bottom > body.bottom + 0.5)
+      .map((c) => c.dataset.check);
+  });
+
 for (const locale of LOCALES) {
   for (const scenario of SCENARIOS) {
     test(`${scenario.name} in ${locale}`, async ({ page }) => {
@@ -302,7 +311,18 @@ for (const locale of LOCALES) {
     const checks = await page.locator("[role=dialog] .checks").boundingBox();
     expect(warning!.y).toBeLessThan(checks!.y);
     expect(warning!.y + warning!.height).toBeLessThanOrEqual(565);
+    expect(await checksBelowFold(page), "check rows below the fold").toEqual([]);
     await page.keyboard.press("Escape");
+
+    // A new install from Browse: every shown check row and the passed-checks line are in view
+    // without scrolling.
+    await page.locator(".switch [role=tab]").nth(1).click();
+    await page.locator(".mod-card", { hasText: "Hearth" }).locator(".mod-card-foot .btn-primary").click();
+    await expect(page.locator("[role=dialog] .check-fold")).toBeVisible();
+    await expectFits(page);
+    expect(await checksBelowFold(page), "check rows below the fold").toEqual([]);
+    await page.keyboard.press("Escape");
+    await page.locator(".switch [role=tab]").first().click();
 
     // The unverified file dialog is the tallest: warning in view, typed confirmation in the footer.
     await page.locator(".toolbar-actions button").first().click();
