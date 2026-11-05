@@ -115,6 +115,13 @@ fn copy_into(from: &Path, to: &Path) -> std::io::Result<()> {
 /// Makes the profile's `mods/` hold exactly the turned-on mods, each with the bytes that were
 /// verified at install. A file changed since then is replaced from the store; a changed store
 /// file is an error, never handed to the game.
+///
+/// Idempotent, and safe to interrupt: it works out what to do from the lock and the folder as
+/// they are, never from what an earlier run meant to do, and every copy is written beside its
+/// target and renamed into place, so a crash leaves at worst a `.part` file (removed by the next
+/// run, like any name the lock doesn't have) and some mods not yet copied. Every save runs it,
+/// and so does every launch (`service::prepare_launch`, under `ModsLock`), so the folder the
+/// game reads is put right before each start whatever happened before.
 pub fn reconcile(paths: &Paths, tag: &str, lock: &Lock) -> Result<(), ModsError> {
     let dir = paths.mods_dir(tag)?;
     std::fs::create_dir_all(&dir)?;
@@ -397,6 +404,67 @@ mod tests {
         std::fs::write(dir.join("a.zip"), b"tampered").unwrap();
         reconcile(&paths, "v1", &l).unwrap();
         assert_eq!(std::fs::read(dir.join("a.zip")).unwrap(), b"mod a");
+    }
+
+    /// A reconcile that stopped partway (a crash, a full disk) is finished by the next one, and a
+    /// reconcile with nothing to do changes nothing.
+    #[test]
+    fn an_interrupted_reconcile_is_finished_by_the_next() {
+        let (_tmp, paths) = setup();
+        let a = store(&paths, b"mod a");
+        let b = store(&paths, b"mod b");
+        let c = store(&paths, b"mod c");
+        let l = lock(vec![
+            installed("a", &a, true),
+            installed("b", &b, true),
+            installed("c", &c, false),
+        ]);
+        let dir = paths.mods_dir("v1").unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        // As a run that died left it: a copy half written beside its target, the mod that was
+        // turned off not yet taken away, one mod not copied at all, and one already right.
+        std::fs::write(dir.join(".b.zip.123-4.part"), b"mod").unwrap();
+        std::fs::write(dir.join("c.zip"), b"mod c").unwrap();
+        std::fs::write(dir.join("a.zip"), b"mod a").unwrap();
+
+        reconcile(&paths, "v1", &l).unwrap();
+        let listing = || {
+            let mut names: Vec<(String, Vec<u8>)> = std::fs::read_dir(&dir)
+                .unwrap()
+                .map(|e| {
+                    let e = e.unwrap();
+                    (
+                        e.file_name().to_string_lossy().to_string(),
+                        std::fs::read(e.path()).unwrap(),
+                    )
+                })
+                .collect();
+            names.sort();
+            names
+        };
+        let after = listing();
+        assert_eq!(
+            after,
+            [
+                ("a.zip".to_string(), b"mod a".to_vec()),
+                ("b.zip".to_string(), b"mod b".to_vec())
+            ]
+        );
+        let modified = std::fs::metadata(dir.join("a.zip"))
+            .unwrap()
+            .modified()
+            .unwrap();
+
+        reconcile(&paths, "v1", &l).unwrap();
+        assert_eq!(listing(), after, "again: the same folder");
+        assert_eq!(
+            std::fs::metadata(dir.join("a.zip"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            modified,
+            "a right copy is left alone, not written again"
+        );
     }
 
     /// Contract R4 §7: a version's folder holds copies. Writing into one in place reaches
