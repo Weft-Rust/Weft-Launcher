@@ -42,7 +42,17 @@ npm run tauri dev     # dev mode (plain `cargo run` won't work - UI is served by
 npm run tauri build   # installer
 ```
 
-Before a PR: `cargo fmt --check && cargo clippy && cargo test` in `src-tauri`, and `npm run build`. UI strings go through `src/i18n` - add keys to all four languages (en, pt-BR, es, ru); `npm run check:i18n` (also part of `npm run build`) lists missing keys, placeholder mismatches, missing plural forms (counted messages have `_one`, `_other` and, per language, `_few`/`_many` keys), message keys used in `src` that don't exist, and backend error codes without an `errors.*` message. `npm test` runs the unit tests (vitest) for the pure logic in `src/mods` and `src/i18n`, and the mock's rules against the backend's cases. `npm run test:ui` runs the UI tests (Playwright, `e2e/`): every mock scenario in all four languages at the minimum 960×565 window, plus the install, launch-safety and keyboard flows. Run `npx playwright install chromium` once first. CI (`.github/workflows/ci.yml`) runs all of these on every pull request.
+Before a PR:
+
+- `cargo fmt --check && cargo clippy && cargo test` in `src-tauri`.
+- `npm run build`, which runs `npm run check:i18n` first. UI strings go through `src/i18n`: add keys to all four languages (en, pt-BR, es, ru). The check lists missing keys, placeholder mismatches, missing plural forms (counted messages have `_one`, `_other` and, per language, `_few`/`_many` keys), message keys used in `src` that don't exist, and backend error codes without an `errors.*` message. A message with `{0}` takes a name the backend sends (a mod, a version, a repo); any other backend detail is shown apart, behind "Details", never inside a translated sentence.
+- `npm test`: the unit tests (vitest) for the pure logic in `src/mods` and `src/i18n`, and the mock's rules against the shared cases.
+- `npm run test:ui`: the UI tests (Playwright, `e2e/`). Every mock scenario in all four languages at the minimum 960×565 window (layout, rows in view, the state the scenario is for), plus the install, cancel, re-plan, launch-safety, recovery and keyboard flows. Run `npx playwright install chromium` once first, or point `PW_CHROMIUM` at an installed Chromium.
+- `cd src-tauri && cargo test export_bindings -- --ignored` regenerates `src/mods/bindings` after a change to an IPC type.
+
+CI (`.github/workflows/ci.yml`) runs all of these on every pull request.
+
+The pixel font (`src/fonts/weft.woff2`) has Latin, Cyrillic and the accented letters pt-BR and es use; `scripts/font-glyphs.py` draws those from the font's own letters.
 
 ### UI without Tauri
 
@@ -50,7 +60,7 @@ Before a PR: `cargo fmt --check && cargo clippy && cargo test` in `src-tauri`, a
 npm run dev:mock      # http://localhost:1420/?scenario=mods
 ```
 
-Runs the UI in a browser against a fake backend (`src/dev/mockBackend.ts`). Its rules are the backend's, ported in `src/dev/mockRules.ts` (plans, dependency resolution, installs turned off for a missing dependency, cascades, revocations kept in the lock, copy previews, Remove and Undo) and checked by `npm test` against the cases of the Rust table tests (`src/dev/fixtures/rules.json`); crashes are engine log lines read by a port of `diagnose.rs`, tested against that file's own fixtures. The mock is never part of a production build.
+Runs the UI in a browser against a fake backend (`src/dev/mockBackend.ts`). Its rules are the backend's, ported in `src/dev/mockRules.ts` (plans and their tokens, dependency resolution through installed mods, installs turned off for a missing dependency, cascades, revocations read fail-closed and kept in the lock, copies of managed mods in the player's own folder, copy previews, Remove and Undo) and checked by `npm test` against the shared cases in `src/dev/fixtures/rules.json`, which a Rust test runs against the real backend too. Operations have ids, report which file of how many they are on, and can be cancelled; crashes are engine log lines read by a port of `diagnose.rs`, tested against that file's own fixtures. The mock is never part of a production build.
 
 Pick a state with `?scenario=` and adjust it with flags, which combine: `?scenario=mods&index=cached&revoked=cogwork&slow=1`. Flags in the URL override the ones a scenario sets. Both lists come from `src/dev/scenarios.ts`; `npm test` fails if this README misses one.
 
@@ -69,6 +79,8 @@ Pick a state with `?scenario=` and adjust it with flags, which combine: `?scenar
 | `missingdep` | Mods that need others: Hearth needs Cogwork, which is off; Lanterns needs Glowmoss, which isn't installed; Railways needs Signals, which has no build yet. | — |
 | `lateblock` | Nothing blocks Play until Play itself finds Cogwork revoked; Hearth, which needs it, then blocks the start. | `prelaunch=revoke` |
 | `long` | Very long mod names, ids and repos, for overflow checks. | `long=1` |
+| `shadowed` | Cogwork is revoked, and the player's own mods folder has a copy of it, which would load in its place: Play is blocked until that file goes. | `revoked=cogwork` `shadow=cogwork` |
+| `chain` | Mods that need mods that need others: Chimneys needs Hearth, which needs Cogwork, both installed and off; Junctions needs Railways, which needs Signals, which has no build. | `chain=1` |
 
 | Flag | Values | Effect |
 |---|---|---|
@@ -76,12 +88,15 @@ Pick a state with `?scenario=` and adjust it with flags, which combine: `?scenar
 | `source` | `ok`, `notfound`, `ratelimited`, `offline` | State of the added GitHub source. |
 | `revoked` | `<mod id>` | Revokes the installed builds of that mod. |
 | `abi` | `error` | The game version's mod interface can't be found out. |
-| `fail` | `install`, `network`, `toolarge`, `dep`, `meanwhile`, `catalog`, `sources` | Comma-separated. Installs fail at the hash check, mid-download, before it, while downloading a dependency, or because the set changed meanwhile; the catalogue or the source list fails to load. |
-| `file` | `unverified`, `known`, `notamod`, `revoked`, `wrongplatform` | What From file picks. |
+| `fail` | `install`, `network`, `toolarge`, `dep`, `meanwhile`, `catalog`, `sources` | Comma-separated. Installs fail at the hash check, mid-download, before it, or while downloading a dependency; `meanwhile` publishes a newer Glowmoss after the first plan, so a plan with Glowmoss in it is refused as changed and planned again; the catalogue or the source list fails to load. |
+| `file` | `unverified`, `known`, `notamod`, `revoked`, `revokedlate`, `wrongplatform` | What From file picks; `revokedlate` is revoked by the index while it is being installed. |
+| `shadow` | `<mod id>` | The player's own mods folder has a copy of that mod, which loads when the launcher's is off or revoked. |
+| `revocations` | `messy` | Revocations come with uppercase hashes, no reason or time, and one entry that isn't a hash: they still revoke, and only that one is dropped. |
+| `chain` | `1` | Adds Chimneys and Junctions, which need mods that need others. |
 | `crash` | `wrongVersion`, `loadFailed`, `notAMod`, `wrongName`, `missingDep`, `initPanicked`, `exit` | Play starts the game and it stops with this failure; `exit` is a crash that names no mod. |
 | `prelaunch` | `revoke` | Play finds Cogwork revoked, as a fresh index would, before it starts the game. |
 | `long` | `1` | Adds very long names, ids and repos. |
-| `slow` | `1` | Everything takes four times as long. |
+| `slow` | `1` | Everything takes four times as long: time enough to press Cancel. |
 
 ## Releasing
 
