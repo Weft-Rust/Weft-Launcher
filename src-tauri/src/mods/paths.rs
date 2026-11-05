@@ -116,15 +116,30 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ModsError> {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
     let tmp = path.with_file_name(format!(".{name}.{}.tmp", unique_suffix()));
-    let result = (|| {
+    let result = (|| -> std::io::Result<()> {
         use std::io::Write;
         let mut file = std::fs::File::create(&tmp)?;
         file.write_all(bytes)?;
         file.sync_all()?;
-        std::fs::rename(&tmp, path)
+        std::fs::rename(&tmp, path)?;
+        sync_dir(path.parent());
+        Ok(())
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
     Ok(result?)
+}
+
+/// So the rename itself survives a power cut. Only where a folder can be opened and synced:
+/// Windows makes the rename durable on its own.
+fn sync_dir(dir: Option<&Path>) {
+    #[cfg(unix)]
+    if let Some(dir) = dir
+        && let Ok(d) = std::fs::File::open(dir)
+    {
+        let _ = d.sync_all();
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
 }

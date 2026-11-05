@@ -1,6 +1,7 @@
 //! The files behind the mod sets: `mods/store/<sha256>.zip` holds every verified mod once, each
 //! profile's `mods.lock.json` lists what is installed, and the profile's `mods/` folder holds
-//! exactly the turned-on mods. A mod that is off is not in that folder at all: the engine runs
+//! exactly the turned-on mods, each as its own copy of the store file (never a hard link, so a
+//! write to one can't reach the store or another version). A mod that is off is not in that folder at all: the engine runs
 //! code even from mods it was told to skip, so leaving the file out is the only real "off".
 //!
 //! [`admit`] is the one way into the store: it hashes the file, checks the zip and the platform.
@@ -46,7 +47,8 @@ fn check_lock(lock: &Lock) -> Result<(), ModsError> {
 fn read_lock_file(path: &Path) -> Result<Lock, ModsError> {
     match std::fs::read(path) {
         Ok(bytes) => {
-            let lock: Lock = serde_json::from_slice(&bytes)?;
+            let lock: Lock = serde_json::from_slice(&bytes)
+                .map_err(|e| ModsError::LockInvalid(e.to_string()))?;
             check_lock(&lock)?;
             Ok(lock)
         }
@@ -94,11 +96,20 @@ pub fn write_lock(paths: &Paths, tag: &str, lock: &Lock) -> Result<(), ModsError
     write_atomic(&paths.lock_file(tag)?, &serde_json::to_vec_pretty(lock)?)
 }
 
-fn link_or_copy(from: &Path, to: &Path) -> std::io::Result<()> {
-    if std::fs::hard_link(from, to).is_ok() {
-        return Ok(());
+/// A copy of `from` at `to`, written beside it and renamed into place. `std::fs::copy` clones
+/// the data where the system can (`clonefile` on APFS, `copy_file_range` on Linux, which
+/// reflinks on Btrfs and XFS); either way the result is a file of its own.
+fn copy_into(from: &Path, to: &Path) -> std::io::Result<()> {
+    let tmp = to.with_file_name(format!(
+        ".{}.{}.part",
+        to.file_name().unwrap_or_default().to_string_lossy(),
+        unique_suffix()
+    ));
+    let result = std::fs::copy(from, &tmp).and_then(|_| std::fs::rename(&tmp, to));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
-    std::fs::copy(from, to).map(|_| ())
+    result
 }
 
 /// Makes the profile's `mods/` hold exactly the turned-on mods, each with the bytes that were
@@ -135,7 +146,7 @@ pub fn reconcile(paths: &Paths, tag: &str, lock: &Lock) -> Result<(), ModsError>
                 actual,
             });
         }
-        link_or_copy(&stored, &target)?;
+        copy_into(&stored, &target)?;
     }
     Ok(())
 }
@@ -302,7 +313,8 @@ pub fn admit_stored(
 }
 
 /// Copies a file from the player's computer into the store, refusing it if its bytes are not the
-/// ones that were inspected.
+/// ones that were inspected. Only a regular file, and no more than [`archive::MAX_FILE_BYTES`]
+/// is read, even from a file that grows meanwhile.
 pub fn admit_local(
     paths: &Paths,
     source: &Path,
@@ -310,10 +322,21 @@ pub fn admit_local(
     id: Option<&str>,
     platform: Option<Platform>,
 ) -> Result<ArchiveInfo, ModsError> {
+    super::inspect::checked_size(source)?;
     let tmp = temp_path(paths, sha256)?;
-    if let Err(e) = std::fs::copy(source, &tmp) {
+    let copied = (|| -> Result<(), ModsError> {
+        use std::io::Read;
+        let max = archive::MAX_FILE_BYTES;
+        let mut from = std::fs::File::open(source)?.take(max + 1);
+        let mut to = std::fs::File::create(&tmp)?;
+        if std::io::copy(&mut from, &mut to)? > max {
+            return Err(ModsError::TooLarge("larger than 512 MB".into()));
+        }
+        Ok(())
+    })();
+    if let Err(e) = copied {
         let _ = std::fs::remove_file(&tmp);
-        return Err(e.into());
+        return Err(e);
     }
     admit(paths, &tmp, sha256, id, platform).map_err(|e| match e {
         ModsError::Sha256Mismatch { .. } => ModsError::FileChanged,
@@ -374,6 +397,39 @@ mod tests {
         std::fs::write(dir.join("a.zip"), b"tampered").unwrap();
         reconcile(&paths, "v1", &l).unwrap();
         assert_eq!(std::fs::read(dir.join("a.zip")).unwrap(), b"mod a");
+    }
+
+    /// Contract R4 §7: a version's folder holds copies. Writing into one in place reaches
+    /// neither the store nor another version, and the next reconcile puts it right.
+    #[test]
+    fn profiles_hold_copies_not_links() {
+        use std::io::Write;
+        let (_tmp, paths) = setup();
+        let a = store(&paths, b"mod a");
+        let l = lock(vec![installed("a", &a, true)]);
+        reconcile(&paths, "v1", &l).unwrap();
+        reconcile(&paths, "v2", &l).unwrap();
+        let in_v1 = paths.mods_dir("v1").unwrap().join("a.zip");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(std::fs::metadata(&in_v1).unwrap().nlink(), 1);
+            assert_eq!(std::fs::metadata(paths.store_object(&a)).unwrap().nlink(), 1);
+        }
+        let mut f = std::fs::OpenOptions::new().write(true).open(&in_v1).unwrap();
+        f.write_all(b"evil!").unwrap();
+        drop(f);
+        assert_eq!(std::fs::read(paths.store_object(&a)).unwrap(), b"mod a");
+        let in_v2 = paths.mods_dir("v2").unwrap().join("a.zip");
+        assert_eq!(std::fs::read(&in_v2).unwrap(), b"mod a");
+
+        reconcile(&paths, "v1", &l).unwrap();
+        assert_eq!(std::fs::read(&in_v1).unwrap(), b"mod a");
+        let names: Vec<String> = std::fs::read_dir(paths.mods_dir("v1").unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(names, ["a.zip"], "no temporary file is left");
     }
 
     #[test]
