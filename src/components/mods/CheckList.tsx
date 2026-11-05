@@ -36,14 +36,28 @@ const hasCode = (c: CheckRow) => [c.title, c.detail].some((m) => m?.args?.some((
  * again what is above them (`aside`). That line's one control shows them, and every shortened hash
  * and commit in the list whole: one tab stop for all of it.
  */
-export function CheckList({ checks, label, onRetry, retrying = false }: { checks: CheckRow[]; label: string; onRetry?: () => void; retrying?: boolean }) {
+export function CheckList({
+  checks,
+  label,
+  onRetry,
+  retrying = false,
+  whole = false,
+}: {
+  checks: CheckRow[];
+  label: string;
+  onRetry?: () => void;
+  retrying?: boolean;
+  /** Everything shown, every value whole, no fold: a list the player already asked to see. */
+  whole?: boolean;
+}) {
   const { t, tn } = useI18n();
-  const [open, setOpen] = useState(false);
+  const [shown, setOpen] = useState(false);
+  const open = whole || shown;
   const listId = useId();
   const passed = checks.filter((c) => c.state === "yes" || c.state === "same");
-  const folds = passed.length >= 2;
-  const codes = checks.some(hasCode);
-  const asides = checks.some((c) => c.aside && c.detail && !passed.includes(c));
+  const folds = !whole && passed.length >= 2;
+  const codes = !whole && checks.some(hasCode);
+  const asides = !whole && checks.some((c) => c.aside && c.detail && !passed.includes(c));
   return (
     <FullValues.Provider value={open}>
     <ul className="checks" aria-label={label} id={listId}>
@@ -84,7 +98,7 @@ export function CheckList({ checks, label, onRetry, retrying = false }: { checks
           </span>
           <span>
             {folds && <>{tn("mods.checksPassed", passed.length)} · </>}
-            <button className="link-btn check-fold-btn" aria-expanded={open} aria-controls={listId} onClick={() => setOpen(!open)}>
+            <button className="link-btn check-fold-btn" aria-expanded={open} aria-controls={listId} onClick={() => setOpen(!shown)}>
               {open ? t("mods.checksHide") : folds ? t("mods.checksShow") : t("mods.checksShowDetails")}
             </button>
           </span>

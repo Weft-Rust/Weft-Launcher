@@ -135,6 +135,16 @@ export function copyDonors(tags: string[], to: string, profiles: Record<string, 
   return tags.filter((t) => t !== to && (profiles[t]?.mods.some((m) => m.enabled) ?? false));
 }
 
+/** The catalogue build of mod `id` with this hash: where a copied build's evidence comes from. */
+export function buildBySha(catalog: Catalog | null, id: string, sha256: string): CatalogVersion | undefined {
+  for (const m of catalog?.mods ?? []) {
+    if (m.id !== id) continue;
+    const v = m.versions.find((x) => x.sha256 === sha256);
+    if (v) return v;
+  }
+  return undefined;
+}
+
 export function shortSha(sha: string): string {
   return `${sha.slice(0, 8)}…${sha.slice(-4)}`;
 }

@@ -319,7 +319,6 @@
     "copyInstalledOn": "Installed for {0}, turned on",
     "copyInstalledOff": "Installed for {0}, turned off",
     "copyFrom": "Copy mods from",
-    "copyIntro": "These changes will be made to {0}:",
     "copyWillInstall": "Installs its build for {0}",
     "copyAlreadyThere": "Already in {0}: left as it is",
     "copyNoBuild": "No build for {0} yet",
@@ -522,7 +521,14 @@
     "checksPassed_other": "{n} checks passed",
     "checksShow": "Show",
     "checksHide": "Hide",
-    "checksShowDetails": "Show details"
+    "checksShowDetails": "Show details",
+    "copyIntroNone": "Nothing in {0} changes:",
+    "copyEvidenceShow": "Show checks",
+    "copyEvidenceHide": "Hide checks",
+    "copyEvidenceFor": "What is known of {0}",
+    "copyNoEvidence": "The catalogue no longer lists this build",
+    "copyIntro_one": "Copying adds {n} mod to {0}. Nothing {0} has now is removed or replaced.",
+    "copyIntro_other": "Copying adds {n} mods to {0}. Nothing {0} has now is removed or replaced."
   },
   "sizeUnits": {
     "B": "B",

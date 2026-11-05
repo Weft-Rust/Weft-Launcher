@@ -326,7 +326,6 @@
     "copyInstalledOn": "Instalado para {0}, ligado",
     "copyInstalledOff": "Instalado para {0}, desligado",
     "copyFrom": "Copiar mods de",
-    "copyIntro": "Estas mudanças serão feitas em {0}:",
     "copyWillInstall": "Instala a compilação para {0}",
     "copyAlreadyThere": "Já está em {0}: fica como está",
     "copyNoBuild": "Ainda sem compilação para {0}",
@@ -555,7 +554,15 @@
     "checksPassed_other": "{n} verificações aprovadas",
     "checksShow": "Mostrar",
     "checksHide": "Ocultar",
-    "checksShowDetails": "Mostrar detalhes"
+    "checksShowDetails": "Mostrar detalhes",
+    "copyIntroNone": "Nada muda em {0}:",
+    "copyEvidenceShow": "Mostrar verificações",
+    "copyEvidenceHide": "Ocultar verificações",
+    "copyEvidenceFor": "O que se sabe de {0}",
+    "copyNoEvidence": "O catálogo não lista mais esta versão",
+    "copyIntro_one": "Copiar adiciona {n} mod a {0}. Nada do que {0} tem agora é removido ou substituído.",
+    "copyIntro_many": "Copiar adiciona {n} mods a {0}. Nada do que {0} tem agora é removido ou substituído.",
+    "copyIntro_other": "Copiar adiciona {n} mods a {0}. Nada do que {0} tem agora é removido ou substituído."
   },
   "sizeUnits": {
     "B": "B",

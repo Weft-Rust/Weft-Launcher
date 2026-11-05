@@ -367,6 +367,31 @@ test.describe("every install shows what it does", () => {
     expect(first.slice(0, stays.length).every((c) => /check-no/.test(c))).toBe(true);
     await expect(d.locator("li", { hasText: "Glowmoss 0.3.0: a copied mod needs it" }).locator(".badge")).toHaveText("Unreviewed");
     await expect(d.locator(".dialog-warning")).toContainText("nobody reviewed these: Lanterns and Glowmoss");
+    // One line says what the copy does, and stays: it adds, and replaces nothing. The title
+    // names the one version it copies from; no line under it says that again.
+    await expect(d.getByTestId("copy-intro")).toContainText("Copying adds 4 mods to v26.11.1. Nothing v26.11.1 has now is removed or replaced.");
+    await expect(d.locator(".dialog-field")).toHaveCount(0);
+    // Each build it installs, dependencies too, shows what its own install dialog would: review,
+    // the whole hash, build record. One control for all of them, and no tab stop per value.
+    const evidence = d.locator(".copy-evidence-btn");
+    await expect(evidence).toHaveAttribute("aria-expanded", "false");
+    await expect(d.locator(".copy-item .checks")).toHaveCount(0);
+    await evidence.click();
+    await expect(evidence).toHaveAttribute("aria-expanded", "true");
+    const installs = await d.locator(".copy-list > li.check-yes").count();
+    await expect(d.locator(".copy-item .checks")).toHaveCount(installs);
+    for (const list of await d.locator(".copy-item .checks").all()) {
+      await expect(list.locator("[data-check=review]")).toHaveCount(1);
+      await expect(list.locator("[data-check=pin] .code-full")).toHaveText(/^[0-9a-f]{64}$/);
+      await expect(list.locator("[data-check=provenance]")).toHaveCount(1);
+    }
+    const glowEvidence = d.locator(".copy-item", { hasText: "Glowmoss 0.3.0" }).locator(".checks");
+    await expect(glowEvidence.locator("[data-check=review]")).toHaveClass(/check-no/);
+    await expect(glowEvidence.locator("[data-check=review]")).toContainText("Published by");
+    expect(await d.locator(".copy-item [tabindex], .copy-item button").count()).toBe(0);
+    await expectWhole(page, "copy evidence");
+    await evidence.click();
+    await expect(d.locator(".copy-item .checks")).toHaveCount(0);
     await d.locator(".dialog-actions .btn-primary", { hasText: "Copy 4 mods to v26.11.1" }).click();
     await expect(d.locator(".dialog-title")).toHaveText("Mods copied to v26.11.1", { timeout: 30_000 });
     // The four it was asked for, and Glowmoss, which one of them needs.

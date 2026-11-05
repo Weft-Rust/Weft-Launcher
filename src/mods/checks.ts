@@ -126,6 +126,16 @@ export function pinCheck(v: CatalogVersion): CheckRow {
       };
 }
 
+/**
+ * What is known of one catalogue build wherever it is offered: its review, how its download is
+ * pinned (with the hash) and its build record. The install dialog's first rows; a copy shows the
+ * same for each build it installs.
+ */
+export function evidenceChecks(v: CatalogVersion, indexFrom: string | null = null): CheckRow[] {
+  const build = buildChecks(v, indexFrom);
+  return [...build.slice(0, 1), pinCheck(v), ...build.slice(1)];
+}
+
 export interface InstallCheckContext {
   tag: string;
   /** A mod's display name by id. */
@@ -205,8 +215,7 @@ export function withProblem(problem: AppErrorPayload | null, rows: CheckRow[]): 
 /** Everything the install and update dialogs show, from the backend's plan. */
 export function installChecks(plan: InstallPlan, v: CatalogVersion, ctx: InstallCheckContext): CheckRow[] {
   const rows: CheckRow[] = [];
-  const build = buildChecks(v, ctx.indexFrom ?? null);
-  rows.push(...build.slice(0, 1), pinCheck(v), ...build.slice(1));
+  rows.push(...evidenceChecks(v, ctx.indexFrom ?? null));
   rows.push(abiCheck(plan, v, ctx));
   rows.push(...planDepChecks(plan, v.deps, ctx));
   return withProblem(plan.problem, rows);

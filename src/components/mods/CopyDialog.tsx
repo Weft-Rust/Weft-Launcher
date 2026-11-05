@@ -3,15 +3,16 @@ import { useI18n } from "../../i18n/useI18n";
 import type { Shown } from "../../i18n/errors";
 import { useMods } from "../../hooks/useMods";
 import { usePlan } from "../../hooks/usePlan";
-import type { CopyItem, CopyPreview, CopyResult, InstalledMod, Trust, UiProgress } from "../../mods/types";
-import { activeStep, consentChanges, copyConsentView, type CheckState, type ConsentView } from "../../mods/checks";
+import type { Catalog, CopyItem, CopyPreview, CopyResult, InstalledMod, Trust, UiProgress } from "../../mods/types";
+import { activeStep, consentChanges, copyConsentView, evidenceChecks, type CheckState, type ConsentView } from "../../mods/checks";
 import { COPY_OUTCOME, copyConsent } from "../../mods/copyPlan";
-import { networkDown } from "../../mods/select";
+import { buildBySha, networkDown } from "../../mods/select";
+import { useCheckContext } from "../../hooks/useCheckContext";
 import { Dialog } from "../Dialog";
 import { ErrorText } from "../ErrorText";
 import { VersionSelect } from "../VersionSelect";
 import { Truncate } from "../Truncate";
-import { CheckMark } from "./CheckList";
+import { CheckList, CheckMark } from "./CheckList";
 import { ModProgressBar } from "./ModProgressBar";
 import { PlanChanges, useOutcomeNote } from "./PlanChanges";
 import { TrustBadge } from "./TrustBadge";
@@ -41,6 +42,10 @@ export function CopyDialog({ tag, donors, onClose }: CopyDialogProps) {
   const [changedFrom, setChangedFrom] = useState<ConsentView | null>(null);
   const outcomeNote = useOutcomeNote();
   const fromLabelId = useId();
+  const listsId = useId();
+  /** Each build's evidence (review, hash, build record), shown on demand with one control. */
+  const [evidence, setEvidence] = useState(false);
+  const indexFrom = useCheckContext(tag).indexFrom ?? null;
   const copying = isCopying(tag);
   const target = profile(tag);
   const donor = profile(from);
@@ -122,27 +127,24 @@ export function CopyDialog({ tag, donors, onClose }: CopyDialogProps) {
 
   return (
     <Dialog onClose={onClose} locked={copying} title={title} footer={footer}>
-      {!result && (
+      {/* One version to copy from: the title names it already. */}
+      {!result && donors.length > 1 && (
         <div className="dialog-field">
           <span className="dialog-field-label" id={fromLabelId}>
             {t("mods.copyFrom")}
           </span>
-          {donors.length > 1 ? (
-            <VersionSelect
-              value={from}
-              options={donors.map((d) => ({ value: d, label: d }))}
-              onChange={(f) => {
-                setFrom(f);
-                setChangedFrom(null);
-                setError(null);
-              }}
-              disabled={copying}
-              labelledBy={fromLabelId}
-              compact
-            />
-          ) : (
-            <strong className="dialog-field-value">{from}</strong>
-          )}
+          <VersionSelect
+            value={from}
+            options={donors.map((d) => ({ value: d, label: d }))}
+            onChange={(f) => {
+              setFrom(f);
+              setChangedFrom(null);
+              setError(null);
+            }}
+            disabled={copying}
+            labelledBy={fromLabelId}
+            compact
+          />
         </div>
       )}
       {result ? (
@@ -184,22 +186,42 @@ export function CopyDialog({ tag, donors, onClose }: CopyDialogProps) {
               {tn("mods.copyInstallsOff", consent.installedOff.length, formatList(consent.installedOff.map(name)), tag)}
             </p>
           )}
-          <p className="dialog-summary">{t("mods.copyIntro", tag)}</p>
+          {/* What the copy does, in one line that stays: it adds to the set and replaces nothing. */}
+          <p className="dialog-summary" data-testid="copy-intro">
+            {toInstall.length ? tn("mods.copyIntro", toInstall.length, tag) : t("mods.copyIntroNone", tag)}
+            {toInstall.length > 0 && (
+              <>
+                {" "}
+                <button className="link-btn copy-evidence-btn" aria-expanded={evidence} aria-controls={listsId} onClick={() => setEvidence(!evidence)}>
+                  {evidence ? t("mods.copyEvidenceHide") : t("mods.copyEvidenceShow")}
+                </button>
+              </>
+            )}
+          </p>
           {staying.length > 0 && (
             <p className="dialog-note" data-testid="copy-stays">
               {tn("mods.copyStaysLine", staying.length, formatList(staying.map((i) => i.name)))}
             </p>
           )}
-          <CopyList items={ordered} tag={tag} progressFor={copying ? byId : undefined} />
+          <div id={listsId}>
+          <CopyList items={ordered} tag={tag} progressFor={copying ? byId : undefined} evidence={evidence ? { catalog, indexFrom } : undefined} />
           {consent.deps.length > 0 && (
             <>
               <p className="dialog-note">{t("mods.copyAlsoInstalls")}</p>
               <ExtraList
-                rows={consent.deps.map((d) => ({ id: d.id, state: "yes", text: t("mods.copyDepInstall", d.name, d.version), trust: d.trust }))}
+                rows={consent.deps.map((d) => ({
+                  id: d.id,
+                  state: "yes",
+                  text: t("mods.copyDepInstall", d.name, d.version),
+                  trust: d.trust,
+                  build: { name: d.name, sha256: d.sha256 },
+                }))}
                 progressFor={copying ? byId : undefined}
+                evidence={evidence ? { catalog, indexFrom } : undefined}
               />
             </>
           )}
+          </div>
           {consent.enable.length > 0 && (
             <>
               <p className="dialog-note">{t("mods.copyAlsoEnables")}</p>
@@ -219,13 +241,31 @@ export function CopyDialog({ tag, donors, onClose }: CopyDialogProps) {
 
 const STAYS: ReadonlySet<CopyItem["outcome"]> = new Set(["noBuild", "localFile", "revoked"]);
 
+interface EvidenceFrom {
+  catalog: Catalog | null;
+  indexFrom: string | null;
+}
+
+/**
+ * What is known of one build the copy installs, as its own install dialog would show it: the
+ * review, the pinned hash whole and the build record.
+ */
+function BuildEvidence({ id, name, sha256, from }: { id: string; name: string; sha256: string; from: EvidenceFrom }) {
+  const { t } = useI18n();
+  const v = buildBySha(from.catalog, id, sha256);
+  if (!v) return <small>{t("mods.copyNoEvidence")}</small>;
+  return <CheckList whole checks={evidenceChecks(v, from.indexFrom)} label={t("mods.copyEvidenceFor", name)} />;
+}
+
 /** Dependencies a copy brings along, each with its tier. */
 function ExtraList({
   rows,
   progressFor,
+  evidence,
 }: {
-  rows: { id: string; state: CheckState; text: string; trust?: Trust }[];
+  rows: { id: string; state: CheckState; text: string; trust?: Trust; build?: { name: string; sha256: string } }[];
   progressFor?: (id: string) => UiProgress | undefined;
+  evidence?: EvidenceFrom;
 }) {
   return (
     <ul className="checks copy-list">
@@ -240,6 +280,7 @@ function ExtraList({
                 {r.trust && <TrustBadge trust={r.trust} />}
               </span>
               {p && <ModProgressBar progress={p} nameOf={() => r.text} compact />}
+              {evidence && r.build && <BuildEvidence id={r.id} name={r.build.name} sha256={r.build.sha256} from={evidence} />}
             </span>
           </li>
         );
@@ -289,10 +330,13 @@ function CopyList({
   items,
   tag,
   progressFor,
+  evidence,
 }: {
   items: CopyItem[];
   tag: string;
   progressFor?: (id: string) => UiProgress | undefined;
+  /** Set: each build that installs shows what is known of it. */
+  evidence?: EvidenceFrom;
 }) {
   const { t } = useI18n();
   return (
@@ -314,6 +358,7 @@ function CopyList({
               ) : (
                 <small>{t(o.key, tag)}</small>
               )}
+              {evidence && item.outcome === "install" && item.sha256 && <BuildEvidence id={item.id} name={item.name} sha256={item.sha256} from={evidence} />}
             </span>
           </li>
         );
