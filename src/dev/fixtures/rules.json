@@ -1,9 +1,9 @@
 {
-  "_about": "Input/output cases for the mod-set rules, written from the Rust table tests in src-tauri/src/mods/plan.rs and profile.rs (the test each block follows is named in `rust`). mockRules.test.ts runs them against src/dev/mockRules.ts. Builds are [version, abi, channel, deps]; an entry is the Rust test helper `entry(id, deps, abi)` (version 0.1.0, on, Reviewed, from the index, abi ABI) with the fields given changed. A sha is `<id>@<version>`. Contract R4 adds transitive cases (§1) to plans and commits, and the blocks `shadowing` (§4) and `revocations` (§6); `cascades` follows a revocation through to what needs the revoked mod.",
+  "_about": "Input/output cases for the mod-set rules, written from the Rust table tests in src-tauri/src/mods/plan/ and profile.rs (the test each block follows is named in `rust`). mockRules.test.ts runs them against src/dev/mockRules.ts. Builds are [version, abi, channel, deps]; an entry is the Rust test helper `entry(id, deps, abi)` (version 0.1.0, on, Reviewed, from the index, abi ABI) with the fields given changed. A sha is `<id>@<version>`. Contract R4 adds transitive cases (§1) to plans and commits, and the blocks `shadowing` (§4) and `revocations` (§6); `cascades` follows a revocation through to what needs the revoked mod.",
   "abi": { "ABI": "f470b1cbb1f9ad91", "OLD": "5f0569a6bea71b81" },
   "catalogs": {
     "world": {
-      "rust": "plan.rs tests::world",
+      "rust": "plan/tests.rs world",
       "mods": [
         { "id": "cogwork", "origin": "index", "builds": [["0.2.0", "ABI", "release", ["base", "showcase"]], ["0.1.0", "OLD", "release", ["showcase"]]] },
         { "id": "showcase", "origin": "index", "builds": [["0.1.0", "ABI", "release", []]] },
@@ -35,7 +35,7 @@
     "statuses": { "rust": "profile.rs tests::statuses_and_blocking", "mods": [], "revoked": ["pulled@0.1.0"] }
   },
   "plans": {
-    "rust": "plan.rs tests::plans, plan_problems_and_replacement; contract R3 §1 for turnsOn; contract R4 §1 for the transitive cases",
+    "rust": "plan/tests.rs plans, plan_problems_and_replacement; contract R3 §1 for turnsOn; contract R4 §1 for the transitive cases",
     "catalog": "world",
     "cases": [
       { "what": "dependency from the index is installed", "target": "cogwork@0.2.0", "lock": [], "install": ["showcase"], "enable": [], "missing": [], "problem": null, "turnsOn": true },
@@ -124,7 +124,7 @@
     ]
   },
   "commits": {
-    "rust": "plan.rs tests::an_update_keeps_the_on_off_state; contract R3 §1 for installedOff; contract R4 §1 for the transitive cases",
+    "rust": "plan/tests.rs an_update_keeps_the_on_off_state; contract R3 §1 for installedOff; contract R4 §1 for the transitive cases",
     "catalog": "world",
     "cases": [
       {
@@ -185,7 +185,7 @@
     ]
   },
   "toggles": {
-    "rust": "plan.rs tests::the_enable_cascade, removing_turns_off_what_needed_it; contract R3 §2",
+    "rust": "plan/tests.rs the_enable_cascade, removing_turns_off_what_needed_it; contract R3 §2",
     "catalog": "empty",
     "cases": [
       {
@@ -205,7 +205,7 @@
     ]
   },
   "copies": {
-    "rust": "plan.rs tests::copy_preview_outcomes",
+    "rust": "plan/tests.rs copy_preview_outcomes",
     "catalog": "world",
     "from": [
       { "id": "cogwork", "deps": ["showcase"], "abi": "OLD" },

@@ -1,4 +1,4 @@
-// The mod-set rules of src-tauri/src/mods (plan.rs and profile.rs), on plain data, for the mock
+// The mod-set rules of src-tauri/src/mods (plan/ and profile.rs), on plain data, for the mock
 // backend. Each function names the Rust function it follows; mockRules.test.ts runs the Rust table
 // tests' cases against them (src/dev/fixtures/rules.json), so a rule that drifts fails a test.
 //

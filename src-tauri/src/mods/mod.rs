@@ -2,7 +2,7 @@
 //! reviewed mods, GitHub repos as extra sources, and the checks between them and the game.
 //! Design: `docs/mod-manager/PROPOSAL.md`; index contract: `docs/mod-manager/INDEX_FORMAT.md`.
 //!
-//! - Rules on plain data: `plan.rs` (installs, copies, on/off, removal), `profile.rs` (statuses,
+//! - Rules on plain data: `plan/` (installs, copies, on/off, removal), `profile.rs` (statuses,
 //!   updates, revocations), `catalog.rs`, `index/` (the contract), `diagnose.rs`.
 //! - Disk and network: `store.rs`, `install.rs`, `inspect.rs`, `sources.rs`, `abi.rs`, all on a
 //!   [`Paths`].
