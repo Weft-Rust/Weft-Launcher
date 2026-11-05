@@ -1,6 +1,6 @@
 // The flows the mod manager's safety depends on, and keyboard use, against the mock backend.
-import { expect, test } from "@playwright/test";
-import { MODS_TAB, browse, focused, goToTab, open } from "./helpers";
+import { expect, test, type Page } from "@playwright/test";
+import { MODS_TAB, browse, focused, goToTab, open, spoken } from "./helpers";
 
 const dialog = "[role=dialog]";
 
@@ -33,8 +33,11 @@ test.describe("launch safety", () => {
     await expect(notice.locator(".mod-failure-title")).toHaveText("My Tweak stopped Weft from starting: it needs Cogwork.", { timeout: 10_000 });
     await expect(notice.locator("button", { hasText: "Update" })).toHaveCount(0);
     await notice.locator("button", { hasText: "Turn on Cogwork" }).click();
+    // Fixed, so the notice goes: on Home and on Mods.
+    await expect(page.locator(".mod-failure")).toHaveCount(0);
     await goToTab(page, MODS_TAB);
     await expect(page.locator(".mod-row", { hasText: "Cogwork" }).locator(".toggle")).toHaveAttribute("aria-checked", "true");
+    await expect(page.locator(".mod-failure")).toHaveCount(0);
   });
 
   test("Home shows a blocker the backend found at Play, with its fixes", async ({ page }) => {
@@ -43,11 +46,28 @@ test.describe("launch safety", () => {
     await page.locator(".btn-play").click();
     const hearth = page.locator(".blocker", { hasText: "Hearth" });
     await expect(hearth).toContainText("Needs Cogwork, which was pulled from the index.");
+    // It appeared just now, so it is said at once.
+    await expect(page.locator(".blockers [role=alert]")).toContainText("Hearth");
     await expect(page.locator(".btn-play")).toBeDisabled();
     // The panel says it; no second, rawer copy of the error.
     await expect(page.locator(".hero > .launch-error[role=alert]")).toHaveCount(0);
     await hearth.locator("button", { hasText: "Turn off Hearth" }).click();
     await expect(page.locator(".btn-play")).toBeEnabled();
+    // Nothing of the refused start is left once it is fixed.
+    await expect(page.locator(".blocker")).toHaveCount(0);
+    await expect(page.locator(".launch-error")).toHaveCount(0);
+  });
+
+  test("a revoked mod copied in the player's own folder blocks until that file goes", async ({ page }) => {
+    await open(page, "scenario=shadowed");
+    await expect(page.locator(".btn-play")).toBeDisabled();
+    await goToTab(page, MODS_TAB);
+    const blocker = page.locator(".blockers.in-banner .blocker", { hasText: "cogwork-old.zip" });
+    await blocker.locator("button", { hasText: "Show cogwork-old.zip" }).click();
+    // The player deletes it in the folder that opened; back in the launcher, it looks again.
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(blocker).toHaveCount(0);
+    await expect(page.locator(".mod-row[data-mod=cogwork]")).not.toHaveAttribute("data-shadowed", "true");
   });
 });
 
@@ -55,7 +75,7 @@ test.describe("every install shows what it does", () => {
   test("an update opens the review dialog, warning first", async ({ page }) => {
     await open(page, "scenario=mods");
     await goToTab(page, MODS_TAB);
-    await page.locator(".mod-row .mod-update button").first().click();
+    await page.locator(".mod-row .update-btn-row").first().click();
     const d = page.locator(dialog);
     await expect(d.locator(".dialog-warning")).toContainText("It can do anything you can do on this computer");
     // Lanterns 1.1.0 needs Glowmoss, from the same source: named, with its tier.
@@ -109,7 +129,7 @@ test.describe("every install shows what it does", () => {
     await expect(d.locator(".copy-list").first().locator("li")).toHaveCount(6);
     await expect(d.locator("li", { hasText: "Glowmoss 0.3.0: a copied mod needs it" }).locator(".badge")).toHaveText("Unreviewed");
     await expect(d.locator(".dialog-warning")).toContainText("nobody reviewed these: Lanterns and Glowmoss");
-    await d.locator(".dialog-actions .btn-primary", { hasText: "Copy 4 mods" }).click();
+    await d.locator(".dialog-actions .btn-primary", { hasText: "Copy 4 mods to v26.11.1" }).click();
     await expect(d.locator(".dialog-title")).toHaveText("Mods copied to v26.11.1", { timeout: 30_000 });
     await d.locator(".dialog-actions .btn-primary").click();
     await expect(page.locator(".mod-row")).toHaveCount(5);
@@ -121,9 +141,41 @@ test.describe("every install shows what it does", () => {
     await goToTab(page, MODS_TAB);
     await page.locator(".toolbar-actions button").first().click();
     const d = page.locator(dialog);
-    await expect(d.locator(".dialog-title")).toHaveText("Install Cogwork 0.2.0 for v26.11.1 from this file?");
+    // Cogwork is installed: the title and the button both say Update.
+    await expect(d.locator(".dialog-title")).toHaveText("Update Cogwork to 0.2.0 for v26.11.1 from this file?");
     await expect(d.locator(".checks li", { hasText: "Same file as Cogwork 0.2.0" })).toHaveClass(/check-yes/);
-    await expect(d.locator(".dialog-actions .btn-primary")).toHaveText("Install");
+    await expect(d.locator(".dialog-actions .btn-primary")).toHaveText("Update");
+  });
+
+  test("a file whose fit can't be found out says unknown, with Retry, never no", async ({ page }) => {
+    await open(page, "scenario=knownfile&abi=error");
+    await goToTab(page, MODS_TAB);
+    await page.locator(".toolbar-actions button").first().click();
+    const d = page.locator(dialog);
+    const fit = d.locator(".checks li").first();
+    await expect(fit).toHaveAttribute("data-check", "abi");
+    await expect(fit).toHaveClass(/check-unknown/);
+    await expect(fit).toContainText("Whether it fits v26.11.1 couldn't be checked");
+    await expect(d.locator(".checks li.check-no")).toHaveCount(0);
+    await expect(d.locator(".dialog-actions .btn-primary")).toBeDisabled();
+    await fit.locator("button", { hasText: "Retry" }).click();
+    await expect(d.locator(".checks li").first()).toHaveClass(/check-unknown/);
+  });
+
+  test("installing a mod that needs mods that need others turns the whole chain on", async ({ page }) => {
+    await open(page, "scenario=chain");
+    await goToTab(page, MODS_TAB);
+    await browse(page);
+    await page.locator(".mod-card", { hasText: "Chimneys" }).locator("button.btn-primary").click();
+    const d = page.locator(dialog);
+    await expect(d.locator(".checks li", { hasText: "Needs Hearth: turns it on too" })).toHaveClass(/check-yes/);
+    await expect(d.locator(".checks li", { hasText: "Needs Cogwork: turns it on too" })).toHaveClass(/check-yes/);
+    await d.locator(".dialog-actions .btn-primary").click();
+    await expect(d).toHaveCount(0, { timeout: 15_000 });
+    await page.locator(".switch [role=tab]").first().click();
+    for (const name of ["Chimneys", "Hearth", "Cogwork"]) {
+      await expect(page.locator(".mod-row", { has: page.locator(".mod-name", { hasText: name }) }).locator(".toggle")).toHaveAttribute("aria-checked", "true");
+    }
   });
 
   test("an update keeps a mod that is off turned off", async ({ page }) => {
@@ -133,7 +185,7 @@ test.describe("every install shows what it does", () => {
     const toggle = row.locator(".toggle");
     if ((await toggle.getAttribute("aria-checked")) === "true") await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "false");
-    await row.locator(".mod-update button").click();
+    await row.locator(".update-btn-row").click();
     await page.locator(`${dialog} .dialog-actions .btn-primary`).click();
     await expect(page.locator(dialog)).toHaveCount(0, { timeout: 15_000 });
     await expect(row.locator(".toggle")).toHaveAttribute("aria-checked", "false");
@@ -142,12 +194,71 @@ test.describe("every install shows what it does", () => {
   test("a failed dependency download leaves no progress behind", async ({ page }) => {
     await open(page, "scenario=mods&fail=dep");
     await goToTab(page, MODS_TAB);
-    await page.locator(".mod-row", { hasText: "Lanterns" }).locator(".mod-update button").click();
+    await page.locator(".mod-row", { hasText: "Lanterns" }).locator(".update-btn-row").click();
     await page.locator(`${dialog} .dialog-actions .btn-primary`).click();
     await expect(page.locator(`${dialog} .inline-error`)).toContainText("gone from GitHub", { timeout: 15_000 });
     await expect(page.locator(`${dialog} .progress-bar`)).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(page.locator(".progress-bar")).toHaveCount(0);
+  });
+});
+
+/** Opens the update of Lanterns (1.0.0 → 1.1.0, which brings Glowmoss along). */
+async function updateLanterns(page: Page, query: string) {
+  await open(page, query);
+  await goToTab(page, MODS_TAB);
+  await page.locator(".mod-row", { hasText: "Lanterns" }).locator(".update-btn-row").click();
+  await expect(page.locator(`${dialog} .checks`)).toBeVisible();
+  return page.locator(dialog);
+}
+
+test.describe("operations", () => {
+  test("progress names the file, and Cancel stops it calmly with nothing changed", async ({ page }) => {
+    const d = await updateLanterns(page, "scenario=mods&slow=1");
+    await d.locator(".dialog-actions .btn-primary").click();
+    // The dependency comes first: file 1 of 2.
+    await expect(d.locator(".progress-label")).toHaveText(/^File 1 of 2: Glowmoss, (waiting|downloading \d+%)/);
+    await d.locator(".progress-cancel").click();
+    await expect(d.getByTestId("cancelled-note")).toHaveText("Cancelled. Nothing was changed.", { timeout: 15_000 });
+    await expect(d.locator(".inline-error, [role=alert]")).toHaveCount(0);
+    await expect(spoken(page)).toHaveText("Cancelled. Nothing was changed.");
+    await expect(d.locator(".progress-bar")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".mod-row[data-mod=lanterns] .mod-version")).toHaveText("1.0.0");
+    await expect(page.locator(".mod-row[data-mod=glowmoss]")).toHaveCount(0);
+    await expect(page.locator(".progress-bar")).toHaveCount(0);
+  });
+
+  test("a set that changed meanwhile is planned again, shown, and asked again", async ({ page }) => {
+    const d = await updateLanterns(page, "scenario=mods&fail=meanwhile");
+    await d.locator(".dialog-actions .btn-primary").click();
+    const changes = d.getByTestId("plan-changes");
+    await expect(changes).toContainText("This changed since you looked:");
+    await expect(changes).toContainText("Glowmoss 0.3.1 instead of 0.3.0");
+    await expect(d.locator(".checks li", { hasText: "Needs Glowmoss: installs 0.3.1 with it" })).toHaveCount(1);
+    // Asked again: nothing ran, and the button works on the new plan.
+    await expect(d.locator(".progress-bar")).toHaveCount(0);
+    await d.locator(".dialog-actions .btn-primary").click();
+    await expect(d).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.locator(".mod-row[data-mod=glowmoss] .mod-version")).toHaveText("0.3.1");
+  });
+});
+
+test.describe("announcements", () => {
+  test("results are said politely; only blockers that appear are said assertively", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    // Every assertive region belongs to a blocker panel.
+    const alerts = page.locator("[role=alert]");
+    for (const a of await alerts.all()) expect(await a.evaluate((e) => !!e.closest(".blockers"))).toBe(true);
+    const said = await alerts.allTextContents();
+    // A plain toggle is said by the switch itself; a result with more to it goes to the live region.
+    const remove = page.locator(".mod-row[data-mod=showcase] .delete-btn");
+    await remove.click();
+    await remove.click();
+    await expect(spoken(page)).toContainText("Removed Showcase from v26.11.1.");
+    // The blockers didn't change, so nothing is said about them again.
+    expect(await alerts.allTextContents()).toEqual(said);
   });
 });
 
@@ -232,7 +343,7 @@ test.describe("keyboard", () => {
   test("dialogs start on Cancel, keep focus inside and close on Escape", async ({ page }) => {
     await open(page, "scenario=mods");
     await goToTab(page, MODS_TAB);
-    await page.locator(".mod-row .mod-update button").first().click();
+    await page.locator(".mod-row .update-btn-row").first().click();
     await expect(page.locator(dialog)).toBeVisible();
     const first = await focused(page);
     expect(first.inDialog).toBe(true);
@@ -245,16 +356,19 @@ test.describe("keyboard", () => {
     await expect(page.locator(dialog)).toHaveCount(0);
   });
 
-  test("an unverified file starts in its typed confirmation, which says why Install is off", async ({ page }) => {
+  test("an unverified file starts in its typed confirmation, which says why Replace is off", async ({ page }) => {
     await open(page, "scenario=mods");
     await goToTab(page, MODS_TAB);
     await page.locator(".toolbar-actions button").first().click();
     const input = page.locator(`${dialog} .dialog-actions input`);
     await expect(input).toBeFocused();
+    // My Tweak is installed: the title, the button and the hint all say Replace.
+    await expect(page.locator(`${dialog} .dialog-title`)).toHaveText("Replace My Tweak with unverified mytweak.zip for v26.11.1?");
     const install = page.locator(`${dialog} .btn-danger`);
+    await expect(install).toHaveText("Replace anyway");
     await expect(install).toBeDisabled();
     const why = await install.getAttribute("aria-describedby");
-    await expect(page.locator(`[id="${why}"]`)).toHaveText("Type mytweak to install it anyway");
+    await expect(page.locator(`[id="${why}"]`)).toHaveText("Type mytweak to replace it anyway");
     await page.keyboard.type("mytweak");
     await expect(install).toBeEnabled();
     await page.keyboard.press("Enter");
@@ -272,6 +386,18 @@ test.describe("keyboard", () => {
 });
 
 test.describe("degraded states", () => {
+  test("Sources says how old the index signature is, and why a source couldn't be refreshed", async ({ page }) => {
+    await open(page, "scenario=stale&source=ratelimited");
+    await goToTab(page, MODS_TAB);
+    await page.locator(".header-actions button", { hasText: "Sources" }).click();
+    await expect(page.getByTestId("index-meta")).toContainText(/signed Sep 21: revocations since then may be missing/);
+    const index = page.locator(".source-row").first();
+    await expect(index.locator("button", { hasText: "Retry" })).toHaveCount(1);
+    const source = page.locator(".source-row", { hasText: "lantern-dev/lanterns" });
+    await expect(source).toContainText("GitHub is limiting requests, so lantern-dev/lanterns couldn't be refreshed.");
+    await expect(source.locator("button", { hasText: "Retry" })).toHaveCount(1);
+  });
+
   test("a catalogue that fails to load offers Retry, not 'no mods'", async ({ page }) => {
     await open(page, "scenario=mods&fail=catalog");
     await goToTab(page, MODS_TAB);
