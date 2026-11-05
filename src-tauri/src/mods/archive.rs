@@ -1,6 +1,7 @@
 //! What a mod zip may contain before it is stored: the mod's library for each system and its
-//! `assets/`, nothing else. The launcher never unpacks or runs a mod; this only reads the zip's
-//! table of contents, so a strange file is refused before the game ever sees it.
+//! `assets/`, nothing else. The launcher never unpacks a mod to disk or runs it: it reads the
+//! zip's table of contents, then inflates every entry once into nothing, counting, so a strange
+//! file, a damaged one or one that lies about its sizes is refused before the game ever sees it.
 
 use serde::Serialize;
 use std::io::Read;
@@ -79,6 +80,12 @@ pub enum ArchiveProblem {
     TwoLibraries(&'static str),
     #[error("no mod library inside")]
     NoLibrary,
+    #[error("{0} unpacks to more than the zip says it does")]
+    SizeMismatch(String),
+    #[error("{0} is damaged ({1})")]
+    Damaged(String, String),
+    #[error("{0} is encrypted")]
+    Encrypted(String),
 }
 
 /// Checks the layout of a mod zip. With `expected_id`, the library names must say that id.
@@ -119,9 +126,8 @@ pub fn inspect<R: Read + std::io::Seek>(
         {
             return Err(P::UnsafePath(raw).into());
         }
-        // Declared sizes, from the central directory: the launcher copies the zip whole and only
-        // inflates its small manifest, so it never learns what the library really inflates to.
-        // INDEX_FORMAT.md says so ("Size limits").
+        // Declared sizes, from the central directory: a fast refusal. What each entry really
+        // inflates to is counted below, against these same declared sizes.
         total = total.saturating_add(entry.size());
         if total > MAX_TOTAL_BYTES {
             return Err(P::TooLarge.into());
@@ -172,6 +178,7 @@ pub fn inspect<R: Read + std::io::Seek>(
     let Some(id) = id.filter(|_| !libraries.is_empty()) else {
         return Err(P::NoLibrary.into());
     };
+    inflate_all(&mut zip)?;
     platforms.sort();
     libraries.sort();
     Ok(ArchiveInfo {
@@ -181,6 +188,56 @@ pub fn inspect<R: Read + std::io::Seek>(
         has_assets,
         entries: zip.len(),
     })
+}
+
+/// Inflates every entry once into nothing, counting what comes out. An entry that inflates to
+/// more than its declared size, that is shorter, whose checksum doesn't match, that can't be
+/// inflated or that is encrypted refuses the zip: the declared sizes, which the limits were
+/// checked against, then hold for what the game unpacks too. Reads at most the declared total,
+/// which is at most MAX_TOTAL_BYTES, plus one buffer.
+fn inflate_all<R: Read + std::io::Seek>(
+    zip: &mut zip::ZipArchive<R>,
+) -> Result<(), ArchiveProblem> {
+    use ArchiveProblem as P;
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut total: u64 = 0;
+    for i in 0..zip.len() {
+        let name = zip
+            .by_index_raw(i)
+            .map(|e| e.name().to_string())
+            .map_err(|e| P::NotZip(e.to_string()))?;
+        let mut entry = match zip.by_index(i) {
+            Ok(entry) => entry,
+            Err(zip::result::ZipError::UnsupportedArchive(why))
+                if why == zip::result::ZipError::PASSWORD_REQUIRED =>
+            {
+                return Err(P::Encrypted(name));
+            }
+            Err(e) => return Err(P::Damaged(name, e.to_string())),
+        };
+        let declared = entry.size();
+        let mut actual: u64 = 0;
+        loop {
+            let n = match entry.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => n as u64,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(P::Damaged(name, e.to_string())),
+            };
+            actual += n;
+            if actual > declared {
+                return Err(P::SizeMismatch(name));
+            }
+            if total + actual > MAX_TOTAL_BYTES {
+                return Err(P::TooLarge);
+            }
+        }
+        if actual < declared {
+            return Err(P::Damaged(name, "shorter than it says".into()));
+        }
+        total += actual;
+    }
+    Ok(())
 }
 
 /// The name and description a mod gives itself in `assets/lang/en_us.lang`. Shown as what the
@@ -430,6 +487,94 @@ pub(crate) mod tests {
         assert_eq!(
             problem(inspect(Cursor::new(central_directory_zip(&big)), None)),
             ArchiveProblem::TooLarge
+        );
+    }
+
+    /// A deflated zip of a library and one asset, and where that asset's headers are, so a test
+    /// can make the zip lie about it.
+    fn zip_with_asset(asset: &[u8]) -> Vec<u8> {
+        let mut buf = Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buf);
+            let deflate =
+                FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            zip.start_file("libcogwork.so", deflate).unwrap();
+            zip.write_all(b"elf").unwrap();
+            zip.start_file("assets/data.bin", deflate).unwrap();
+            zip.write_all(asset).unwrap();
+            zip.finish().unwrap();
+        }
+        buf.into_inner()
+    }
+
+    /// Offsets of `name`'s local header and central directory entry.
+    fn headers_of(zip: &[u8], name: &str) -> (usize, usize) {
+        let find = |sig: &[u8; 4], name_len_at: usize, name_at: usize| {
+            (0..zip.len() - 4)
+                .find(|&i| {
+                    &zip[i..i + 4] == sig && {
+                        let n = u16::from_le_bytes([zip[i + name_len_at], zip[i + name_len_at + 1]])
+                            as usize;
+                        zip.get(i + name_at..i + name_at + n) == Some(name.as_bytes())
+                    }
+                })
+                .unwrap()
+        };
+        (find(b"PK\x03\x04", 26, 30), find(b"PK\x01\x02", 28, 46))
+    }
+
+    /// Writes `size` as `name`'s uncompressed size, in both headers.
+    fn declare_size(zip: &mut [u8], name: &str, size: u32) {
+        let (local, central) = headers_of(zip, name);
+        zip[local + 22..local + 26].copy_from_slice(&size.to_le_bytes());
+        zip[central + 24..central + 28].copy_from_slice(&size.to_le_bytes());
+    }
+
+    /// A zip that says an entry is small, so it passes every declared limit, but inflates to
+    /// megabytes: the count of what really comes out refuses it.
+    #[test]
+    fn a_zip_that_lies_about_its_sizes_is_refused() {
+        let mut lying = zip_with_asset(&vec![0u8; 2 * 1024 * 1024]);
+        declare_size(&mut lying, "assets/data.bin", 1000);
+        assert_eq!(
+            problem(inspect(Cursor::new(lying), None)),
+            ArchiveProblem::SizeMismatch("assets/data.bin".into())
+        );
+        // A size larger than what is there is a lie too: the entry is cut short.
+        let mut short = zip_with_asset(b"some asset bytes");
+        declare_size(&mut short, "assets/data.bin", 4000);
+        assert!(matches!(
+            problem(inspect(Cursor::new(short), None)),
+            ArchiveProblem::Damaged(name, _) if name == "assets/data.bin"
+        ));
+    }
+
+    #[test]
+    fn a_damaged_or_encrypted_entry_is_refused() {
+        let body: Vec<u8> = (0..64 * 1024u32).map(|i| (i * 7 % 251) as u8).collect();
+        let good = zip_with_asset(&body);
+        assert!(inspect(Cursor::new(good.clone()), None).is_ok());
+
+        // Bytes of the compressed stream changed: it doesn't inflate, or its checksum fails.
+        let mut damaged = good.clone();
+        let (local, _) = headers_of(&damaged, "assets/data.bin");
+        let data = local + 30 + "assets/data.bin".len();
+        for b in &mut damaged[data + 8..data + 40] {
+            *b ^= 0x5a;
+        }
+        assert!(matches!(
+            problem(inspect(Cursor::new(damaged), None)),
+            ArchiveProblem::Damaged(name, _) if name == "assets/data.bin"
+        ));
+
+        // The encrypted flag, in both headers.
+        let mut encrypted = good;
+        let (local, central) = headers_of(&encrypted, "assets/data.bin");
+        encrypted[local + 6] |= 1;
+        encrypted[central + 8] |= 1;
+        assert_eq!(
+            problem(inspect(Cursor::new(encrypted), None)),
+            ArchiveProblem::Encrypted("assets/data.bin".into())
         );
     }
 }

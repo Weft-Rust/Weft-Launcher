@@ -286,7 +286,7 @@ design; this is where the build differs from it, or settles what they left open.
 - **Provenance** is shown as a record (`buildRecord: "recorded"`) only when the signed index records all of it: the GitHub Actions repo, workflow and commit, and when its CI checked the attestation (`gh attestation verify`, run when a version is added). The row says it is the index's record, not the launcher's check. A record missing any of these is `incomplete` and shows as unknown; a source's own `provenance` claim is passed on as `claimed`, never a record; without either the UI says "No build record". The launcher doesn't verify attestations itself. See INDEX_FORMAT, Provenance.
 - **Reviewed means reviewed.** An index version without a `reviewed` record is dropped.
 - **Matching is by ABI, not tag**, and compares published metadata: the `abi` an entry declares against the version's. Builds from untagged Weft commits fit every release with the same ABI. The launcher doesn't read the compiled library (that would mean loading it), and `fitsVersion` is `null` when the version's ABI is unknown.
-- **Zip sizes are the declared ones.** The archive checks use the central directory's sizes; the launcher never inflates the library (INDEX_FORMAT, "Size limits").
+- **Zip sizes are counted, not only declared.** The archive limits are checked against the central directory's sizes, then every entry is inflated once into nothing and counted before the zip is stored; a zip that lies about its sizes, is damaged or is encrypted is refused. The launcher still never unpacks a mod to disk or loads its library (INDEX_FORMAT, "Size limits").
 
 ### Deferred
 
