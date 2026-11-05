@@ -31,6 +31,8 @@ pub mod version;
 #[cfg(test)]
 mod doc_tests;
 #[cfg(test)]
+mod rules_fixture;
+#[cfg(test)]
 mod service_tests;
 
 pub use context::{Ctx, ModsLock, Operations};
