@@ -384,6 +384,18 @@ function lockOf(tag: string): Entry[] {
 
 const report = (tag: string) => R.report(tag, lockOf(tag), abiOf(tag), ABI_ERROR ? err("AbiUnavailable", tag) : null, catalog, playerFolder);
 
+// `profile=fail`: every read of a set fails. `profile=failafterplay`: the first read after a
+// refused Play fails, the ones after it work (Retry gets through).
+const profileFlag = flag("profile");
+let failNextRead = false;
+function readProfile(tag: string) {
+  if (profileFlag === "fail" || failNextRead) {
+    failNextRead = false;
+    fail("Io", `could not read ${tag}/mods.lock: permission denied`);
+  }
+  return report(tag);
+}
+
 function findBuild(sha256: string) {
   return R.findBuild(catalog, sha256) ?? fail("ModNotInCatalog", sha256);
 }
@@ -678,6 +690,7 @@ async function launch(tag: string) {
   if (flag("prelaunch") === "revoke" && !catalog.revoked.length) revoke("cogwork");
   const r = report(tag);
   if (r.blocking.length) {
+    if (profileFlag === "failafterplay") failNextRead = true;
     fail("ModsBlocked", r.blocking.map((id) => r.mods.find((m) => m.id === id)?.name ?? id).join(", "));
   }
   running.add(tag);
@@ -803,7 +816,7 @@ const handlers: Handlers = {
     catalog.mods = catalog.mods.filter((m) => m.origin.kind !== "source" || !sameRepo(m.origin.repo, repo));
     return catalog.sources.map((s) => s.repo);
   },
-  get_mod_profile: ({ tag }) => report(tag),
+  get_mod_profile: ({ tag }) => readProfile(tag),
   get_mod_icon: ({ url }) => {
     iconRequests.push(url);
     const known = catalog.mods.some((m) => m.icon === url);

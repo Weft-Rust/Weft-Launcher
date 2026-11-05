@@ -93,4 +93,9 @@ export const FLAGS: Flag[] = [
   { name: "prelaunch", values: ["revoke"], description: "Play finds Cogwork revoked, as a fresh index would, before it starts the game." },
   { name: "long", values: ["1"], description: "Adds very long names, ids and repos." },
   { name: "slow", values: ["1"], description: "Everything takes four times as long: time enough to press Cancel." },
+  {
+    name: "profile",
+    values: ["fail", "failafterplay"],
+    description: "Reading a version's set fails (`Io`): always, or only the first read after Play is refused, so Retry gets through.",
+  },
 ];

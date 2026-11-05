@@ -54,6 +54,8 @@ interface ModsContextValue {
   profile: (tag: string | null | undefined) => ProfileReport | undefined;
   profileError: (tag: string) => Shown | null;
   loadProfile: (tag: string) => Promise<ProfileReport | undefined>;
+  /** The same read, saying why it failed when it did. */
+  readProfile: (tag: string) => Promise<{ report: ProfileReport } | { error: Shown }>;
   /** A mod's display name in a version's set, falling back to the catalogue and then the id. */
   nameIn: (tag: string) => NameOf;
 
@@ -230,19 +232,24 @@ export function ModsProvider({ children }: { children: ReactNode }) {
   const { read, changed } = useProfileCoordinator(setProfiles);
   const { progress, running, begin, end, markCancelling } = useOperations();
 
-  const loadProfile = useCallback(
-    async (tag: string) => {
+  const readProfile = useCallback(
+    async (tag: string): Promise<{ report: ProfileReport } | { error: Shown }> => {
       try {
         const report = await read(tag);
         setProfileErrors((e) => without(e, tag));
-        return report;
+        return { report };
       } catch (err) {
-        setProfileErrors((e) => ({ ...e, [tag]: showError(err) }));
-        return undefined;
+        const error = showError(err);
+        setProfileErrors((e) => ({ ...e, [tag]: error }));
+        return { error };
       }
     },
     [read]
   );
+  const loadProfile = useCallback(async (tag: string) => {
+    const r = await readProfile(tag);
+    return "report" in r ? r.report : undefined;
+  }, [readProfile]);
 
   const tags = useMemo(() => installedVersions.map((v) => v.tag), [installedVersions]);
   const tagsRef = useRef(tags);
@@ -453,6 +460,7 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       profile,
       profileError,
       loadProfile,
+      readProfile,
       nameIn,
       isBusy,
       isCopying,
@@ -480,6 +488,7 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       profile,
       profileError,
       loadProfile,
+      readProfile,
       nameIn,
       isBusy,
       isCopying,

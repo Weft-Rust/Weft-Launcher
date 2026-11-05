@@ -98,7 +98,9 @@ describe("heroState", () => {
     expect(heroState(blocked, false)).toBe("blocked");
     expect(heroState(blocked, true)).toBe("playing");
     expect(heroState(report([]), false)).toBe("ready");
-    expect(heroState(undefined, false)).toBe("ready");
+    // Not read yet, or not readable: never "ready".
+    expect(heroState(undefined, false)).toBe("checking");
+    expect(heroState(undefined, false, true)).toBe("unchecked");
   });
 });
 

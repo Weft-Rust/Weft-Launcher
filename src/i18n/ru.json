@@ -540,7 +540,10 @@
     "failureLogLine": "Строка журнала",
     "indexSays": "Индекс сообщает: «{0}»",
     "indexGaveNoReason": "Индекс не указал причину.",
-    "detailsLabel": "{0}: подробности"
+    "detailsLabel": "{0}: подробности",
+    "refusedUnread": "Weft не запустился из-за модов, а прочитать их снова, чтобы сказать каких, не удалось: {0}",
+    "refusedRetry": "Проверить моды снова",
+    "homeProfileFailed": "Не удалось прочитать моды {0}: {1}"
   },
   "sizeUnits": {
     "B": "Б",
@@ -557,5 +560,7 @@
   "versionModCount_few": "{n} мода",
   "versionModCount_many": "{n} модов",
   "versionModCount_other": "{n} мода",
-  "versionModsBlocked": "Моды мешают запуску. Исправьте их на «Главной» или во вкладке «Моды»."
+  "versionModsBlocked": "Моды мешают запуску. Исправьте их на «Главной» или во вкладке «Моды».",
+  "heroBadgeChecking": "ВЕРСИЯ {0} · ПРОВЕРКА МОДОВ",
+  "heroBadgeUnchecked": "ВЕРСИЯ {0} · МОДЫ НЕ ПРОВЕРЕНЫ"
 }

@@ -93,6 +93,32 @@ test.describe("launch safety", () => {
     await expect(page.locator(".launch-error")).toHaveCount(0);
   });
 
+  test("a refused start stays on screen, with a way to check again, when the set can't be read again", async ({ page }) => {
+    await open(page, "scenario=lateblock&profile=failafterplay");
+    await expect(page.locator(".hero-version-badge")).toContainText("READY");
+    await page.locator(".btn-play").click();
+    // Play was refused for mods, and reading them again failed: the refusal says so, never
+    // silently gone, and Play isn't offered as if all were well.
+    const refusal = page.locator(".refused-unread");
+    await expect(refusal).toContainText("Weft didn't start because of its mods, and they couldn't be read again to say which");
+    await expect(refusal.locator(".error-details summary")).toHaveText("Details");
+    await expect(page.locator(".blocker")).toHaveCount(0);
+    // Check again: the read works this time, and the panel with the fixes takes over.
+    await refusal.locator("button", { hasText: "Check mods again" }).click();
+    await expect(page.locator(".blocker", { hasText: "Hearth" })).toHaveCount(1);
+    await expect(page.locator(".refused-unread")).toHaveCount(0);
+    await expect(page.locator(".btn-play")).toBeDisabled();
+  });
+
+  test("Home says it is checking mods, or that it couldn't, never ready before it knows", async ({ page }) => {
+    await open(page, "scenario=mods&profile=fail");
+    await expect(page.locator(".hero-version-badge")).toContainText("MODS NOT CHECKED");
+    await expect(page.locator(".hero-version-badge")).not.toContainText("READY");
+    const failed = page.locator(".launch-error", { hasText: "Couldn't read the mods for v26.11.1" });
+    await expect(failed).toBeVisible();
+    await expect(failed.locator("button")).toHaveText("Retry loading mods");
+  });
+
   test("turning off a mod with a copy in the player's own folder says that copy loads", async ({ page }) => {
     await open(page, "scenario=mods&shadow=structures");
     await goToTab(page, MODS_TAB);

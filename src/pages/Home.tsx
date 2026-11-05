@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from "react";
-import type { UiError } from "../mods/types";
+import type { ProfileReport, UiError } from "../mods/types";
 import { useI18n } from "../i18n/useI18n";
 import { showError, type Shown } from "../i18n/errors";
 import { ErrorText } from "../components/ErrorText";
@@ -28,15 +28,31 @@ const BADGE: Record<HeroState, MessageKey> = {
   ready: "heroBadge",
   playing: "heroBadgePlaying",
   blocked: "heroBadgeBlocked",
+  checking: "heroBadgeChecking",
+  unchecked: "heroBadgeUnchecked",
 };
+
+/**
+ * A refused start. For a refusal because of mods, `seen` is the set as it was known once the
+ * launcher tried to read it again: only a newer one can say the refusal no longer holds.
+ */
+interface LaunchError {
+  tag: string;
+  error: UiError;
+  shown: Shown;
+  seen?: ProfileReport;
+  /** The read again failed: the blocker panel can't say which mods, so this notice does. */
+  unread?: Shown;
+}
 
 export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSelectTag }: HomeProps) {
   const { t, locale, formatList } = useI18n();
   const { installedVersions, loaded } = useInstall();
   const { anyRunning, isRunning, launch, lastCrash } = useGameState();
-  const { profile, isCopying, loadProfile } = useMods();
-  const [launchError, setLaunchError] = useState<{ tag: string; error: UiError; shown: Shown } | null>(null);
+  const { profile, profileError, isCopying, loadProfile, readProfile } = useMods();
+  const [launchError, setLaunchError] = useState<LaunchError | null>(null);
   const [launching, setLaunching] = useState(false);
+  const [rereading, setRereading] = useState(false);
   const blockersId = useId();
 
   const sortedVersions = useMemo(() => [...installedVersions].sort((a, b) => compareTags(b.tag, a.tag)), [installedVersions]);
@@ -51,7 +67,8 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
   const report = profile(effectiveTag);
   const review = useReviewDialog(effectiveTag);
   const isSelectedRunning = effectiveTag ? isRunning(effectiveTag) : false;
-  const state = heroState(report, isSelectedRunning);
+  const readError = effectiveTag ? profileError(effectiveTag) : null;
+  const state = heroState(report, isSelectedRunning, !!readError);
   const blocked = state === "blocked";
   const crash = lastCrash && lastCrash.tag === effectiveTag ? lastCrash : null;
   const busyWithMods = effectiveTag ? isCopying(effectiveTag) : false;
@@ -63,12 +80,25 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
     setLaunchError(null);
     const r = await launch(tag);
     if (r.status === "failed") {
-      // The backend found a blocker the shown set doesn't have (a revocation Play applied, a
-      // change from elsewhere): read the set again, so the panel can say what and offer fixes.
-      if (r.error.code === "ModsBlocked") await loadProfile(tag);
-      setLaunchError({ tag, error: r.error, shown: r.shown });
+      if (r.error.code === "ModsBlocked") {
+        // The backend found a blocker the shown set doesn't have (a revocation Play applied, a
+        // change from elsewhere): read the set again, so the panel can say what and offer fixes.
+        // If that read fails, the refusal stays on screen, with a way to read it again.
+        setLaunchError(await reread(tag, { tag, error: r.error, shown: r.shown }));
+      } else {
+        setLaunchError({ tag, error: r.error, shown: r.shown });
+      }
     }
     setLaunching(false);
+  };
+
+  /** Reads a refused version's set again; the refusal then holds until a newer set clears it. */
+  const reread = async (tag: string, refusal: LaunchError): Promise<LaunchError> => {
+    setRereading(true);
+    const r = await readProfile(tag);
+    setRereading(false);
+    if ("report" in r) return { ...refusal, seen: r.report, unread: undefined };
+    return { ...refusal, seen: profile(tag), unread: r.error };
   };
 
   const handleOpenFolder = async () => {
@@ -81,11 +111,15 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
     }
   };
 
-  // A refusal because mods blocked is about that set: once a newer report of it has nothing
-  // blocking (the player fixed it, here or on Mods), the refusal no longer holds.
+  // A refusal because mods blocked is about that set: once a report of it newer than the one
+  // known at the refusal has nothing blocking (the player fixed it, here or on Mods), the
+  // refusal no longer holds. An older report, or none, never clears it.
   const reportBlocks = (report?.blocking.length ?? 0) > 0;
   useEffect(() => {
-    if (launchError?.error.code === "ModsBlocked" && launchError.tag === effectiveTag && report && !reportBlocks) setLaunchError(null);
+    if (launchError?.error.code !== "ModsBlocked" || launchError.tag !== effectiveTag) return;
+    if (report && report !== launchError.seen && !reportBlocks) setLaunchError(null);
+    // A read that succeeds after a failed one: the panel takes over.
+    else if (report && report !== launchError.seen && launchError.unread) setLaunchError({ ...launchError, seen: report, unread: undefined });
   }, [launchError, effectiveTag, report, reportBlocks]);
 
   if (!loaded) {
@@ -106,11 +140,16 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
     );
   }
 
-  // A refused launch says why, unless the blocker panel below already says it with its fixes.
-  const shownError =
-    launchError && launchError.tag === effectiveTag && launchError.error.code !== "ModsBlocked" ? launchError.shown : null;
+  // A refused launch says why, unless the blocker panel below already says it with its fixes:
+  // a refusal because of mods hides only behind a set that was read and shows what blocks.
+  const refusal = launchError && launchError.tag === effectiveTag ? launchError : null;
+  const modsRefusal = refusal?.error.code === "ModsBlocked" ? refusal : null;
+  const unreadRefusal = modsRefusal && (modsRefusal.unread || !reportBlocks) ? modsRefusal : null;
+  const shownError = refusal && !modsRefusal ? refusal.shown : null;
+  // The set couldn't be read at all (no refusal involved): say so, with Retry, also here.
+  const shownReadError = !report && readError && !unreadRefusal ? readError : null;
   // With something to read under Play, the title steps back so the actions stay in view.
-  const compact = blocked || !!crash || !!shownError;
+  const compact = blocked || !!crash || !!shownError || !!unreadRefusal || !!shownReadError;
   const names = enabledNames(report);
 
   return (
@@ -148,6 +187,31 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
         {/* Why Play is off, and the fixes, right under it. */}
         {effectiveTag && <BlockerPanel id={blockersId} tag={effectiveTag} locked={anyRunning} review={review} />}
         {shownError && <ErrorText error={shownError} className="launch-error" />}
+        {unreadRefusal && effectiveTag && (
+          <ErrorText
+            error={{ ...(unreadRefusal.unread ?? unreadRefusal.shown), message: t("mods.refusedUnread", (unreadRefusal.unread ?? unreadRefusal.shown).message) }}
+            className="launch-error refused-unread"
+          >
+            <button
+              className="btn-secondary btn-small"
+              disabled={rereading}
+              onClick={async () => setLaunchError(await reread(effectiveTag, unreadRefusal))}
+            >
+              {rereading ? t("mods.retrying") : t("mods.refusedRetry")}
+            </button>
+          </ErrorText>
+        )}
+        {shownReadError && effectiveTag && (
+          <ErrorText error={{ ...shownReadError, message: t("mods.homeProfileFailed", effectiveTag, shownReadError.message) }} className="launch-error">
+            <button className="btn-secondary btn-small" disabled={rereading} onClick={async () => {
+              setRereading(true);
+              await loadProfile(effectiveTag);
+              setRereading(false);
+            }}>
+              {rereading ? t("mods.retrying") : t("mods.profileRetry")}
+            </button>
+          </ErrorText>
+        )}
         {report && effectiveTag && (
           <p className="mods-line">
             <Truncate text={names.length ? t("mods.homeMods", effectiveTag, formatList(names)) : t("mods.homeModsNone", effectiveTag)} />

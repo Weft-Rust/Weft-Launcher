@@ -513,7 +513,10 @@
     "failureLogLine": "Linha do log",
     "indexSays": "O índice diz: “{0}”",
     "indexGaveNoReason": "O índice não informou motivo.",
-    "detailsLabel": "{0}: detalhes"
+    "detailsLabel": "{0}: detalhes",
+    "refusedUnread": "O Weft não iniciou por causa dos mods, e não foi possível lê-los de novo para dizer quais: {0}",
+    "refusedRetry": "Verificar os mods de novo",
+    "homeProfileFailed": "Não foi possível ler os mods de {0}: {1}"
   },
   "sizeUnits": {
     "B": "B",
@@ -528,5 +531,7 @@
   "versionModCount_one": "{n} mod",
   "versionModCount_many": "{n} mods",
   "versionModCount_other": "{n} mods",
-  "versionModsBlocked": "Mods impedem o início. Resolva na aba Início ou Mods."
+  "versionModsBlocked": "Mods impedem o início. Resolva na aba Início ou Mods.",
+  "heroBadgeChecking": "VERSÃO {0} · VERIFICANDO MODS",
+  "heroBadgeUnchecked": "VERSÃO {0} · MODS NÃO VERIFICADOS"
 }

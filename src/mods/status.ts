@@ -289,11 +289,16 @@ export function crashFixes(failure: ModFailure | null, report: ProfileReport | u
   return fixes;
 }
 
-export type HeroState = "ready" | "playing" | "blocked";
+/**
+ * What Home says about the selected version. "ready" only once its mods were read and nothing
+ * blocks: before that it is checking them, and when they couldn't be read it says so, never ready.
+ */
+export type HeroState = "ready" | "playing" | "blocked" | "checking" | "unchecked";
 
-export function heroState(report: ProfileReport | undefined, running: boolean): HeroState {
+export function heroState(report: ProfileReport | undefined, running: boolean, readFailed = false): HeroState {
   if (running) return "playing";
-  return report && report.blocking.length > 0 ? "blocked" : "ready";
+  if (!report) return readFailed ? "unchecked" : "checking";
+  return report.blocking.length > 0 ? "blocked" : "ready";
 }
 
 /** What stopped the game, in display names. `name` is the blamed mod's; `nameOf` names the others. */

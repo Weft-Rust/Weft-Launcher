@@ -486,7 +486,10 @@
     "failureLogLine": "Log line",
     "indexSays": "The index says: “{0}”",
     "indexGaveNoReason": "The index gave no reason.",
-    "detailsLabel": "{0}: details"
+    "detailsLabel": "{0}: details",
+    "refusedUnread": "Weft didn't start because of its mods, and they couldn't be read again to say which: {0}",
+    "refusedRetry": "Check mods again",
+    "homeProfileFailed": "Couldn't read the mods for {0}: {1}"
   },
   "sizeUnits": {
     "B": "B",
@@ -499,5 +502,7 @@
   "deleteWithMods_other": "Delete with its {n} mods",
   "versionModCount_one": "{n} mod",
   "versionModCount_other": "{n} mods",
-  "versionModsBlocked": "Mods stop it from starting. Fix them on Home or the Mods tab."
+  "versionModsBlocked": "Mods stop it from starting. Fix them on Home or the Mods tab.",
+  "heroBadgeChecking": "VERSION {0} · CHECKING MODS",
+  "heroBadgeUnchecked": "VERSION {0} · MODS NOT CHECKED"
 }
