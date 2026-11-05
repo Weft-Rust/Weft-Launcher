@@ -58,6 +58,16 @@ test.describe("launch safety", () => {
     await expect(page.locator(".launch-error")).toHaveCount(0);
   });
 
+  test("turning off a mod with a copy in the player's own folder says that copy loads", async ({ page }) => {
+    await open(page, "scenario=mods&shadow=structures");
+    await goToTab(page, MODS_TAB);
+    await page.locator(".mod-row[data-mod=structures] .toggle").click();
+    const notice = page.locator(".banner", { hasText: "Turned off Structures." });
+    await expect(notice).toContainText("Your own mods folder has a copy of Structures (structures-old.zip), so the game loads that one instead.");
+    await expect(spoken(page)).toContainText("structures-old.zip");
+    await expect(page.locator(".mod-row[data-mod=structures]")).toHaveAttribute("data-shadowed", "true");
+  });
+
   test("a revoked mod copied in the player's own folder blocks until that file goes", async ({ page }) => {
     await open(page, "scenario=shadowed");
     await expect(page.locator(".btn-play")).toBeDisabled();

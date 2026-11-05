@@ -266,5 +266,18 @@ describe("contract R4: shadowing, reasons and recovery", () => {
     ]);
     expect(describeToggle({ ...r, alsoDisabled: [] }, "cogwork", false, "v", name)).toBeNull();
   });
+
+  it("turning off a mod with a copy in the player's folder says that copy loads instead", () => {
+    const shadowed = { ...report([]), shadowed: [{ id: "cogwork", file: "cogwork-old.zip", managed: "off" as const }] };
+    const r: ChangeResult = { report: shadowed, installed: [], alsoEnabled: [], alsoDisabled: [], missing: [], installedOff: [], undo: null };
+    expect(describeToggle(r, "cogwork", false, "v", name)).toEqual({
+      tone: "warn",
+      lines: [
+        { key: "mods.noticeTurnedOff", args: ["COGWORK"] },
+        { key: "mods.noticeShadowLoads", args: ["COGWORK", "cogwork-old.zip"] },
+      ],
+    });
+    expect(describeToggle(r, "cogwork", true, "v", name)).toBeNull();
+  });
 });
 

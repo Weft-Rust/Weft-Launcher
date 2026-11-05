@@ -5,7 +5,7 @@ import { useMods } from "../../hooks/useMods";
 import { useGameState, type GameCrash } from "../../hooks/useGameState";
 import { modsApi } from "../../mods/api";
 import { catalogModFor } from "../../mods/select";
-import { blockers, crashFixes, failureTitle, type Fix } from "../../mods/status";
+import { blockers, crashFixes, failureTitle, shadowOf, type Fix } from "../../mods/status";
 import type { CatalogMod, InstalledMod } from "../../mods/types";
 import { Announce } from "../Announce";
 import { announce } from "../LiveRegion";
@@ -179,6 +179,9 @@ export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNotice
   const report = profile(crash.tag);
   const managed = failure?.modId ? report?.mods.find((m) => m.id === failure.modId) : undefined;
   const fixes = crashFixes(failure, report, catalog);
+  // A copy in the player's own folder may be what the game loaded, so turning this one off may not help.
+  const shadow = failure?.modId ? shadowOf(report, failure.modId) : undefined;
+  const outside = !!failure?.modId && (!managed || !!shadow);
 
   const attempt = async (work: () => Promise<void>) => {
     setActionError(null);
@@ -199,6 +202,7 @@ export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNotice
       <span className="mod-failure-title">{title}</span>
       {failure && <span className="mod-failure-line">{failure.line}</span>}
       {failure && !managed && failure.modId && <span className="mod-failure-why">{t("mods.failureOutside")}</span>}
+      {shadow && <span className="mod-failure-why">{t("mods.failureShadowed", shadow.file)}</span>}
       <span className="mod-failure-actions">
         <FixButtons tag={crash.tag} fixes={fixes} locked={false} review={review} apply={apply} />
         {managed && onGoToMods && (
@@ -206,7 +210,7 @@ export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNotice
             {t("mods.homeFixInMods")}
           </button>
         )}
-        {failure && !managed && failure.modId && (
+        {outside && (
           <button className="btn-secondary btn-small" onClick={() => attempt(modsApi.openPlayerModsFolder)}>
             {t("mods.openModsFolder")}
           </button>

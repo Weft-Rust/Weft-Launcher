@@ -365,8 +365,12 @@ export function describeChange(result: ChangeResult, primary: string | null, tag
 export function describeToggle(result: ChangeResult, id: string, enabled: boolean, tag: string, name: NameOf): NoticeText | null {
   const lines: Msg[] = [];
   sideEffects(result, tag, name, lines);
+  // Off, but a copy in the player's own folder loads in its place (contract R4 §4): say so now,
+  // not only in a note the player may not open.
+  const shadow = enabled ? undefined : shadowOf(result.report, id);
+  if (shadow && shadow.managed !== "on") lines.push({ key: "mods.noticeShadowLoads", args: [name(id), shadow.file] });
   if (!lines.length) return null;
-  return { tone: "ok", lines: [{ key: enabled ? "mods.noticeTurnedOn" : "mods.noticeTurnedOff", args: [name(id)] }, ...lines] };
+  return { tone: shadow ? "warn" : "ok", lines: [{ key: enabled ? "mods.noticeTurnedOn" : "mods.noticeTurnedOff", args: [name(id)] }, ...lines] };
 }
 
 export function describeRemove(result: ChangeResult, id: string, tag: string, name: NameOf): NoticeText {

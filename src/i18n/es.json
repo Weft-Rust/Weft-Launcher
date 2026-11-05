@@ -437,7 +437,9 @@
     "updatesNeedCatalog": "No se pudo cargar la lista de mods, así que no se pueden revisar las actualizaciones. Reintenta arriba.",
     "updateLabelTo": "Actualizar {0} a {1}…",
     "sourcesRetry": "Reintentar",
-    "sourcesLoadFailedLead": "No se pudieron leer tus fuentes."
+    "sourcesLoadFailedLead": "No se pudieron leer tus fuentes.",
+    "noticeShadowLoads": "Tu propia carpeta de mods tiene una copia de {0} ({1}), así que el juego carga esa en su lugar.",
+    "failureShadowed": "Tu propia carpeta de mods tiene una copia ({0}); puede que el juego haya cargado esa."
   },
   "sizeUnits": {
     "B": "B",

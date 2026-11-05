@@ -419,7 +419,9 @@
     "updateLabelTo": "Update {0} to {1}…",
     "sourcesRetry": "Retry",
     "updateLabel": "Update {0}",
-    "sourcesLoadFailedLead": "Couldn't read your sources."
+    "sourcesLoadFailedLead": "Couldn't read your sources.",
+    "noticeShadowLoads": "Your own mods folder has a copy of {0} ({1}), so the game loads that one instead.",
+    "failureShadowed": "Your own mods folder has a copy of it ({0}); the game may have loaded that one."
   },
   "sizeUnits": {
     "B": "B",
