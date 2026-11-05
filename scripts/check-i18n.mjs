@@ -4,7 +4,8 @@
 // - a language lacks a key English has, has one English doesn't, or drops a `{n}` placeholder;
 // - a counted message (`key_one`, `key_other`...) lacks a plural form the language needs, as
 //   Intl.PluralRules says (Russian: one, few, many, other), or has one it doesn't use;
-// - code under src/ uses a message key that en.json doesn't have;
+// - code under src/ uses a message key that en.json doesn't have, or en.json has a key no code
+//   names (keys built from a prefix, like `sizeUnits.${unit}`, are listed in DYNAMIC);
 // - an error code the backend can send has no `errors.*` message, going by the generated
 //   ErrorCode union in src/mods/bindings/ErrorCode.ts;
 // - a message names a trust tier or a revocation in English but not with that language's term
@@ -106,8 +107,13 @@ const SIDE_BY_SIDE = [
 function sideBySide(text) {
   return SIDE_BY_SIDE.flatMap((re) => [...text.matchAll(re)].map((m) => ({ line: text.slice(0, m.index).split("\n").length, text: m[0].replace(/\s+/g, " ") })));
 }
+// Every message is used: a key is used when code names it in quotes (t("playButton"),
+// "mods.ckIndex" in a table). Keys that code builds from a prefix are listed here, and only these.
+const DYNAMIC = ["sizeUnits."];
+const mentioned = new Set();
 for (const file of sources(join(root, "src"))) {
   const text = readFileSync(file, "utf8");
+  for (const m of text.matchAll(/["'`]([A-Za-z][A-Za-z0-9_.]*)["'`]/g)) mentioned.add(m[1]);
   const rel = file.slice(root.length);
   for (const m of sideBySide(text)) problems.push(`${rel}:${m.line}: two translated pieces side by side make one sentence: ${m.text}`);
   for (const m of text.matchAll(CALL)) {
@@ -119,6 +125,10 @@ for (const file of sources(join(root, "src"))) {
   for (const m of text.matchAll(LITERAL)) {
     if (!known(m[1])) problems.push(`${rel}: "${m[1]}" is not in en.json`);
   }
+}
+
+for (const key of [...Object.keys(en.plain), ...Object.keys(en.plural)]) {
+  if (!mentioned.has(key) && !DYNAMIC.some((p) => key.startsWith(p))) problems.push(`en.json: "${key}" is never used; remove it from every locale`);
 }
 
 // Every error code the backend can send has a message. The codes are the ErrorCode union that
