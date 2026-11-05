@@ -87,6 +87,11 @@ export interface Shown {
 export function showError(err: unknown): Shown {
   if (err === null || err === undefined) return { message: '', detail: null };
   const e = asAppError(err);
+  if (e.code === 'ModUrlRefused') {
+    // Which rule the link broke, in words; the link itself behind Details.
+    const refusal = urlRule(e.detail);
+    if (refusal) return { message: t(URL_RULE_MESSAGE[refusal.kind]), detail: refusal.url || null };
+  }
   if (e.code === 'ModSourceRateLimited') {
     // When GitHub said the limit ends, that is what to say: "until 14:32".
     const until = rateLimitReset(e);
@@ -137,6 +142,32 @@ export function rateLimitReset(error: { code: string; detail: string | null } | 
   if (error?.code !== 'ModSourceRateLimited') return null;
   const m = /^resets at (\d+)$/.exec(error.detail ?? '');
   return m ? new Date(Number(m[1]) * 1000) : null;
+}
+
+/** The rules a download link can break (src-tauri/src/mods/index/format.rs `UrlProblem`), by what the player can tell from them. */
+const URL_RULES: Record<string, 'host' | 'form' | 'asset'> = {
+  notHttps: 'host',
+  notGithub: 'host',
+  backslash: 'form',
+  percentEncoded: 'form',
+  notAUrl: 'form',
+  notCanonical: 'form',
+  queryOrFragment: 'form',
+  noPath: 'form',
+  badRepo: 'asset',
+  notReleaseAsset: 'asset',
+};
+const URL_RULE_MESSAGE: Record<'host' | 'form' | 'asset', MessageKey> = {
+  host: 'errors.modUrlRefusedHost',
+  form: 'errors.modUrlRefusedForm',
+  asset: 'errors.modUrlRefusedAsset',
+};
+
+/** The rule a refused download link broke and the link, from `ModUrlRefused`'s detail ("<rule> <url>"). */
+export function urlRule(detail: string | null): { kind: 'host' | 'form' | 'asset'; url: string } | null {
+  const m = /^([A-Za-z]+) (.*)$/s.exec(detail ?? '');
+  const kind = m ? URL_RULES[m[1]] : undefined;
+  return m && kind ? { kind, url: m[2] } : null;
 }
 
 function takesDetail(key: MessageKey): boolean {

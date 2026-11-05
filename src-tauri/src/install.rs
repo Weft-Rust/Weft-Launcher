@@ -188,7 +188,11 @@ pub fn sweep_leftovers(app_handle: &tauri::AppHandle) {
 /// Why `url` is not the release asset `asset_name` of game version `tag`, if it isn't: the mods'
 /// rule ([`crate::mods::index::release_asset_problem`]) for the game's own repo. A URL that only
 /// starts right, like `…/releases/download/../../../other/repo/…`, is refused.
-pub fn version_url_problem(tag: &str, asset_name: &str, url: &str) -> Option<&'static str> {
+pub fn version_url_problem(
+    tag: &str,
+    asset_name: &str,
+    url: &str,
+) -> Option<crate::mods::index::UrlProblem> {
     crate::mods::index::release_asset_problem(WEFT_REPO, tag, asset_name, url)
 }
 

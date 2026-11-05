@@ -79,8 +79,11 @@ pub enum ModsError {
     #[error("Cancelled")]
     Cancelled,
     /// A build's download URL isn't its GitHub release asset.
-    #[error("Refused download URL: {0}")]
-    UrlRefused(String),
+    #[error("Refused download URL {url}: {why}")]
+    UrlRefused {
+        url: String,
+        why: super::index::UrlProblem,
+    },
     /// A mod icon that isn't a PNG.
     #[error("Not a PNG icon: {0}")]
     IconInvalid(String),
@@ -154,7 +157,7 @@ impl ModsError {
             ChangedMeanwhile(_) => C::ModChangedMeanwhile,
             LockInvalid(_) => C::ModLockInvalid,
             Cancelled => C::ModCancelled,
-            UrlRefused(_) => C::ModUrlRefused,
+            UrlRefused { .. } => C::ModUrlRefused,
             IconInvalid(_) => C::ModIconInvalid,
         }
     }
@@ -195,8 +198,9 @@ impl From<ModsError> for AppError {
             | VersionNotInstalled(d)
             | GameRunning(d)
             | ChangedMeanwhile(d)
-            | UrlRefused(d)
             | IconInvalid(d) => Some(d),
+            // The rule first, which the page says in words (src/i18n/errors.ts `urlRule`).
+            UrlRefused { url, why } => Some(format!("{} {url}", why.rule())),
             LockInvalid(d) => Some(format!("mods.lock.json: {d}")),
         };
         AppError::new(code, detail)
@@ -221,6 +225,20 @@ mod tests {
         assert_eq!(http(403), ErrorCode::HttpStatus);
         assert_eq!(http(500), ErrorCode::HttpStatus);
         assert_eq!(http(503), ErrorCode::Network);
+    }
+
+    #[test]
+    fn a_refused_url_says_the_rule_first() {
+        use crate::mods::index::UrlProblem;
+        let e = AppError::from(ModsError::UrlRefused {
+            url: "http://github.com/a/b/releases/download/t/x.zip".into(),
+            why: UrlProblem::NotHttps,
+        });
+        assert_eq!(e.code, ErrorCode::ModUrlRefused);
+        assert_eq!(
+            e.detail.as_deref(),
+            Some("notHttps http://github.com/a/b/releases/download/t/x.zip")
+        );
     }
 
     #[test]

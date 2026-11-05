@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { asAppError, rateLimitReset, showError } from "./errors";
+import { asAppError, rateLimitReset, showError, urlRule } from "./errors";
 
 describe("one parser for rejections", () => {
   it("keeps a known code and its detail", () => {
@@ -34,5 +34,19 @@ describe("a source's rate limit", () => {
     expect(shown.detail).toBeNull();
     expect(showError({ code: "ModSourceRateLimited", detail: null }).message).toBe("GitHub is limiting requests. Try again in a few minutes.");
     expect(rateLimitReset({ code: "RateLimited", detail: `resets at ${at}` })).toBeNull();
+  });
+});
+
+describe("a refused download link", () => {
+  it("says which rule it broke, with the link behind Details", () => {
+    const url = "http://github.com/a/b/releases/download/t/x.zip";
+    expect(urlRule(`notHttps ${url}`)).toEqual({ kind: "host", url });
+    const shown = showError({ code: "ModUrlRefused", detail: `notReleaseAsset ${url}` });
+    expect(shown.message).toBe("A download link pointed at a file other than this mod's release on its GitHub repo, so the launcher refused it. Nothing was downloaded.");
+    expect(shown.detail).toBe(url);
+    // A rule this build doesn't know: the general sentence, and the whole detail.
+    const other = showError({ code: "ModUrlRefused", detail: `somethingNew ${url}` });
+    expect(other.message).toMatch(/^A download link didn't point where/);
+    expect(other.detail).toBe(`somethingNew ${url}`);
   });
 });

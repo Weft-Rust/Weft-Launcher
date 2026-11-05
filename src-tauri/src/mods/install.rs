@@ -64,7 +64,10 @@ pub async fn fetch_to_store(
         return Ok(());
     }
     if check_url && let Some(why) = asset_url_problem(&m.id, &v.source_repo, &v.tag, &v.url) {
-        return Err(ModsError::UrlRefused(format!("{}: {why}", v.url)));
+        return Err(ModsError::UrlRefused {
+            url: v.url.clone(),
+            why,
+        });
     }
     let tmp = store::temp_path(paths, &v.sha256)?;
     progress(ProgressStage::Downloading, 0);

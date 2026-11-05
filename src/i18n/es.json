@@ -100,7 +100,10 @@
     "modIconInvalid": "El icono de este mod no es un PNG pequeño, así que no se muestra.",
     "details": "Detalles",
     "modSourcesDamaged": "No se pudo leer tu lista de fuentes de mods, así que se apartó y se guardó. Vuelve a añadir tus fuentes; la lista antigua está en Detalles.",
-    "modSourceRateLimitedUntil": "GitHub está limitando las peticiones hasta las {0}. Vuelve a intentarlo entonces."
+    "modSourceRateLimitedUntil": "GitHub está limitando las peticiones hasta las {0}. Vuelve a intentarlo entonces.",
+    "modUrlRefusedHost": "Un enlace de descarga apuntaba fuera de github.com, o no usaba https, así que el launcher lo rechazó. No se descargó nada.",
+    "modUrlRefusedForm": "Un enlace de descarga no estaba escrito de la forma sencilla de un enlace de descarga de GitHub, así que el launcher lo rechazó. No se descargó nada.",
+    "modUrlRefusedAsset": "Un enlace de descarga apuntaba a un archivo que no es la versión de este mod en su repositorio de GitHub, así que el launcher lo rechazó. No se descargó nada."
   },
   "mods": {
     "title": "Mods",

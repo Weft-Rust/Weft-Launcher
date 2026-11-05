@@ -320,9 +320,60 @@ pub fn same_repo(a: &str, b: &str) -> bool {
     a.eq_ignore_ascii_case(b)
 }
 
+/// Which rule a download URL broke: the page says it in the player's language (the detail of
+/// `ModUrlRefused` starts with [`UrlProblem::rule`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UrlProblem {
+    Backslash,
+    PercentEncoded,
+    NotAUrl,
+    NotCanonical,
+    NotHttps,
+    NotGithub,
+    QueryOrFragment,
+    NoPath,
+    BadRepo,
+    NotReleaseAsset,
+}
+
+impl UrlProblem {
+    /// The rule's stable name, which the page reads (src/i18n/errors.ts `urlRule`).
+    pub fn rule(self) -> &'static str {
+        match self {
+            Self::Backslash => "backslash",
+            Self::PercentEncoded => "percentEncoded",
+            Self::NotAUrl => "notAUrl",
+            Self::NotCanonical => "notCanonical",
+            Self::NotHttps => "notHttps",
+            Self::NotGithub => "notGithub",
+            Self::QueryOrFragment => "queryOrFragment",
+            Self::NoPath => "noPath",
+            Self::BadRepo => "badRepo",
+            Self::NotReleaseAsset => "notReleaseAsset",
+        }
+    }
+}
+
+impl std::fmt::Display for UrlProblem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Backslash => "contains a backslash",
+            Self::PercentEncoded => "percent-encoded",
+            Self::NotAUrl => "not a URL",
+            Self::NotCanonical => "not in canonical form",
+            Self::NotHttps => "not https",
+            Self::NotGithub => "not github.com",
+            Self::QueryOrFragment => "has a query or fragment",
+            Self::NoPath => "no path",
+            Self::BadRepo => "bad repo",
+            Self::NotReleaseAsset => "not this repo's release asset",
+        })
+    }
+}
+
 /// Why `url` is not the release asset `<id>.zip` of `tag` in `repo`, if it isn't. See
 /// [`release_asset_problem`].
-pub fn asset_url_problem(id: &str, repo: &str, tag: &str, url: &str) -> Option<&'static str> {
+pub fn asset_url_problem(id: &str, repo: &str, tag: &str, url: &str) -> Option<UrlProblem> {
     release_asset_problem(repo, tag, &format!("{id}.zip"), url)
 }
 
@@ -330,40 +381,40 @@ pub fn asset_url_problem(id: &str, repo: &str, tag: &str, url: &str) -> Option<&
 /// `https://github.com/<owner>/<repo>/releases/download/<tag>/<file>` exactly as written: no
 /// other host, port, user, query or fragment, no `\`, no percent-encoding, no `.` or `..`.
 /// Game versions (`install.rs`) and mods both go through it.
-pub fn release_asset_problem(repo: &str, tag: &str, file: &str, url: &str) -> Option<&'static str> {
+pub fn release_asset_problem(repo: &str, tag: &str, file: &str, url: &str) -> Option<UrlProblem> {
     if url.contains('\\') {
-        return Some("contains a backslash");
+        return Some(UrlProblem::Backslash);
     }
     if url.contains('%') {
-        return Some("percent-encoded");
+        return Some(UrlProblem::PercentEncoded);
     }
     let Ok(parsed) = url::Url::parse(url) else {
-        return Some("not a URL");
+        return Some(UrlProblem::NotAUrl);
     };
     // The parser resolves `.` and `..` and fixes up odd spellings; a URL that changes when
     // parsed is not the one that was reviewed.
     if parsed.as_str() != url {
-        return Some("not in canonical form");
+        return Some(UrlProblem::NotCanonical);
     }
     if parsed.scheme() != "https" {
-        return Some("not https");
+        return Some(UrlProblem::NotHttps);
     }
     if parsed.host_str() != Some("github.com")
         || parsed.port().is_some()
         || !parsed.username().is_empty()
         || parsed.password().is_some()
     {
-        return Some("not github.com");
+        return Some(UrlProblem::NotGithub);
     }
     if parsed.query().is_some() || parsed.fragment().is_some() {
-        return Some("has a query or fragment");
+        return Some(UrlProblem::QueryOrFragment);
     }
     let Some(segments) = parsed.path_segments() else {
-        return Some("no path");
+        return Some(UrlProblem::NoPath);
     };
     let segments: Vec<&str> = segments.collect();
     let Some((owner, name)) = repo.split_once('/') else {
-        return Some("bad repo");
+        return Some(UrlProblem::BadRepo);
     };
     match segments.as_slice() {
         [o, r, "releases", "download", t, n]
@@ -375,7 +426,7 @@ pub fn release_asset_problem(repo: &str, tag: &str, file: &str, url: &str) -> Op
         {
             None
         }
-        _ => Some("not this repo's release asset"),
+        _ => Some(UrlProblem::NotReleaseAsset),
     }
 }
 
