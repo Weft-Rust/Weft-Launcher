@@ -21,7 +21,8 @@ import { SourcesDialog } from "../components/mods/SourcesDialog";
 import { CopyDialog } from "../components/mods/CopyDialog";
 import { BannerStack, Toasts, type BannerItem } from "../components/mods/BannerStack";
 import { useCatalogBanners } from "../components/mods/catalogBanners";
-import { BlockerPanel, ModFailureNotice, useReviewDialog } from "../components/mods/ModFixes";
+import { BlockerPanel, useReviewDialog } from "../components/mods/ModFixes";
+import { ModFailureNotice } from "../components/mods/ModFailureNotice";
 import { REFRESH_ICON } from "../components/icons";
 
 const VIEWS = ["installed", "browse"] as const;
