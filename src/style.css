@@ -487,7 +487,7 @@ button:disabled { cursor: not-allowed; }
 .mod-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
 /* The name has the card's whole width: the tier and where it is from sit on the line under it,
    and the button beside the summary. */
-.mod-card { display: grid; align-content: start; grid-template-columns: 48px minmax(0, 1fr) auto; grid-template-areas: "icon title title" "icon badges badges" "summary summary foot"; gap: 0 12px; padding: 8px 12px; }
+.mod-card { display: grid; align-content: start; grid-template-columns: 48px minmax(0, 1fr) auto; grid-template-areas: "icon title title" "icon badges badges" "summary summary summary" "by by foot"; gap: 0 12px; padding: 8px 12px; }
 .mod-card-head { display: contents; }
 .mod-card-head .mod-icon { grid-area: icon; align-self: start; }
 .mod-card-title { grid-area: title; min-width: 0; }
@@ -495,18 +495,16 @@ button:disabled { cursor: not-allowed; }
 .mod-name-btn { display: block; max-width: 100%; text-align: left; }
 .mod-name-btn:hover .mod-name { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
 .mod-card-version { flex: none; color: var(--g5); line-height: 24px; }
-.mod-card-version + .mod-source::before { content: "· "; }
-.mod-badges { grid-area: badges; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mod-badges { grid-area: badges; display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; min-width: 0; }
+.mod-card-by { grid-area: by; align-self: center; min-width: 0; color: var(--g5); line-height: 24px; overflow-wrap: anywhere; margin-top: 4px; }
 .mod-badges > .badge { flex: none; }
-.mod-summary { grid-area: summary; color: #b9c1d3; line-height: 24px; height: 48px; margin-top: 4px; align-self: start; }
+.mod-summary { grid-area: summary; color: #b9c1d3; line-height: 24px; height: 24px; margin-top: 4px; align-self: start; }
 .mod-card-foot { grid-area: foot; display: flex; flex-direction: column; align-items: flex-end; justify-content: flex-end; gap: 0; margin-top: 4px; }
 .mod-card-foot .needs-net { color: var(--a3); font-size: 16px; line-height: 24px; white-space: nowrap; }
-/* Offline, the note goes beside the button on a line of its own, so the summary keeps its width. */
-.mod-card.needs-net-card { grid-template-areas: "icon title title" "icon badges badges" "summary summary summary" "foot foot foot"; }
+/* Offline, the note goes beside the button on a line of its own, under who it is from. */
+.mod-card.needs-net-card { grid-template-areas: "icon title title" "icon badges badges" "by by by" "foot foot foot"; }
 .needs-net-card .mod-card-foot { flex-direction: row; align-items: center; justify-content: flex-end; gap: 12px; }
 .needs-net-card .needs-net { order: -1; }
-.needs-net-card .mod-summary { height: 24px; }
-.mod-source { color: var(--g5); line-height: 24px; min-width: 0; flex: 0 1 auto; }
 .installed-mark { color: var(--v3); line-height: 24px; white-space: nowrap; }
 
 .empty-state p + p { margin-top: 8px; }

@@ -135,17 +135,23 @@ export function BrowseList({ report, locked }: BrowseListProps) {
                       <Truncate className="mod-name" text={mod.name} />
                     </button>
                   </div>
+                  {/* The tier, the channel and the version (or why there is none to install),
+                      each whole: what doesn't fit beside the others goes to the next line. */}
                   <div className="mod-badges">
                     {shown && <TrustBadge trust={shown.trust} />}
                     {best && <ChannelBadge channel={best.channel} />}
                     <span className="mod-card-version" data-must-fit>
                       {what}
                     </span>
-                    <Truncate className="mod-source" text={who} />
                   </div>
                 </div>
-                {/* Offline, the network note takes a line, so the summary gives one up: two rows of cards still fit. */}
-                <Truncate className="mod-summary" text={mod.summary || t("mods.noSummary")} lines={needsNet ? 1 : 2} />
+                {/* The start of what it is; all of it, with the authors and checks, is in its details.
+                    Offline, the network note takes its line, so two rows of cards still fit. */}
+                {!needsNet && <Truncate className="mod-summary" text={mod.summary || t("mods.noSummary")} lines={1} />}
+                {/* Who it is from, whole: it wraps rather than being cut. */}
+                <span className="mod-card-by" data-must-fit>
+                  {t("mods.by", who)}
+                </span>
                 <div className="mod-card-foot">
                   {p ? (
                     <ModProgressBar progress={p} nameOf={(x) => (x.modId === mod.id ? mod.name : nameIn(tag)(x.modId))} compact />

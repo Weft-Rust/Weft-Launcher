@@ -246,6 +246,9 @@ for (const locale of LOCALES) {
           // Names have the card's width: the tier and source sit on the line below.
           await expect(page.locator(".mod-card .mod-name[tabindex='0']"), "cut names").toHaveCount(0);
         }
+        // Who a mod is from and why there is nothing to install (e.g. "Prereleases only") are whole
+        // on every card: they wrap rather than being cut, and nothing about them is a tab stop.
+        expect(await page.locator(".mod-card-by[data-must-fit]").count()).toBe(await page.locator(".mod-card").count());
         await checks.browse?.(page, en);
         await expectWhole(page, "Browse");
         expect(await lowContrast(page), "small text under 4.5:1").toEqual([]);
