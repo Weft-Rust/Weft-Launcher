@@ -141,3 +141,301 @@ fn the_revocation_defaults_are_documented() {
     );
     assert!(DOC.contains("Revocations fail closed"));
 }
+
+// ---------------------------------------------------------------------------------------------
+// The JSON Schemas in docs/mod-manager/schema, held to the examples and to the launcher's checks.
+
+const INDEX_SCHEMA: &str = include_str!("../../../docs/mod-manager/schema/index.schema.json");
+const MOD_SCHEMA: &str = include_str!("../../../docs/mod-manager/schema/mod.schema.json");
+
+/// What each `pattern` in the schemas stands for: the launcher's own check, so a pattern can't
+/// drift from what is enforced without this table changing too. A pattern not here fails.
+fn pattern_check(pattern: &str) -> fn(&str) -> bool {
+    use super::abi::{is_abi, is_safe_ref};
+    use super::index::{is_commit, is_mod_id, is_repo, is_rfc3339, is_semver, is_sha256};
+    match pattern {
+        r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$" => is_rfc3339,
+        "^[a-z0-9_]{1,64}$" => is_mod_id,
+        "^[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}$" => is_safe_ref,
+        "^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$" => is_repo,
+        "^([0-9a-f]{40}|[0-9a-f]{64})$" => is_commit,
+        "^[0-9a-f]{16}$" => is_abi,
+        "^[0-9a-f]{64}$" => is_sha256,
+        r"^\s*[0-9A-Fa-f]{64}\s*$" => |s| {
+            let t = s.trim();
+            t.len() == 64 && t.bytes().all(|b| b.is_ascii_hexdigit())
+        },
+        r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$" => {
+            is_semver
+        }
+        "^https://" => |s| s.starts_with("https://"),
+        r"^https://github\.com/" => |s| s.starts_with("https://github.com/"),
+        r"^https://(github\.com|raw\.githubusercontent\.com|user-images\.githubusercontent\.com|[A-Za-z0-9-]+\.github\.io)/" => {
+            crate::download::icon_url_allowed
+        }
+        other => {
+            panic!("schema pattern {other:?} stands for no launcher check; add it to pattern_check")
+        }
+    }
+}
+
+/// A validator for the part of JSON Schema the schemas use, and only that: a keyword it doesn't
+/// know fails, so the schemas stay checkable here.
+struct Schemas {
+    files: Vec<(&'static str, serde_json::Value)>,
+}
+
+impl Schemas {
+    fn load() -> Self {
+        let parse = |s: &str| serde_json::from_str::<serde_json::Value>(s).expect("schema is JSON");
+        Schemas {
+            files: vec![
+                ("index.schema.json", parse(INDEX_SCHEMA)),
+                ("mod.schema.json", parse(MOD_SCHEMA)),
+            ],
+        }
+    }
+
+    fn file(&self, name: &str) -> &serde_json::Value {
+        &self
+            .files
+            .iter()
+            .find(|(n, _)| *n == name)
+            .unwrap_or_else(|| panic!("no schema {name}"))
+            .1
+    }
+
+    /// Where `value` breaks `schema` (inside file `file`), as JSON-pointer-ish paths.
+    fn errors(
+        &self,
+        file: &str,
+        schema: &serde_json::Value,
+        value: &serde_json::Value,
+        at: &str,
+    ) -> Vec<String> {
+        use serde_json::Value as V;
+        let mut out = Vec::new();
+        let Some(rules) = schema.as_object() else {
+            panic!("schema at {at} is not an object");
+        };
+        for (key, rule) in rules {
+            match key.as_str() {
+                "$schema" | "$id" | "$defs" | "title" | "description" | "format" => {}
+                "$ref" => {
+                    let r = rule.as_str().unwrap();
+                    let (target, pointer) = r.split_once('#').unwrap();
+                    let target = if target.is_empty() { file } else { target };
+                    let resolved = self
+                        .file(target)
+                        .pointer(pointer)
+                        .unwrap_or_else(|| panic!("no {r}"));
+                    out.extend(self.errors(target, resolved, value, at));
+                }
+                "type" => {
+                    let types: Vec<&str> = match rule {
+                        V::String(t) => vec![t.as_str()],
+                        V::Array(ts) => ts.iter().map(|t| t.as_str().unwrap()).collect(),
+                        _ => panic!("type at {at}"),
+                    };
+                    let fits = |t: &str| match t {
+                        "object" => value.is_object(),
+                        "array" => value.is_array(),
+                        "string" => value.is_string(),
+                        "integer" => value.is_u64() || value.is_i64(),
+                        "number" => value.is_number(),
+                        "boolean" => value.is_boolean(),
+                        "null" => value.is_null(),
+                        other => panic!("type {other} at {at}"),
+                    };
+                    if !types.iter().any(|t| fits(t)) {
+                        out.push(format!("{at}: not {types:?}"));
+                    }
+                }
+                "const" if value != rule => out.push(format!("{at}: not {rule}")),
+                "const" => {}
+                "enum" if !rule.as_array().unwrap().contains(value) => {
+                    out.push(format!("{at}: not one of {rule}"))
+                }
+                "enum" => {}
+                "required" => {
+                    if let Some(o) = value.as_object() {
+                        for k in rule.as_array().unwrap() {
+                            if !o.contains_key(k.as_str().unwrap()) {
+                                out.push(format!("{at}: lacks {k}"));
+                            }
+                        }
+                    }
+                }
+                "properties" => {
+                    if let Some(o) = value.as_object() {
+                        for (k, sub) in rule.as_object().unwrap() {
+                            if let Some(v) = o.get(k) {
+                                out.extend(self.errors(file, sub, v, &format!("{at}/{k}")));
+                            }
+                        }
+                    }
+                }
+                "items" => {
+                    if let Some(a) = value.as_array() {
+                        for (i, v) in a.iter().enumerate() {
+                            out.extend(self.errors(file, rule, v, &format!("{at}/{i}")));
+                        }
+                    }
+                }
+                "allOf" => {
+                    for sub in rule.as_array().unwrap() {
+                        out.extend(self.errors(file, sub, value, at));
+                    }
+                }
+                "anyOf" => {
+                    let any = rule
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|sub| self.errors(file, sub, value, at).is_empty());
+                    if !any {
+                        out.push(format!("{at}: matches none of anyOf"));
+                    }
+                }
+                "not" => {
+                    if self.errors(file, rule, value, at).is_empty() {
+                        out.push(format!("{at}: matches what `not` rules out"));
+                    }
+                }
+                "pattern" => {
+                    if let Some(s) = value.as_str()
+                        && !pattern_check(rule.as_str().unwrap())(s)
+                    {
+                        out.push(format!("{at}: {s:?} doesn't match {rule}"));
+                    }
+                }
+                "minLength" => {
+                    if let Some(s) = value.as_str()
+                        && (s.chars().count() as u64) < rule.as_u64().unwrap()
+                    {
+                        out.push(format!("{at}: shorter than {rule}"));
+                    }
+                }
+                "minimum" => {
+                    if let Some(n) = value.as_f64()
+                        && n < rule.as_f64().unwrap()
+                    {
+                        out.push(format!("{at}: below {rule}"));
+                    }
+                }
+                other => panic!(
+                    "schema keyword {other:?} at {at} isn't checked here; add it or leave it out"
+                ),
+            }
+        }
+        out
+    }
+
+    fn check(&self, file: &str, value: &serde_json::Value) -> Vec<String> {
+        self.errors(file, self.file(file), value, "")
+    }
+}
+
+#[test]
+fn the_examples_follow_the_schemas() {
+    let s = Schemas::load();
+    assert_eq!(
+        s.check("index.schema.json", &example("mods")),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        s.check("mod.schema.json", &example("asset")),
+        Vec::<String>::new()
+    );
+    // INDEX_FORMAT points at them.
+    assert!(DOC.contains("schema/index.schema.json") && DOC.contains("schema/mod.schema.json"));
+}
+
+/// What the schemas rule out, the launcher drops or refuses too.
+#[test]
+fn the_schemas_and_the_launcher_agree_on_what_is_wrong() {
+    let s = Schemas::load();
+    type Change = fn(&mut serde_json::Value);
+    let builds: &[(&str, Change)] = &[
+        ("no sha256", |v| {
+            v["asset"].as_object_mut().unwrap().remove("sha256");
+        }),
+        ("an uppercase sha256", |v| {
+            v["asset"]["sha256"] = "A".repeat(64).into()
+        }),
+        ("an unknown channel", |v| v["channel"] = "beta".into()),
+        ("a version that isn't semver", |v| {
+            v["version"] = "1.2".into()
+        }),
+        ("a short commit", |v| {
+            v["source"]["commit"] = "cceea78".into()
+        }),
+        ("an abi that isn't 16 hex", |v| {
+            v["weft"]["abi"] = "f470".into()
+        }),
+        ("a dep that isn't a mod id", |v| {
+            v["deps"] = serde_json::json!([{ "id": "Base" }])
+        }),
+        ("no reviewer", |v| v["reviewed"]["by"] = "".into()),
+    ];
+    for (what, change) in builds {
+        let mut raw = example("mods");
+        change(&mut raw["mods"][0]["versions"][0]);
+        assert!(
+            !s.check("index.schema.json", &raw).is_empty(),
+            "the schema allows {what}"
+        );
+        let index = index::parse(raw.to_string().as_bytes()).unwrap();
+        let kept: usize = index.mods.iter().map(|m| m.versions.len()).sum();
+        assert_eq!(kept, 0, "the launcher keeps a build with {what}");
+    }
+
+    let mods: &[(&str, Change)] = &[
+        ("the reserved id", |v| v["id"] = "base".into()),
+        ("an id with capitals", |v| v["id"] = "Lanterns".into()),
+        ("no schema", |v| {
+            v.as_object_mut().unwrap().remove("schema");
+        }),
+    ];
+    for (what, change) in mods {
+        let mut raw = example("asset");
+        change(&mut raw);
+        assert!(
+            !s.check("mod.schema.json", &raw).is_empty(),
+            "the schema allows {what}"
+        );
+        let accepted = serde_json::from_value::<ModJson>(raw)
+            .ok()
+            .and_then(|json| {
+                let zip = GhAsset {
+                    name: json.asset.name.clone(),
+                    browser_download_url: json.asset.url.clone(),
+                    size: json.asset.size,
+                    digest: Some(format!("sha256:{}", json.asset.sha256)),
+                };
+                let release = GhRelease {
+                    tag_name: json.tag.clone(),
+                    draft: false,
+                    prerelease: false,
+                    published_at: None,
+                    assets: vec![zip.clone()],
+                };
+                let repo = json.source.repo.clone();
+                accept(&repo, &release, &zip, json).ok()
+            });
+        assert!(
+            accepted.is_none(),
+            "the launcher accepts a mod.json with {what}"
+        );
+    }
+
+    // An icon off GitHub's hosts: the schema says no, and the launcher drops it.
+    let mut raw = example("mods");
+    raw["mods"][0]["icon"] = "https://tracker.example/icon.png".into();
+    assert!(!s.check("index.schema.json", &raw).is_empty());
+    assert!(
+        index::parse(raw.to_string().as_bytes()).unwrap().mods[0]
+            .icon
+            .is_none()
+    );
+}

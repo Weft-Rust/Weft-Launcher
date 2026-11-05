@@ -20,6 +20,8 @@ The JSON examples below are complete and valid: a test in the launcher (`src-tau
 
 ## `index.json`
 
+JSON Schemas for both files, for an editor or a publishing CI: [`schema/index.schema.json`](schema/index.schema.json) and [`schema/mod.schema.json`](schema/mod.schema.json). They say what a file must hold for every entry in it to be used; the launcher's tests hold the examples below to them, and each `pattern` to the check the launcher runs. Rules that compare one field with another, or with GitHub, are only in the text.
+
 ```json
 {
   "schema": 1,

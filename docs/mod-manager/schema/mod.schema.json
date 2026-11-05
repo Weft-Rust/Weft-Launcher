@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mod.schema.json",
+  "title": "<id>.mod.json for an Unreviewed source, schema 1",
+  "description": "The mod-level fields and one build's fields at the top level, published next to <id>.zip in each release: INDEX_FORMAT.md, '<id>.mod.json, for Unreviewed sources'. It must also agree with GitHub's record of the release (tag, repo, asset name, URL, size and digest), which a schema can't check. reviewed is never read from a source.",
+  "allOf": [
+    { "$ref": "index.schema.json#/$defs/modFields" },
+    { "$ref": "index.schema.json#/$defs/build" },
+    { "type": "object", "required": ["schema"], "properties": { "schema": { "const": 1 } } }
+  ]
+}
