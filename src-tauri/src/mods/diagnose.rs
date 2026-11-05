@@ -1,7 +1,8 @@
 //! Names the mod that stopped the game from starting. Weft exits with code 1 and leaves the
 //! reason in its log; these are the engine's own messages (`crates/engine/src/modloader.rs`),
-//! which `crates/app/src/main.rs` logs with `log::error!`, so as `<time> ERROR [weft] <message>`.
-//! Only ERROR lines count: the engine logs ordinary mod loading at INFO.
+//! which `crates/app/src/main.rs` logs with `log::error!`, so as `<time> ERROR [weft] <message>`
+//! (`crates/engine/src/log.rs`). Only ERROR lines of the target `weft` count: the engine logs
+//! ordinary mod loading at INFO, and a mod's own lines (`[mod:x]`) may say anything.
 
 use serde::Serialize;
 use ts_rs::TS;
@@ -61,15 +62,37 @@ fn id_from_library(path: &str) -> Option<String> {
     (!id.is_empty()).then(|| id.to_string())
 }
 
-/// The message part of a log line: after the last `[target] `, which may hold spaces in a path.
-fn message(line: &str) -> &str {
-    line.rfind("] ").map_or(line, |i| &line[i + 2..])
+/// A log line split as the engine writes it, after the launcher's `[stderr] ` or `[stdout] `:
+/// `{t:9.3} {LEVEL} [{target}] {message}`.
+struct Record<'a> {
+    level: &'a str,
+    target: &'a str,
+    message: &'a str,
 }
 
-/// Whether the line was logged at ERROR: the level stands on its own before the message.
-fn is_error(line: &str) -> bool {
-    let before = line.rfind("] ").map_or(line, |i| &line[..i]);
-    before.split_whitespace().any(|w| w == "ERROR")
+fn record(line: &str) -> Option<Record<'_>> {
+    let rest = line.trim_start();
+    let rest = ["[stderr]", "[stdout]"]
+        .iter()
+        .find_map(|p| rest.strip_prefix(p))
+        .unwrap_or(rest)
+        .trim_start();
+    let (time, rest) = rest.split_once(char::is_whitespace)?;
+    time.parse::<f64>().ok()?;
+    let (level, rest) = rest.trim_start().split_once(char::is_whitespace)?;
+    let rest = rest.trim_start().strip_prefix('[')?;
+    let (target, message) = rest.split_once("] ")?;
+    Some(Record {
+        level,
+        target,
+        message,
+    })
+}
+
+/// The message of an engine ERROR line, if this is one.
+fn engine_error(line: &str) -> Option<&str> {
+    let r = record(line)?;
+    (r.level == "ERROR" && r.target == "weft").then_some(r.message)
 }
 
 fn is_id(s: &str) -> bool {
@@ -78,45 +101,43 @@ fn is_id(s: &str) -> bool {
 
 fn classify(line: &str) -> Option<ModFailure> {
     use FailureKind as K;
-    if !is_error(line) {
-        return None;
-    }
+    let message = engine_error(line)?;
     let failure = |kind, mod_id: Option<&str>, other: Option<&str>| ModFailure {
         kind,
         mod_id: mod_id.map(str::to_string),
         other: other.map(str::to_string),
         line: line.trim().to_string(),
     };
-    if line.contains("was built against another mod ABI") {
-        return Some(failure(K::WrongVersion, word_after(line, "mod "), None));
+    if message.contains("was built against another mod ABI") {
+        return Some(failure(K::WrongVersion, word_after(message, "mod "), None));
     }
-    if line.contains(" requires missing mod ") {
+    if message.contains(" requires missing mod ") {
         return Some(failure(
             K::MissingDep,
-            word_after(line, "mod "),
-            word_after(line, " requires missing mod "),
+            word_after(message, "mod "),
+            word_after(message, " requires missing mod "),
         ));
     }
-    if line.contains(" is the crate ") {
+    if message.contains(" is the crate ") {
         return Some(failure(
             K::WrongName,
-            word_after(line, "mod "),
-            word_after(line, " is the crate "),
+            word_after(message, "mod "),
+            word_after(message, " is the crate "),
         ));
     }
-    if let Some(id) = word_after(line, "loading mod ")
-        && line.contains(&format!("loading mod {id} from "))
+    if let Some(id) = word_after(message, "loading mod ")
+        && message.starts_with(&format!("loading mod {id} from "))
     {
         return Some(failure(K::LoadFailed, Some(id), None));
     }
-    if let Some(at) = line.find(" is not a Weft mod") {
-        let path = message(&line[..at]).trim();
+    if let Some(at) = message.find(" is not a Weft mod") {
+        let path = message[..at].trim();
         return Some(ModFailure {
             mod_id: id_from_library(path),
             ..failure(K::NotAMod, None, None)
         });
     }
-    if let Some(before) = message(line).trim_end().strip_suffix("init panicked") {
+    if let Some(before) = message.trim_end().strip_suffix("init panicked") {
         // The engine prefixes each registration error with the mod's id: `showcase: init panicked`.
         let id = before
             .trim_end()
@@ -230,6 +251,15 @@ mod tests {
         }
     }
 
+    /// A path with `] ` in it doesn't move the message.
+    #[test]
+    fn paths_with_brackets() {
+        let line = "[stderr]     0.402 ERROR [weft] /home/u/mods [old] /x/libmytweak.so is not a Weft mod";
+        let f = find(line).unwrap();
+        assert_eq!(f.kind, K::NotAMod);
+        assert_eq!(f.mod_id.as_deref(), Some("mytweak"));
+    }
+
     #[test]
     fn an_init_panic_names_the_mod() {
         // Several registration errors are joined with newlines into one ERROR record: only the
@@ -271,6 +301,11 @@ mod tests {
             "[stderr]     0.402 INFO  [mod:hints] loading mod cogwork from the cache",
             "[stderr]     0.402 WARN  [weft] mod cogwork requires missing mod showcase",
             "[stdout] <player> my build is not a Weft mod",
+            // A mod's own ERROR lines name other mods; only the engine's count.
+            "[stderr]     0.402 ERROR [mod:hints] mod cogwork requires missing mod showcase",
+            "[stderr]     0.402 ERROR [mod:x] mod y was built against another mod ABI (1, this engine has 2)",
+            "[stderr]     0.402 ERROR [modloader] showcase: init panicked",
+            "ERROR [weft] mod cogwork requires missing mod showcase",
             "",
         ] {
             assert!(find(line).is_none(), "{line:?}");
