@@ -5,7 +5,9 @@
 
 use reqwest::header::{ETAG, IF_NONE_MATCH, LINK, USER_AGENT};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
+use ts_rs::TS;
 
 use super::error::ModsError;
 use super::index::{
@@ -26,14 +28,71 @@ struct SourcesFile {
     repos: Vec<String>,
 }
 
-pub fn list(paths: &Paths) -> Vec<String> {
-    std::fs::read(paths.sources_file())
-        .ok()
-        .and_then(|b| serde_json::from_slice::<SourcesFile>(&b).ok())
-        .map(|f| f.repos.into_iter().filter(|r| is_repo(r)).collect())
-        .unwrap_or_default()
+/// The player's sources. No file is no sources. A file that can't be read or isn't a sources
+/// list is never taken for an empty one: it is moved aside, kept, and `ModSourcesDamaged` names
+/// where, until the player saves a new list ([`save`]) or puts that one back.
+pub fn list(paths: &Paths) -> Result<Vec<String>, ModsError> {
+    let file = paths.sources_file();
+    match std::fs::read(&file) {
+        Ok(bytes) => match serde_json::from_slice::<SourcesFile>(&bytes) {
+            Ok(f) => Ok(f.repos.into_iter().filter(|r| is_repo(r)).collect()),
+            Err(e) => Err(set_aside(&file, &e.to_string())),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => match damaged_copy(&file) {
+            Some(kept) => Err(ModsError::SourcesDamaged(kept.display().to_string())),
+            None => Ok(Vec::new()),
+        },
+        Err(e) => Err(set_aside(&file, &e.to_string())),
+    }
 }
 
+/// The list to change: a damaged one is already set aside and kept, so a change starts a new one.
+pub fn list_for_change(paths: &Paths) -> Result<Vec<String>, ModsError> {
+    match list(paths) {
+        // Only once it is out of the way: a file that couldn't be moved is never overwritten.
+        Err(ModsError::SourcesDamaged(_)) if !paths.sources_file().exists() => Ok(Vec::new()),
+        other => other,
+    }
+}
+
+/// `sources.json` moved to `sources.damaged-<seconds>.json` beside it, and the error naming it.
+fn set_aside(file: &Path, why: &str) -> ModsError {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    let kept = file.with_file_name(format!("sources.damaged-{stamp}.json"));
+    match std::fs::rename(file, &kept) {
+        Ok(()) => {
+            eprintln!(
+                "mod sources: {} is damaged ({why}); kept as {}",
+                file.display(),
+                kept.display()
+            );
+            ModsError::SourcesDamaged(kept.display().to_string())
+        }
+        // It can't even be moved: it stays where it is, and is still never overwritten
+        // unasked (`list_for_change` only starts over once it is aside).
+        Err(_) => ModsError::SourcesDamaged(file.display().to_string()),
+    }
+}
+
+/// The newest damaged list set aside next to `file`, if there is one.
+fn damaged_copy(file: &Path) -> Option<PathBuf> {
+    let dir = file.parent()?;
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("sources.damaged-") && n.ends_with(".json"))
+        })
+        .max()
+}
+
+/// Writes the list. A damaged one set aside before stays where it is, kept.
 pub fn save(paths: &Paths, repos: &[String]) -> Result<(), ModsError> {
     let file = SourcesFile {
         repos: repos.to_vec(),
@@ -122,6 +181,30 @@ pub(crate) struct GhRelease {
     pub assets: Vec<GhAsset>,
 }
 
+/// Why a source that GitHub answered has no mods to offer, by how far its best release got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum NoModsReason {
+    /// It has no published releases.
+    NoReleases,
+    /// No release carries an `<id>.zip` with its `<id>.mod.json`.
+    NoModFiles,
+    /// A release's `<id>.mod.json` couldn't be read, or isn't one.
+    Unreadable,
+    /// GitHub has no SHA-256 digest for the zip, so nothing could be checked.
+    NoDigest,
+    /// The description doesn't match GitHub's record of the release (tag, repo, asset, size or
+    /// hash), or names another id.
+    Disagrees,
+    /// It matches, but breaks a rule every mod follows (version, interface, URL, dependencies).
+    Invalid,
+}
+
+/// Keeps the reason that got furthest.
+fn note(seen: &mut Option<NoModsReason>, why: NoModsReason) {
+    *seen = Some(seen.map_or(why, |s| s.max(why)));
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct SourceCache {
     etag: Option<String>,
@@ -129,6 +212,9 @@ struct SourceCache {
     /// When GitHub last answered; missing in caches older launchers wrote.
     #[serde(default)]
     checked: Option<String>,
+    /// Why there are no mods, when there are none.
+    #[serde(default)]
+    no_mods: Option<NoModsReason>,
 }
 
 fn cache_path(paths: &Paths, repo: &str) -> std::path::PathBuf {
@@ -148,9 +234,16 @@ pub(crate) fn accept(
     release: &GhRelease,
     zip: &GhAsset,
     json: ModJson,
-) -> Option<IndexMod> {
-    let stem = zip.name.strip_suffix(".zip")?;
-    let digest = zip.digest.as_deref()?.strip_prefix("sha256:")?;
+) -> Result<IndexMod, NoModsReason> {
+    let stem = zip
+        .name
+        .strip_suffix(".zip")
+        .ok_or(NoModsReason::NoModFiles)?;
+    let digest = zip
+        .digest
+        .as_deref()
+        .and_then(|d| d.strip_prefix("sha256:"))
+        .ok_or(NoModsReason::NoDigest)?;
     let agrees = json.schema == 1
         && is_mod_id(&json.id)
         && json.id != RESERVED_ID
@@ -162,7 +255,7 @@ pub(crate) fn accept(
         && json.asset.size == zip.size
         && json.asset.sha256.eq_ignore_ascii_case(digest);
     if !agrees {
-        return None;
+        return Err(NoModsReason::Disagrees);
     }
     let mut channel = json.channel;
     if release.prerelease && channel == Channel::Release {
@@ -189,11 +282,11 @@ pub(crate) fn accept(
         reviewed: None,
     };
     if version_problem(&json.id, &version).is_some() {
-        return None;
+        return Err(NoModsReason::Invalid);
     }
     let mut summary = json.summary;
     clamp_summary(&mut summary);
-    Some(IndexMod {
+    Ok(IndexMod {
         id: json.id,
         name: json.name,
         summary,
@@ -266,6 +359,8 @@ pub struct SourceFetch {
     pub freshness: Freshness,
     pub checked: Option<String>,
     pub error: Option<ModsError>,
+    /// Why GitHub's answer has no mods, when it has none.
+    pub no_mods: Option<NoModsReason>,
 }
 
 /// The last good answer with the reason the refresh failed, or nothing and the reason.
@@ -276,12 +371,14 @@ fn fall_back(cached: Option<SourceCache>, error: ModsError) -> SourceFetch {
             freshness: Freshness::Cached,
             checked: c.checked,
             error: Some(error),
+            no_mods: c.no_mods,
         },
         None => SourceFetch {
             mods: Vec::new(),
             freshness: Freshness::Unavailable,
             checked: None,
             error: Some(error),
+            no_mods: None,
         },
     }
 }
@@ -391,12 +488,14 @@ pub fn cached(paths: &Paths, repo: &str) -> SourceFetch {
             freshness: Freshness::Cached,
             checked: c.checked,
             error: None,
+            no_mods: c.no_mods,
         },
         None => SourceFetch {
             mods: Vec::new(),
             freshness: Freshness::Unavailable,
             checked: None,
             error: None,
+            no_mods: None,
         },
     }
 }
@@ -417,6 +516,7 @@ pub async fn fetch(
             freshness: Freshness::Cached,
             checked: c.checked,
             error: None,
+            no_mods: c.no_mods,
         };
     }
 
@@ -432,13 +532,20 @@ pub async fn fetch(
                 freshness: Freshness::Fresh,
                 checked: cache.checked,
                 error: None,
+                no_mods: cache.no_mods,
             };
         }
         Err(e) => return fall_back(cached, e),
     };
 
     let mut entries = Vec::new();
-    for release in releases.iter().filter(|r| !r.draft) {
+    let mut why = None;
+    let published: Vec<&GhRelease> = releases.iter().filter(|r| !r.draft).collect();
+    if published.is_empty() {
+        note(&mut why, NoModsReason::NoReleases);
+    }
+    for release in published {
+        let mut pairs = 0;
         for json_asset in release
             .assets
             .iter()
@@ -452,17 +559,25 @@ pub async fn fetch(
             else {
                 continue;
             };
+            pairs += 1;
             let Some(json) = get_mod_json(client, &json_asset.browser_download_url).await else {
+                note(&mut why, NoModsReason::Unreadable);
                 continue;
             };
-            if let Some(entry) = accept(repo, release, zip, json) {
-                entries.push(entry);
+            match accept(repo, release, zip, json) {
+                Ok(entry) => entries.push(entry),
+                Err(reason) => note(&mut why, reason),
             }
         }
+        if pairs == 0 {
+            note(&mut why, NoModsReason::NoModFiles);
+        }
     }
+    let mods = merge(entries);
     let cache = SourceCache {
         etag,
-        mods: merge(entries),
+        no_mods: if mods.is_empty() { why } else { None },
+        mods,
         checked: Some(now()),
     };
     let _ = serde_json::to_vec(&cache).map(|b| write_atomic(&path, &b));
@@ -471,6 +586,7 @@ pub async fn fetch(
         freshness: Freshness::Fresh,
         checked: cache.checked,
         error: None,
+        no_mods: cache.no_mods,
     }
 }
 
@@ -509,6 +625,51 @@ pub async fn canonical_name(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn a_damaged_list_is_set_aside_kept_and_said_until_a_new_one_is_saved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::new(tmp.path());
+        let file = paths.sources_file();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        assert_eq!(
+            list(&paths).unwrap(),
+            Vec::<String>::new(),
+            "no file is no sources"
+        );
+        std::fs::write(&file, b"{ not json").unwrap();
+        let Err(ModsError::SourcesDamaged(kept)) = list(&paths) else {
+            panic!("a damaged list is said")
+        };
+        assert!(!file.exists(), "set aside");
+        assert_eq!(
+            std::fs::read(&kept).unwrap(),
+            b"{ not json",
+            "kept as it was"
+        );
+        // Said again, not taken for no sources, until a new list is saved.
+        assert!(matches!(list(&paths), Err(ModsError::SourcesDamaged(k)) if k == kept));
+        assert_eq!(list_for_change(&paths).unwrap(), Vec::<String>::new());
+        save(&paths, &["a/b".to_string()]).unwrap();
+        assert_eq!(list(&paths).unwrap(), ["a/b"]);
+        assert!(Path::new(&kept).exists(), "the damaged one is still kept");
+    }
+
+    #[test]
+    fn why_a_source_has_no_mods_is_how_far_it_got() {
+        let mut why = None;
+        note(&mut why, NoModsReason::NoModFiles);
+        note(&mut why, NoModsReason::Disagrees);
+        note(&mut why, NoModsReason::Unreadable);
+        assert_eq!(why, Some(NoModsReason::Disagrees));
+        let (r, zip) = release(false);
+        let mut j = json();
+        j.tag = "another-tag".into();
+        assert_eq!(
+            accept("Zorro909/weft-mods", &r, &zip, j).err(),
+            Some(NoModsReason::Disagrees)
+        );
+    }
 
     fn release(prerelease: bool) -> (GhRelease, GhAsset) {
         let zip = GhAsset {
@@ -558,9 +719,9 @@ pub(crate) mod tests {
     fn description_must_agree_with_github() {
         let (r, zip) = release(false);
         let repo = "Zorro909/weft-mods";
-        assert!(accept(repo, &r, &zip, json()).is_some());
+        assert!(accept(repo, &r, &zip, json()).is_ok());
         assert!(
-            accept("zorro909/WEFT-MODS", &r, &zip, json()).is_some(),
+            accept("zorro909/WEFT-MODS", &r, &zip, json()).is_ok(),
             "repos compare without case"
         );
 
@@ -578,16 +739,20 @@ pub(crate) mod tests {
         for (what, change) in cases {
             let mut j = json();
             change(&mut j);
-            assert!(accept(repo, &r, &zip, j).is_none(), "{what} differs");
+            assert!(accept(repo, &r, &zip, j).is_err(), "{what} differs");
         }
         assert!(
-            accept("Other/repo", &r, &zip, json()).is_none(),
+            accept("Other/repo", &r, &zip, json()).is_err(),
             "repo differs"
         );
 
         let mut no_digest = zip.clone();
         no_digest.digest = None;
-        assert!(accept(repo, &r, &no_digest, json()).is_none(), "no digest");
+        assert_eq!(
+            accept(repo, &r, &no_digest, json()).err(),
+            Some(NoModsReason::NoDigest),
+            "no digest"
+        );
     }
 
     #[test]
@@ -602,7 +767,7 @@ pub(crate) mod tests {
             j.asset.url =
                 format!("https://github.com/{repo}/releases/download/cogwork-v0.2.0/{id}.zip");
             zip.browser_download_url = j.asset.url.clone();
-            assert!(accept(repo, &r, &zip, j).is_none(), "{id:?}");
+            assert!(accept(repo, &r, &zip, j).is_err(), "{id:?}");
         }
     }
 
@@ -692,6 +857,7 @@ pub(crate) mod tests {
                 &"a".repeat(64),
             )],
             checked: Some("2026-11-01T00:00:00Z".into()),
+            no_mods: None,
         };
         let got = fall_back(Some(cache), ModsError::SourceRateLimited);
         assert_eq!(got.freshness, Freshness::Cached);
@@ -727,6 +893,7 @@ pub(crate) mod tests {
             etag: None,
             mods: vec![good, elsewhere, reviewed, reserved],
             checked: None,
+            no_mods: None,
         };
         write_atomic(
             &cache_path(&paths, repo),

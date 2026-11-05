@@ -30,6 +30,7 @@ export type * from "./Managed";
 export type * from "./ModFailure";
 export type * from "./ModProgress";
 export type * from "./ModStatus";
+export type * from "./NoModsReason";
 export type * from "./Origin";
 export type * from "./PlanItem";
 export type * from "./PlanReplaces";

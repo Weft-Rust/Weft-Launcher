@@ -39,6 +39,9 @@ pub struct FileInspection {
     pub summary: Option<String>,
     pub fits_system: bool,
     pub catalog_match: Option<CatalogMatch>,
+    /// The index revoked this file's hash: it can't be installed.
+    pub revoked: bool,
+    /// The index's reason for that; null when it gave none.
     pub revoked_reason: Option<String>,
     /// The installed version of a mod with the same id, which this file would replace.
     pub replaces: Option<String>,
@@ -130,7 +133,8 @@ pub fn inspect(
         problem,
         name,
         summary,
-        revoked_reason: catalog.revocation(&sha256).map(|r| r.reason.clone()),
+        revoked: catalog.revocation(&sha256).is_some(),
+        revoked_reason: catalog.revocation(&sha256).and_then(|r| r.reason.clone()),
         catalog_match,
         replaces,
         plan_token,

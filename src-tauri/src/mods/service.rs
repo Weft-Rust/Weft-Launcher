@@ -60,6 +60,16 @@ fn source_result(repo: String, f: SourceFetch) -> SourceResult {
         freshness: f.freshness,
         checked: f.checked,
         error: f.error.map(AppError::from),
+        no_mods: f.no_mods,
+    }
+}
+
+/// The player's sources, or none and why: a damaged list is kept aside and said, never
+/// taken for an empty one.
+fn listed_sources(paths: &Paths) -> (Vec<String>, Option<AppError>) {
+    match sources::list(paths) {
+        Ok(repos) => (repos, None),
+        Err(e) => (Vec::new(), Some(e.into())),
     }
 }
 
@@ -92,11 +102,15 @@ pub async fn load_catalog(ctx: &Ctx, refresh: bool) -> Result<Catalog, ModsError
     })
     .await;
     let mut fetched = Vec::new();
-    for repo in sources::list(&ctx.paths) {
+    let (repos, sources_error) = listed_sources(&ctx.paths);
+    for repo in repos {
         let f = sources::fetch(&ctx.paths, &client, &repo, refresh).await;
         fetched.push(source_result(repo, f));
     }
-    let catalog = build_catalog(state, fetched);
+    let catalog = Catalog {
+        sources_error,
+        ..build_catalog(state, fetched)
+    };
     ctx.hold_catalog(catalog.clone());
     Ok(catalog)
 }
@@ -104,14 +118,18 @@ pub async fn load_catalog(ctx: &Ctx, refresh: bool) -> Result<Catalog, ModsError
 /// The catalogue from what is on disk: the cached index and each source's last answer.
 pub fn offline_catalog(paths: &Paths) -> Catalog {
     let state = index::cached(&index_cache(paths), OffsetDateTime::now_utc());
-    let sources = sources::list(paths)
+    let (repos, sources_error) = listed_sources(paths);
+    let sources = repos
         .into_iter()
         .map(|repo| {
             let f = sources::cached(paths, &repo);
             source_result(repo, f)
         })
         .collect();
-    build_catalog(state, sources)
+    Catalog {
+        sources_error,
+        ..build_catalog(state, sources)
+    }
 }
 
 /// The list the page last saw, else the one on disk: never touches the network.
@@ -175,7 +193,8 @@ pub async fn icon_png(ctx: &Ctx, url: &str) -> Result<Vec<u8>, ModsError> {
 // ---------------------------------------------------------------------------------------------
 // Sources
 
-pub fn source_list(ctx: &Ctx) -> Vec<String> {
+/// The player's sources; `ModSourcesDamaged` when the list couldn't be read (it is kept aside).
+pub fn source_list(ctx: &Ctx) -> Result<Vec<String>, ModsError> {
     sources::list(&ctx.paths)
 }
 
@@ -184,7 +203,8 @@ pub async fn add_source(ctx: &Ctx, repo: &str) -> Result<Vec<String>, ModsError>
     let repo = sources::normalize(repo)?;
     let canonical = sources::canonical_name(&http()?, ctx.github_api(), &repo).await?;
     let _held = ctx.lock_mods().await;
-    let repos = sources::with_repo(sources::list(&ctx.paths), &canonical);
+    // A damaged list is already kept aside: this starts a new one.
+    let repos = sources::with_repo(sources::list_for_change(&ctx.paths)?, &canonical);
     sources::save(&ctx.paths, &repos)?;
     Ok(repos)
 }
@@ -192,7 +212,7 @@ pub async fn add_source(ctx: &Ctx, repo: &str) -> Result<Vec<String>, ModsError>
 /// Mods installed from the repo stay installed; they just stop getting updates.
 pub async fn remove_source(ctx: &Ctx, repo: &str) -> Result<Vec<String>, ModsError> {
     let _held = ctx.lock_mods().await;
-    let repos = sources::without_repo(sources::list(&ctx.paths), repo);
+    let repos = sources::without_repo(sources::list(&ctx.paths)?, repo);
     sources::save(&ctx.paths, &repos)?;
     Ok(repos)
 }
@@ -292,25 +312,47 @@ async fn reconcile(ctx: &Ctx, tag: &str, lock: &Lock) -> Result<(), ModsError> {
     blocking(move || store::reconcile(&paths, &tag, &lock)).await
 }
 
-/// Writes a changed mod set under `ModsLock`: the lock file, then the undo record (kept for a
-/// removal, else cleared, since this is the version's next change), then the folder. `held`
-/// reservations are let go once the lock file names their builds, and unused store files go.
+/// Writes a changed mod set under `ModsLock`. Three files change, each atomically, in an order
+/// where stopping after any step (an error, or the launcher being closed) leaves a state that
+/// is still true:
+///
+/// 1. The undo record of an earlier removal goes first, since this is the version's next
+///    change. If that fails, nothing changed.
+/// 2. `mods.lock.json`, the one record of the set. If that fails, nothing changed but the
+///    lost Undo. Once it is written, the change is made.
+/// 3. For a removal, its undo record. If that fails, the removal stands without an Undo:
+///    `false` says so, and nothing else is wrong.
+/// 4. The version's `mods/` folder, made to match the lock. If that fails, the error is
+///    returned with the change made: the folder is made to match again by the next change and
+///    before every Play ([`prepare_launch`]), so the game never starts with the old one.
+///
+/// `held` reservations are let go once the lock file names their builds, and unused store
+/// files go. Returns whether an undo record for `undo` was kept.
 async fn save(
     ctx: &Ctx,
     tag: &str,
     lock: &Lock,
     undo: Option<&Removed>,
     held: Vec<Reservation>,
-) -> Result<(), ModsError> {
-    store::write_lock(&ctx.paths, tag, lock)?;
-    match undo {
-        Some(removed) => store::write_removed(&ctx.paths, tag, removed)?,
-        None => store::clear_removed(&ctx.paths, tag)?,
+) -> Result<bool, ModsError> {
+    if undo.is_none() {
+        store::clear_removed(&ctx.paths, tag)?;
     }
+    store::write_lock(&ctx.paths, tag, lock)?;
+    let kept = match undo {
+        Some(removed) => match store::write_removed(&ctx.paths, tag, removed) {
+            Ok(()) => true,
+            Err(e) => {
+                eprintln!("mods: the removal from {tag} can't be undone: {e}");
+                false
+            }
+        },
+        None => false,
+    };
     drop(held);
     reconcile(ctx, tag, lock).await?;
     ctx.collect_garbage().await;
-    Ok(())
+    Ok(kept)
 }
 
 /// Records and applies the catalogue's revocations to the version's mod set, unless its game
@@ -452,12 +494,33 @@ pub async fn fetch(ctx: &Ctx, staged: &Staged, op: &Operation) -> Result<(), Mod
     Ok(())
 }
 
+/// What every write that follows a download checks first, under `ModsLock`: the operation wasn't
+/// cancelled, and the game version is still installed and not running. Gives the latest
+/// catalogue: the one the page last loaded, else `fallback`.
+fn recheck_under_lock(
+    ctx: &Ctx,
+    tag: &str,
+    op: &Operation,
+    fallback: Catalog,
+) -> Result<Catalog, ModsError> {
+    op.check()?;
+    if ensure_installed(&ctx.paths, tag).is_err() {
+        return Err(ModsError::ChangedMeanwhile(format!("{tag} was removed")));
+    }
+    if ctx.is_running(tag) {
+        return Err(ModsError::ChangedMeanwhile(format!("{tag} was started")));
+    }
+    Ok(ctx.held_catalog().unwrap_or(fallback))
+}
+
 /// Writes a downloaded install into the profile. Under `ModsLock`, it first checks that what
-/// the player agreed to still holds: the game version is still installed and not running, the
-/// wanted builds are still in the latest catalogue and none of the builds is revoked there, and
-/// resolving again against the latest profile and catalogue gives the same plan token.
-/// Otherwise `ModChangedMeanwhile` (`ModCancelled` if the operation was cancelled), and nothing
-/// is written.
+/// the player agreed to still holds ([`recheck_under_lock`]), and then that the consent does:
+/// every wanted build is read again from the latest catalogue (the same hash may come with
+/// other trust, dependencies or interface now) and must still be installable on the version's
+/// mod interface as it is known now; none of the builds is revoked; and resolving again
+/// against the latest profile, catalogue and interface gives the same plan token. Otherwise
+/// `ModChangedMeanwhile` (`ModCancelled` if the operation was cancelled), and nothing is
+/// written.
 pub async fn commit(ctx: &Ctx, staged: Staged, op: &Operation) -> Result<ChangeResult, ModsError> {
     let Staged {
         tag,
@@ -470,35 +533,40 @@ pub async fn commit(ctx: &Ctx, staged: Staged, op: &Operation) -> Result<ChangeR
         token,
     } = staged;
     let _guard = ctx.lock_mods().await;
-    op.check()?;
+    let catalog = recheck_under_lock(ctx, &tag, op, catalog)?;
     let changed = ModsError::ChangedMeanwhile;
-    if ensure_installed(&ctx.paths, &tag).is_err() {
-        return Err(changed(format!("{tag} was removed")));
+    let abi_now = cached_abi(&ctx.paths, &tag, &catalog.weft).unwrap_or_else(|| abi.clone());
+    if abi_now != abi {
+        return Err(changed(format!("the mod interface of {tag} changed")));
     }
-    if ctx.is_running(&tag) {
-        return Err(changed(format!("{tag} was started")));
-    }
-    let catalog = ctx.held_catalog().unwrap_or(catalog);
+    let mut fresh = Vec::with_capacity(wanted.len());
     for (m, v) in &wanted {
-        if catalog.find(&v.sha256).is_none() {
+        let Some((m, v)) = catalog.find(&v.sha256) else {
             return Err(changed(format!(
                 "{} {} is no longer in the catalogue",
                 m.name, v.version
             )));
-        }
+        };
+        fresh.push((m.clone(), v.clone()));
     }
     for (m, v) in &res.picks {
         if let Some(r) = catalog.revocation(&v.sha256) {
             return Err(changed(format!(
                 "{} {} was revoked: {}",
-                m.name, v.version, r.reason
+                m.name,
+                v.version,
+                r.detail()
             )));
         }
     }
+    for (m, v) in &fresh {
+        plan::check_installable(&catalog, m, v, Fit::here(&abi_now))
+            .map_err(|e| changed(format!("{} {}: {e}", m.name, v.version)))?;
+    }
     let mut lock = store::read_lock(&ctx.paths, &tag)?;
-    let now = plan::resolve(&catalog, &lock, wanted, Fit::here(&abi));
+    let now = plan::resolve(&catalog, &lock, fresh, Fit::here(&abi_now));
     plan::still_holds((&snapshot, &res), (&lock, &now)).map_err(changed)?;
-    if plan_token(Some(&abi), &lock, &now) != token {
+    if plan_token(Some(&abi_now), &lock, &now) != token {
         return Err(plan_changed());
     }
 
@@ -612,7 +680,7 @@ pub async fn install_file(
     ctx.ensure_not_running(tag)?;
     let catalog = current_catalog(ctx).await?;
     if let Some(r) = catalog.revocation(&sha) {
-        return Err(ModsError::Revoked(r.reason.clone()));
+        return Err(ModsError::Revoked(r.detail()));
     }
     let source = PathBuf::from(path);
     inspect::checked_size(&source)?;
@@ -657,17 +725,10 @@ pub async fn install_file(
         let mut entry = inspect::local_entry(&info, &ctx.paths.store_object(&sha), &source, &sha)?;
 
         let _guard = ctx.lock_mods().await;
-        op.check()?;
-        if ensure_installed(&ctx.paths, tag).is_err() {
-            return Err(ModsError::ChangedMeanwhile(format!("{tag} was removed")));
-        }
-        if ctx.is_running(tag) {
-            return Err(ModsError::ChangedMeanwhile(format!("{tag} was started")));
-        }
+        let latest = recheck_under_lock(ctx, tag, &op, catalog)?;
         // A revocation that arrived while the file was copied and hashed.
-        let latest = ctx.held_catalog().unwrap_or(catalog);
         if let Some(r) = latest.revocation(&sha) {
-            return Err(ModsError::Revoked(r.reason.clone()));
+            return Err(ModsError::Revoked(r.detail()));
         }
         let mut lock = store::read_lock(&ctx.paths, tag)?;
         if inspect::file_token(abi.as_deref(), &info.id, &sha, &lock) != plan_token {
@@ -739,10 +800,10 @@ pub async fn remove(ctx: &Ctx, tag: &str, id: &str) -> Result<ChangeResult, Mods
         entry,
         also_disabled: also_disabled.clone(),
     };
-    save(ctx, tag, &lock, Some(&removed), Vec::new()).await?;
+    let kept = save(ctx, tag, &lock, Some(&removed), Vec::new()).await?;
     Ok(ChangeResult {
         also_disabled,
-        undo: Some(id.to_string()),
+        undo: kept.then(|| id.to_string()),
         ..change_result(ctx, tag, &lock, &catalog).await
     })
 }

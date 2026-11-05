@@ -73,6 +73,7 @@ error_codes! {
     ModsBlocked,
     ModSourceInvalid,
     ModSourceNotFound,
+    ModSourcesDamaged,
     ModSourceRateLimited,
     ModDownloadNotFound,
     ModTooLarge,
@@ -195,7 +196,7 @@ impl From<crate::launch::LaunchError> for AppError {
             }
             ProcessSpawnFailed(msg) => AppError::new(C::ProcessSpawnFailed, Some(msg)),
             LogDirCreateFailed(msg) => AppError::new(C::LogDirCreateFailed, Some(msg)),
-            GameFolderNotFound(msg) => AppError::new(C::GameFolderNotFound, Some(msg)),
+            GameFolderNotFound(detail) => AppError::new(C::GameFolderNotFound, detail),
             OpenerError(e) => AppError::new(C::OpenerError, Some(e.to_string())),
         }
     }

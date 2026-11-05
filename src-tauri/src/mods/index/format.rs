@@ -42,12 +42,9 @@ pub struct Index {
     pub revoked: Vec<Revoked>,
 }
 
-/// What a revocation says when it gives no reason.
-pub const NO_REASON: &str = "No reason given";
-
 /// Reads `revoked[]` failing closed: an entry is dropped only when its hash can't be a SHA-256
-/// at all (and that is logged). The hash is lowercased; a missing, empty or odd `reason` becomes
-/// [`NO_REASON`] and an odd `at` unknown. A `revoked` that isn't a list refuses the whole index,
+/// at all (and that is logged). The hash is lowercased; a missing, empty or odd `reason` is no
+/// reason (`None`: the page says so in the player's language) and an odd `at` unknown. A `revoked` that isn't a list refuses the whole index,
 /// so the last verified one stays in use.
 fn revocations<'de, D>(d: D) -> Result<Vec<Revoked>, D::Error>
 where
@@ -69,7 +66,7 @@ pub fn revocation(v: serde_json::Value) -> Option<Revoked> {
     match text("sha256").map(|s| s.to_ascii_lowercase()) {
         Some(sha256) if is_sha256(&sha256) => Some(Revoked {
             sha256,
-            reason: text("reason").unwrap_or_else(|| NO_REASON.to_string()),
+            reason: text("reason"),
             at: text("at"),
         }),
         _ => {
@@ -253,7 +250,9 @@ pub struct Reviewed {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Revoked {
     pub sha256: String,
-    pub reason: String,
+    /// The index's words; `None` when it gave none.
+    #[serde(default)]
+    pub reason: Option<String>,
     pub at: Option<String>,
 }
 
@@ -746,10 +745,10 @@ pub(crate) mod tests {
             "e".repeat(64),
         );
         let index = parse(json.as_bytes()).unwrap();
-        let got: Vec<(&str, &str, Option<&str>)> = index
+        let got: Vec<(&str, Option<&str>, Option<&str>)> = index
             .revoked
             .iter()
-            .map(|r| (r.sha256.as_str(), r.reason.as_str(), r.at.as_deref()))
+            .map(|r| (r.sha256.as_str(), r.reason.as_deref(), r.at.as_deref()))
             .collect();
         let (ab, c, d, e) = (
             "ab".repeat(32),
@@ -760,10 +759,10 @@ pub(crate) mod tests {
         assert_eq!(
             got,
             [
-                (ab.as_str(), "Corrupts worlds", None),
-                (c.as_str(), NO_REASON, None),
-                (d.as_str(), NO_REASON, None),
-                (e.as_str(), NO_REASON, None),
+                (ab.as_str(), Some("Corrupts worlds"), None),
+                (c.as_str(), None, None),
+                (d.as_str(), None, None),
+                (e.as_str(), None, None),
             ]
         );
 

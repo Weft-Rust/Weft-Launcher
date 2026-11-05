@@ -55,6 +55,9 @@ pub enum ModsError {
     SourceInvalid(String),
     #[error("Source not found: {0}")]
     SourceNotFound(String),
+    /// `sources.json` couldn't be read; it was kept, at this path.
+    #[error("Sources list damaged; kept as {0}")]
+    SourcesDamaged(String),
     #[error("Invalid name: {0}")]
     InvalidName(String),
     /// `base` ships inside every Weft; nothing may install over it.
@@ -136,6 +139,7 @@ impl ModsError {
             Blocked(_) => C::ModsBlocked,
             SourceInvalid(_) => C::ModSourceInvalid,
             SourceNotFound(_) => C::ModSourceNotFound,
+            SourcesDamaged(_) => C::ModSourcesDamaged,
             InvalidName(_) => C::InvalidName,
             IdReserved(_) => C::ModIdReserved,
             VersionNotInstalled(_) => C::NotInstalled,
@@ -176,6 +180,7 @@ impl From<ModsError> for AppError {
             | Blocked(d)
             | SourceInvalid(d)
             | SourceNotFound(d)
+            | SourcesDamaged(d)
             | InvalidName(d)
             | IdReserved(d)
             | VersionNotInstalled(d)

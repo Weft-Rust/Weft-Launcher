@@ -3,7 +3,12 @@
 /**
  * Why and when a revocation was applied to an installed build.
  */
-export type Revocation = { reason: string, 
+export type Revocation = { 
+/**
+ * The index's words; null when it gave none. Older launchers wrote "No reason given",
+ * which reads back as none.
+ */
+reason: string | null, 
 /**
  * RFC 3339 time the launcher applied it; unknown in lock files that never said.
  */

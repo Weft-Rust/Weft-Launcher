@@ -11,7 +11,15 @@ problem: AppErrorPayload | null,
 /**
  * What the mod's own language file calls it. Only what the file says about itself.
  */
-name: string | null, summary: string | null, fitsSystem: boolean, catalogMatch: CatalogMatch | null, revokedReason: string | null, 
+name: string | null, summary: string | null, fitsSystem: boolean, catalogMatch: CatalogMatch | null, 
+/**
+ * The index revoked this file's hash: it can't be installed.
+ */
+revoked: boolean, 
+/**
+ * The index's reason for that; null when it gave none.
+ */
+revokedReason: string | null, 
 /**
  * The installed version of a mod with the same id, which this file would replace.
  */

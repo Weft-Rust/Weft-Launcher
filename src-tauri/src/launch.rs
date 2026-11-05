@@ -27,8 +27,10 @@ pub enum LaunchError {
     ProcessSpawnFailed(String),
     #[error("Failed to create log directory: {0}")]
     LogDirCreateFailed(String),
-    #[error("Game folder not found: {0}")]
-    GameFolderNotFound(String),
+    /// The page's sentence says what to do; the detail, if any, is the backend's own words (a
+    /// path), never a sentence of its own.
+    #[error("Game folder not found{}", .0.as_ref().map(|d| format!(": {d}")).unwrap_or_default())]
+    GameFolderNotFound(Option<String>),
     #[error("Failed to open: {0}")]
     OpenerError(#[from] OpenerError),
 }
@@ -373,10 +375,7 @@ pub async fn get_running_versions(app_handle: AppHandle) -> Result<Vec<String>, 
 pub async fn open_game_folder(app_handle: AppHandle, _tag: String) -> Result<(), AppError> {
     match find_game_folder(&app_handle).await {
         Some(folder) => Ok(open_path(&app_handle, &folder)?),
-        None => Err(LaunchError::GameFolderNotFound(
-            "not in the logs yet, start the game once".to_string(),
-        )
-        .into()),
+        None => Err(LaunchError::GameFolderNotFound(None).into()),
     }
 }
 
@@ -423,11 +422,7 @@ pub async fn open_log(app_handle: AppHandle, tag: String) -> Result<(), AppError
     let logs_dir = get_logs_dir(&app_handle)?;
     let log_file = logs_dir.join(format!("{tag}.log"));
     if !log_file.exists() {
-        return Err(LaunchError::GameFolderNotFound(format!(
-            "log file not found: {}",
-            log_file.display()
-        ))
-        .into());
+        return Err(LaunchError::GameFolderNotFound(Some(log_file.display().to_string())).into());
     }
     open_path(&app_handle, &log_file)?;
     Ok(())

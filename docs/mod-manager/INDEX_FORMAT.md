@@ -99,7 +99,7 @@ The JSON examples below are complete and valid: a test in the launcher (`src-tau
 | `reviewed` | required in the index | `by` and `at`: who reviewed exactly these bytes, and when. Not read from sources. |
 | `revoked[]` | `[]` | Builds that must never be used again. Must be a list: anything else refuses the whole index. |
 | `revoked[].sha256` | required | The build's hash, in any case. |
-| `revoked[].reason` | `"No reason given"` | Why, for the player. Also used when it is empty or not a string. |
+| `revoked[].reason` | none (`null`) | Why, for the player. Also none when it is empty or not a string; the launcher then says "No reason given" in the player's language. |
 | `revoked[].at` | `null` | When. Also `null` when it is not a string. |
 
 ### Rules the launcher enforces

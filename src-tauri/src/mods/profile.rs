@@ -47,7 +47,11 @@ pub struct LockEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Revocation {
-    pub reason: String,
+    /// The index's words; null when it gave none. Older launchers wrote "No reason given",
+    /// which reads back as none.
+    #[serde(default, deserialize_with = "given_reason")]
+    #[ts(type = "string | null")]
+    pub reason: Option<String>,
     /// RFC 3339 time the launcher applied it; unknown in lock files that never said.
     #[serde(default)]
     pub at: Option<String>,
@@ -81,15 +85,34 @@ impl LockEntry {
     /// Why this build may not be used: the revocation recorded in the lock file, else the
     /// catalogue's.
     pub fn revoked_reason(&self, catalog: &Catalog) -> Option<String> {
-        self.revoked
-            .as_ref()
-            .map(|r| r.reason.clone())
-            .or_else(|| catalog.revocation(&self.sha256).map(|r| r.reason.clone()))
+        match &self.revoked {
+            Some(r) => r.reason.clone(),
+            None => catalog
+                .revocation(&self.sha256)
+                .and_then(|r| r.reason.clone()),
+        }
+    }
+
+    /// Whether this build may not be used: revoked in the lock file or the catalogue.
+    pub fn is_revoked(&self, catalog: &Catalog) -> bool {
+        self.revoked.is_some() || catalog.revocation(&self.sha256).is_some()
     }
 
     pub fn catalog_key(&self) -> Option<String> {
         self.origin.key(&self.id)
     }
+}
+
+/// A revocation's reason as a lock file has it: a missing or empty one, or the English
+/// placeholder older launchers wrote for one, is none.
+fn given_reason<'de, D>(d: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let reason = Option::<String>::deserialize(d)?;
+    Ok(reason
+        .map(|r| r.trim().to_string())
+        .filter(|r| !r.is_empty() && r != "No reason given"))
 }
 
 pub fn now() -> String {
@@ -395,6 +418,8 @@ pub fn report(
     let mut pending = Vec::new();
     let mut shadowed = Vec::new();
     for entry in &lock.mods {
+        // Revoked is decided by the record, never by whether it gave a reason.
+        let is_revoked = entry.is_revoked(catalog);
         let revoked = entry.revoked_reason(catalog);
         let missing: Vec<String> = entry
             .deps
@@ -407,7 +432,7 @@ pub fn report(
             .filter(|d| lock.get(d).is_none())
             .cloned()
             .collect();
-        let status = if revoked.is_some() {
+        let status = if is_revoked {
             ModStatus::Revoked
         } else if !entry.enabled {
             ModStatus::Off
@@ -429,14 +454,14 @@ pub fn report(
             shadowed.push(ShadowedMod {
                 id: entry.id.clone(),
                 file: f.file.clone(),
-                managed: match (revoked.is_some(), entry.enabled) {
+                managed: match (is_revoked, entry.enabled) {
                     (true, _) => Managed::Revoked,
                     (false, true) => Managed::On,
                     (false, false) => Managed::Off,
                 },
             });
         }
-        if revoked.is_some() && entry.enabled {
+        if is_revoked && entry.enabled {
             pending.push(entry.id.clone());
         }
         let reason = match status {
@@ -588,7 +613,7 @@ pub(crate) mod tests {
                 .iter()
                 .map(|s| RevokedView {
                     sha256: s.to_string(),
-                    reason: "broken".into(),
+                    reason: Some("broken".into()),
                 })
                 .collect(),
             index: IndexStatus {
@@ -600,6 +625,7 @@ pub(crate) mod tests {
             sources: vec![],
             weft: vec![],
             platform: String::new(),
+            sources_error: None,
         }
     }
 
@@ -769,8 +795,14 @@ pub(crate) mod tests {
         assert!(apply_revocations(&mut l, &c));
         assert!(!l.get("a").unwrap().enabled);
         assert_eq!(
-            l.get("a").unwrap().revoked.as_ref().unwrap().reason,
-            "broken"
+            l.get("a")
+                .unwrap()
+                .revoked
+                .as_ref()
+                .unwrap()
+                .reason
+                .as_deref(),
+            Some("broken")
         );
         assert!(l.get("b").unwrap().enabled);
         assert!(l.get("b").unwrap().revoked.is_none());

@@ -10,6 +10,7 @@ use super::archive::current_platform;
 use super::index::{
     Channel, Freshness, Index, IndexMod, IndexVersion, Platform, WeftAbi, same_repo,
 };
+use super::sources::NoModsReason;
 use crate::error::AppError;
 
 #[derive(Debug, Clone, Copy, Serialize, serde::Deserialize, PartialEq, Eq, TS)]
@@ -120,6 +121,8 @@ pub struct SourceStatus {
     pub checked: Option<String>,
     /// Set whenever the last refresh failed, even when cached data is shown.
     pub error: Option<AppError>,
+    /// Why GitHub's answer has no mods in it, when it has none.
+    pub no_mods: Option<NoModsReason>,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -132,13 +135,26 @@ pub struct Catalog {
     pub weft: Vec<WeftAbi>,
     /// The system the launcher runs on (`windows-x64`, `linux-x64`, `macos-arm64`), or empty.
     pub platform: String,
+    /// The player's list of sources couldn't be read (`ModSourcesDamaged`): it was kept aside,
+    /// and `sources` is empty until they save a new one.
+    pub sources_error: Option<AppError>,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct RevokedView {
     pub sha256: String,
-    pub reason: String,
+    /// The index's words; null when it gave none (the page says "No reason given" itself).
+    pub reason: Option<String>,
+}
+
+impl RevokedView {
+    /// For an error's detail, which is the backend's own words.
+    pub fn detail(&self) -> String {
+        self.reason
+            .clone()
+            .unwrap_or_else(|| "no reason given".into())
+    }
 }
 
 impl Catalog {
@@ -237,6 +253,7 @@ pub struct SourceResult {
     pub freshness: Freshness,
     pub checked: Option<String>,
     pub error: Option<AppError>,
+    pub no_mods: Option<NoModsReason>,
 }
 
 /// One list from the index and every source. A source release that is also in the index shows
@@ -284,6 +301,7 @@ pub fn build(
             freshness: source.freshness,
             checked: source.checked,
             error: source.error,
+            no_mods: if count == 0 { source.no_mods } else { None },
         });
     }
     mods.sort_by_key(|m| m.name.to_lowercase());
@@ -306,6 +324,7 @@ pub fn build(
         platform: current_platform()
             .map(|p| p.as_str().to_string())
             .unwrap_or_default(),
+        sources_error: None,
     }
 }
 
@@ -343,6 +362,7 @@ pub(crate) mod tests {
             freshness: Freshness::Fresh,
             checked: None,
             error: None,
+            no_mods: None,
         }
     }
 

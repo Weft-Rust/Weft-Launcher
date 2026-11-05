@@ -18,7 +18,7 @@ pub async fn list_mod_catalog(app: AppHandle, force_refresh: bool) -> Result<Cat
 
 #[tauri::command]
 pub async fn get_mod_sources(app: AppHandle) -> Result<Vec<String>, AppError> {
-    Ok(service::source_list(&Ctx::of(&app)?))
+    Ok(service::source_list(&Ctx::of(&app)?)?)
 }
 
 #[tauri::command]
@@ -145,9 +145,9 @@ pub async fn get_mod_icon(app: AppHandle, url: String) -> Result<String, AppErro
 
 #[tauri::command]
 pub async fn open_player_mods_folder(app: AppHandle) -> Result<(), AppError> {
-    let folder = crate::launch::find_game_folder(&app).await.ok_or_else(|| {
-        crate::launch::LaunchError::GameFolderNotFound("start the game once".into())
-    })?;
+    let folder = crate::launch::find_game_folder(&app)
+        .await
+        .ok_or(crate::launch::LaunchError::GameFolderNotFound(None))?;
     let mods = folder.join("mods");
     crate::launch::open_path(&app, if mods.exists() { &mods } else { &folder })?;
     Ok(())

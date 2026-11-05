@@ -135,7 +135,7 @@ pub fn check_installable(
         return Err(ModsError::IdReserved(m.id.clone()));
     }
     if let Some(r) = catalog.revocation(&v.sha256) {
-        return Err(ModsError::Revoked(format!("{}: {}", m.name, r.reason)));
+        return Err(ModsError::Revoked(format!("{}: {}", m.name, r.detail())));
     }
     if !fit.platform_ok(v) {
         return Err(ModsError::NotForPlatform(m.name.clone()));
@@ -220,7 +220,7 @@ pub fn resolve(
             }
             if let Some(have) = lock.get(dep)
                 && have.abi.as_deref().is_none_or(|a| a == fit.abi)
-                && have.revoked_reason(catalog).is_none()
+                && !have.is_revoked(catalog)
             {
                 if !have.enabled && !res.enable.contains(dep) {
                     res.enable.push(dep.clone());
@@ -556,8 +556,12 @@ pub fn set_enabled(
         .get(id)
         .ok_or_else(|| ModsError::NotInstalled(id.to_string()))?;
     let revoked = |e: &LockEntry| {
-        e.revoked_reason(catalog)
-            .map(|reason| ModsError::Revoked(format!("{}: {reason}", e.name)))
+        e.is_revoked(catalog).then(|| {
+            let reason = e
+                .revoked_reason(catalog)
+                .unwrap_or_else(|| "no reason given".into());
+            ModsError::Revoked(format!("{}: {reason}", e.name))
+        })
     };
     let (mut also_enabled, mut also_disabled) = (Vec::new(), Vec::new());
     if enabled {
@@ -1238,7 +1242,7 @@ mod tests {
         let mut pulled = entry("pulled", &[], Some(ABI));
         pulled.enabled = false;
         pulled.revoked = Some(super::super::profile::Revocation {
-            reason: "deletes saves".into(),
+            reason: Some("deletes saves".into()),
             at: Some("2026-11-05T00:00:00Z".into()),
         });
         let mut needs = entry("needs", &["pulled"], Some(ABI));

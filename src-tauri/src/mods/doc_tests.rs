@@ -132,9 +132,11 @@ fn the_proposal_lists_every_mod_command() {
 /// The documented defaults of a revocation are the ones the parser uses.
 #[test]
 fn the_revocation_defaults_are_documented() {
+    let none = index::revocation(serde_json::json!({ "sha256": "a".repeat(64) })).unwrap();
+    assert_eq!(none.reason, None, "a revocation without a reason has none");
     assert!(
-        DOC.contains(&format!("`\"{}\"`", index::NO_REASON)),
-        "INDEX_FORMAT.md gives the default reason"
+        DOC.contains("| `revoked[].reason` | none (`null`) |"),
+        "INDEX_FORMAT.md says a missing reason is none"
     );
     assert!(DOC.contains("Revocations fail closed"));
 }

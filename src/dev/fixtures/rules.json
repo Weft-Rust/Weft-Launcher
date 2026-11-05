@@ -283,9 +283,9 @@
       { "sha256": null }
     ],
     "kept": [
-      { "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "reason": "No reason given", "at": null },
+      { "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "reason": null, "at": null },
       { "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "reason": "Corrupts worlds", "at": "2026-11-03T00:00:00Z" },
-      { "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "reason": "No reason given", "at": null }
+      { "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "reason": null, "at": null }
     ],
     "dropped": 3,
     "matches": [

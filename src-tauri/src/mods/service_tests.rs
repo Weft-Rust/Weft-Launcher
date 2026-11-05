@@ -405,7 +405,7 @@ mod meanwhile {
             let mut c = world.catalog.clone();
             c.revoked.push(RevokedView {
                 sha256: world.sha("cogwork"),
-                reason: "deletes saves".into(),
+                reason: Some("deletes saves".into()),
             });
             ctx.hold_catalog(c);
         }));
@@ -440,6 +440,43 @@ mod meanwhile {
             run(service::set_enabled(ctx, TAG, "showcase", false)).unwrap();
         }));
         assert!(why.contains("turned on"), "{why}");
+    }
+
+    /// The same hash, described differently by a refreshed catalogue: the consent is checked
+    /// against what the catalogue says now, not what it said when the download started.
+    #[test]
+    fn the_same_builds_metadata_changed() {
+        // Another tier.
+        let why = detail(refused(|ctx, world| {
+            let mut c = world.catalog.clone();
+            build_mut(&mut c, "cogwork").trust = super::super::catalog::Trust::Unreviewed;
+            ctx.hold_catalog(c);
+        }));
+        assert!(why.contains("changed since it was shown"), "{why}");
+        // Another dependency, which would have to be downloaded too.
+        let why = detail(refused(|ctx, world| {
+            let mut c = world.catalog.clone();
+            build_mut(&mut c, "cogwork").deps.push("railways".into());
+            ctx.hold_catalog(c);
+        }));
+        assert!(why.contains("railways"), "{why}");
+        // Built for another mod interface now.
+        let why = detail(refused(|ctx, world| {
+            let mut c = world.catalog.clone();
+            build_mut(&mut c, "cogwork").abi = "0".repeat(16);
+            ctx.hold_catalog(c);
+        }));
+        assert!(why.contains("cogwork"), "{why}");
+    }
+
+    #[test]
+    fn the_versions_mod_interface_changed() {
+        let why = detail(refused(|ctx, world| {
+            let mut c = world.catalog.clone();
+            c.weft[0].abi = "0".repeat(16);
+            ctx.hold_catalog(c);
+        }));
+        assert!(why.contains("mod interface"), "{why}");
     }
 
     #[test]
@@ -571,7 +608,7 @@ fn prepare_launch_needs_neither_tauri_nor_the_network() {
     // A revocation recorded earlier still turns the mod off, without the index.
     let mut lock = lock_of(&ctx);
     lock.get_mut("showcase").unwrap().revoked = Some(super::profile::Revocation {
-        reason: "deletes saves".into(),
+        reason: Some("deletes saves".into()),
         at: None,
     });
     store::write_lock(&ctx.paths, TAG, &lock).unwrap();
@@ -594,7 +631,7 @@ fn the_launch_plan() {
     let mut revoked = entry("pulled", &[], Some(ABI));
     revoked.enabled = false;
     revoked.revoked = Some(super::profile::Revocation {
-        reason: "x".into(),
+        reason: Some("x".into()),
         at: None,
     });
     let cases: Vec<(&str, Lock, LaunchPlan)> = vec![
@@ -738,7 +775,7 @@ fn revoke(ctx: &Ctx, world: &World, id: &str, reason: &str) {
     let mut c = ctx.held_catalog().unwrap_or_else(|| world.catalog.clone());
     c.revoked.push(RevokedView {
         sha256: world.sha(id),
-        reason: reason.into(),
+        reason: Some(reason.into()),
     });
     ctx.hold_catalog(c);
 }
@@ -1088,7 +1125,7 @@ mod files {
                 let mut c = catalog.clone();
                 c.revoked.push(RevokedView {
                     sha256: sha.to_ascii_uppercase(),
-                    reason: "steals passwords".into(),
+                    reason: Some("steals passwords".into()),
                 });
                 *held.0.lock().unwrap() = Some(c);
             }
@@ -1195,6 +1232,37 @@ mod copies {
 mod sources {
     use super::*;
 
+    /// A sources list that can't be read is kept and said, in the catalogue too; never read as
+    /// "no sources", and never written over.
+    #[test]
+    fn a_damaged_list_is_kept_and_said() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = with_version(tmp.path(), TAG);
+        let file = ctx.paths.sources_file();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, b"{ \"repos\": [ not json").unwrap();
+        let err = service::source_list(&ctx).unwrap_err();
+        let ModsError::SourcesDamaged(kept) = err else {
+            panic!("{err:?}")
+        };
+        assert_eq!(
+            std::fs::read(&kept).unwrap(),
+            b"{ \"repos\": [ not json",
+            "kept as it was"
+        );
+        let offline = service::offline_catalog(&ctx.paths);
+        assert_eq!(
+            offline.sources_error.map(|e| e.code),
+            Some(crate::error::ErrorCode::ModSourcesDamaged)
+        );
+        // Removing a source from a list that can't be read is refused, not done on an empty one.
+        assert!(matches!(
+            run(service::remove_source(&ctx, "a/b")),
+            Err(ModsError::SourcesDamaged(_))
+        ));
+        assert!(std::path::Path::new(&kept).exists());
+    }
+
     #[test]
     fn adding_a_source_asks_github_for_its_name() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1229,7 +1297,7 @@ mod sources {
             let err = run(service::add_source(&ctx, input)).unwrap_err();
             assert!(want(&err), "{input}: {err:?}");
         }
-        assert_eq!(service::source_list(&ctx), ["Someone/Lanterns"]);
+        assert_eq!(service::source_list(&ctx).unwrap(), ["Someone/Lanterns"]);
         assert!(
             run(service::remove_source(&ctx, "someone/LANTERNS"))
                 .unwrap()
@@ -1252,7 +1320,10 @@ mod profiles {
         let report = run(service::profile(&ctx, TAG)).unwrap();
         let showcase = lock_of(&ctx).get("showcase").unwrap().clone();
         assert!(!showcase.enabled);
-        assert_eq!(showcase.revoked.unwrap().reason, "deletes saves");
+        assert_eq!(
+            showcase.revoked.unwrap().reason.as_deref(),
+            Some("deletes saves")
+        );
         assert_eq!(handed_to_game(&ctx), ["cogwork.zip"]);
         assert!(report.revocations_pending.is_empty());
         assert_eq!(report.blocking, ["cogwork"], "it needs what was pulled");
@@ -1319,10 +1390,8 @@ mod profiles {
         let report = run(service::profile(&ctx, TAG)).unwrap();
         let m = &report.mods[0];
         assert_eq!(m.status, ModStatus::Revoked);
-        assert_eq!(
-            m.revoked_reason.as_deref(),
-            Some(super::super::index::NO_REASON)
-        );
+        // Revoked all the same; no reason is none, said by the page in the player's language.
+        assert_eq!(m.revoked_reason, None);
         let plan = run(service::plan(&ctx, TAG, &world.sha("showcase"))).unwrap();
         assert_eq!(
             plan.problem.unwrap().code,
@@ -1493,5 +1562,136 @@ mod graph {
         assert!(done.also_enabled.is_empty());
         assert!(handed_to_game(&ctx).is_empty());
         assert!(done.report.blocking.is_empty(), "Play keeps working");
+    }
+}
+
+/// A change writes three files (the lock, the undo record, the folder). Each step that fails, or
+/// a launcher closed between two, leaves a state that is true, and the next start or Play
+/// finishes the job.
+mod saves {
+    use super::*;
+
+    /// Something stands where the version's mods folder goes, so making it fails.
+    fn block_folder(ctx: &Ctx) -> std::path::PathBuf {
+        let dir = ctx.paths.mods_dir(TAG).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::write(&dir, b"in the way").unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_folder_that_cant_be_written_leaves_the_change_made_and_play_repairs_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (ctx, world) = setup(&tmp);
+        run(install(&ctx, &world.sha("cogwork"))).unwrap();
+        assert_eq!(handed_to_game(&ctx), ["cogwork.zip", "showcase.zip"]);
+        let dir = block_folder(&ctx);
+        let err = run(service::set_enabled(&ctx, TAG, "cogwork", false)).unwrap_err();
+        assert!(matches!(err, ModsError::Io(_)), "{err:?}");
+        // The lock is the record of the set: the change is made.
+        assert!(!lock_of(&ctx).get("cogwork").unwrap().enabled);
+
+        // The launcher starts again, the obstacle gone: Play hands the game the set as it is.
+        std::fs::remove_file(&dir).unwrap();
+        let ctx = Ctx::new(ctx.paths.clone());
+        assert!(
+            run(service::prepare_launch(&ctx, TAG))
+                .unwrap()
+                .release()
+                .is_some()
+        );
+        assert_eq!(handed_to_game(&ctx), ["showcase.zip"]);
+    }
+
+    #[test]
+    fn a_launcher_closed_between_the_lock_and_the_folder_is_repaired_at_play() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (ctx, world) = setup(&tmp);
+        run(install(&ctx, &world.sha("cogwork"))).unwrap();
+        // What a change that stopped after the lock and before the folder leaves behind.
+        let mut lock = lock_of(&ctx);
+        lock.get_mut("cogwork").unwrap().enabled = false;
+        store::write_lock(&ctx.paths, TAG, &lock).unwrap();
+        assert_eq!(
+            handed_to_game(&ctx),
+            ["cogwork.zip", "showcase.zip"],
+            "the folder is behind"
+        );
+
+        let ctx = Ctx::new(ctx.paths.clone());
+        let offline = service::offline_catalog(&ctx.paths);
+        let report = run(service::build_report(
+            &ctx,
+            TAG,
+            &lock_of(&ctx),
+            &offline,
+            false,
+        ));
+        let cogwork = report
+            .mods
+            .iter()
+            .find(|m| m.entry.id == "cogwork")
+            .unwrap();
+        assert!(!cogwork.entry.enabled, "the page shows the lock");
+        assert!(
+            run(service::prepare_launch(&ctx, TAG))
+                .unwrap()
+                .release()
+                .is_some()
+        );
+        assert_eq!(handed_to_game(&ctx), ["showcase.zip"]);
+    }
+
+    #[test]
+    fn a_removal_whose_undo_cant_be_kept_still_stands_without_an_undo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (ctx, world) = setup(&tmp);
+        run(install(&ctx, &world.sha("showcase"))).unwrap();
+        // Something stands where the undo record goes.
+        let record = ctx.paths.removed_file(TAG).unwrap();
+        std::fs::create_dir_all(record.join("in-the-way")).unwrap();
+        let done = run(service::remove(&ctx, TAG, "showcase")).unwrap();
+        assert_eq!(done.undo, None, "no Undo is offered that couldn't work");
+        assert!(lock_of(&ctx).get("showcase").is_none());
+        assert_eq!(handed_to_game(&ctx), Vec::<String>::new());
+
+        // After a restart it is still removed, and there is nothing to undo.
+        let ctx = Ctx::new(ctx.paths.clone());
+        ctx.hold_catalog(world.catalog.clone());
+        let err = run(restore(&ctx, "showcase")).unwrap_err();
+        assert!(matches!(err, ModsError::NotInstalled(_)), "{err:?}");
+    }
+
+    #[test]
+    fn an_old_undo_that_cant_be_cleared_stops_the_change_before_it_is_made() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (ctx, world) = setup(&tmp);
+        run(install(&ctx, &world.sha("showcase"))).unwrap();
+        let before = std::fs::read(ctx.paths.lock_file(TAG).unwrap()).unwrap();
+        let record = ctx.paths.removed_file(TAG).unwrap();
+        std::fs::create_dir_all(record.join("in-the-way")).unwrap();
+        let err = run(service::set_enabled(&ctx, TAG, "showcase", false)).unwrap_err();
+        assert!(matches!(err, ModsError::Io(_)), "{err:?}");
+        assert_eq!(
+            std::fs::read(ctx.paths.lock_file(TAG).unwrap()).unwrap(),
+            before,
+            "nothing changed"
+        );
+        assert_eq!(handed_to_game(&ctx), ["showcase.zip"]);
+    }
+
+    /// A removal's Undo is gone after a restart only if the record is: it is a file, not memory.
+    #[test]
+    fn an_undo_survives_a_restart() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (ctx, world) = setup(&tmp);
+        run(install(&ctx, &world.sha("showcase"))).unwrap();
+        let done = run(service::remove(&ctx, TAG, "showcase")).unwrap();
+        assert_eq!(done.undo.as_deref(), Some("showcase"));
+        let ctx = Ctx::new(ctx.paths.clone());
+        ctx.hold_catalog(world.catalog.clone());
+        run(restore(&ctx, "showcase")).unwrap();
+        assert!(lock_of(&ctx).get("showcase").unwrap().enabled);
+        assert_eq!(handed_to_game(&ctx), ["showcase.zip"]);
     }
 }
