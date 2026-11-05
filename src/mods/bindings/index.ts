@@ -4,6 +4,7 @@ export type * from "./AppErrorPayload";
 export type * from "./ArchiveInfo";
 export type * from "./AssetInfo";
 export type * from "./BlockingReason";
+export type * from "./BuildRecord";
 export type * from "./Catalog";
 export type * from "./CatalogMatch";
 export type * from "./CatalogMod";

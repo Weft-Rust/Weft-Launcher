@@ -180,7 +180,7 @@
     "ckNotIndex": "Not in the Weft mod index",
     "ckNotIndexDetail": "Published by {0}. Nobody reviewed it.",
     "ckPinned": "Download pinned to SHA-256 {0} by the signed index",
-    "ckBuilt": "Built by GitHub Actions from public source",
+    "ckBuilt": "The signed index records: built by GitHub Actions in {0} @ {1}, checked by {2} on {3}",
     "ckNoBuild": "No build record",
     "ckNoBuildDetail": "Nothing shows which source code this file was built from",
     "ckFits": "Declared mod interface matches this version",
@@ -275,7 +275,7 @@
     "ckWontInstall": "Can't install: {0}",
     "ckPinnedGithub": "Download pinned to GitHub's SHA-256 checksum {0}",
     "ckPinnedGithubDetail": "The checksum comes from the same server as the file. It catches a broken download, not a swapped one.",
-    "ckBuiltDetail": "{0} @ {1} · {2}",
+    "ckBuiltDetail": "Workflow {0} · the launcher doesn't check the build itself",
     "ckBuiltClaimed": "Built by GitHub Actions, the repo says",
     "ckBuiltClaimedDetail": "Claimed by the repo, not checked: {0} @ {1} · {2}",
     "ckDepInstall": "Needs {0}: installs {1} with it",
@@ -503,7 +503,9 @@
     "sourceRetryLabel": "Ask {0} again",
     "tabInstalledLabel_other": "Installed in {0}: {n} mods",
     "typedNotPassed_other": "Not shown to be safe ({n}):",
-    "removeDoubleClick": "A double-click doesn't remove {0}. Press Remove again to confirm."
+    "removeDoubleClick": "A double-click doesn't remove {0}. Press Remove again to confirm.",
+    "ckBuiltIncomplete": "The signed index has an incomplete build record",
+    "ckBuiltIncompleteDetail": "It doesn't give all of the repo, workflow, commit and when it was checked, so how this file was built is unknown"
   },
   "sizeUnits": {
     "B": "B",

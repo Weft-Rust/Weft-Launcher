@@ -86,7 +86,10 @@ function version(id: string, v: string, weftTag: string, extra: Partial<CatalogV
       gitRef: "refs/heads/main",
       verifiedAt: "2026-11-04T18:00:00Z",
     },
-    provenanceVerified: true,
+    buildRecord: R.buildRecord(
+      { kind: "github-attestation", repo, workflow: ".github/workflows/release.yml", ref: "refs/heads/main", verified_at: "2026-11-04T18:00:00Z" },
+      true
+    ),
     reviewed: { by: "Zorro909", at: "2026-11-04" },
     trust: "reviewed",
     ...extra,
@@ -97,7 +100,7 @@ function version(id: string, v: string, weftTag: string, extra: Partial<CatalogV
 const fromSource = (commit: string, claimsProvenance: boolean, extra: Partial<CatalogVersion> = {}): Partial<CatalogVersion> => ({
   trust: "unreviewed",
   reviewed: null,
-  provenanceVerified: false,
+  buildRecord: claimsProvenance ? "claimed" : "none",
   sourceRepo: LANTERN_REPO,
   sourceCommit: commit,
   provenance: claimsProvenance

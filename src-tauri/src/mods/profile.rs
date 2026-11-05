@@ -585,7 +585,7 @@ pub(crate) mod tests {
             size: 10,
             url: String::new(),
             provenance: None,
-            provenance_verified: false,
+            build_record: crate::mods::catalog::BuildRecord::None,
             reviewed: None,
             trust: Trust::Reviewed,
         }

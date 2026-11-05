@@ -239,6 +239,36 @@ pub struct Provenance {
     pub verified_at: Option<String>,
 }
 
+/// The only provenance kind the launcher knows: an attestation the index CI checked with
+/// `gh attestation verify`.
+pub const PROVENANCE_GITHUB: &str = "github-attestation";
+
+impl Provenance {
+    /// Whether this record says everything the launcher shows about a build: a GitHub Actions
+    /// build of a repo, by a workflow file, checked by the index at a time. Anything less (another
+    /// kind, a missing field, a malformed one) is a record the launcher can't stand behind.
+    pub fn is_complete(&self) -> bool {
+        self.kind == PROVENANCE_GITHUB
+            && self.repo.as_deref().is_some_and(is_repo)
+            && self.workflow.as_deref().is_some_and(is_workflow_path)
+            && self.verified_at.as_deref().is_some_and(is_rfc3339)
+    }
+}
+
+/// A workflow file in a repo: `.github/workflows/<name>.yml` or `.yaml`, nothing above it.
+pub fn is_workflow_path(s: &str) -> bool {
+    let Some(name) = s.strip_prefix(".github/workflows/") else {
+        return false;
+    };
+    (name.ends_with(".yml") || name.ends_with(".yaml"))
+        && !name.contains('/')
+        && name.len() > 4
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        && !name.starts_with('.')
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Reviewed {
     pub by: String,
@@ -467,7 +497,10 @@ pub fn sanitize(mut index: Index) -> Index {
         clamp_summary(&mut m.summary);
     }
     index.mods.retain(|m| !m.versions.is_empty());
-    index.weft.retain(|w| is_safe_ref(&w.tag) && is_abi(&w.abi));
+    // As documented: each entry needs its tag, its full commit and its ABI.
+    index
+        .weft
+        .retain(|w| is_safe_ref(&w.tag) && is_commit(&w.commit) && is_abi(&w.abi));
     index.revoked.retain(|r| is_sha256(&r.sha256));
     index
 }
@@ -703,9 +736,10 @@ pub(crate) mod tests {
         ];
         let json = format!(
             r#"{{ "schema": 1, "generated": "2026-11-04T00:00:00Z",
-                 "weft": [ {{ "tag": "v26.11.1", "commit": "x", "abi": "f470b1cbb1f9ad91" }}, {{ "tag": 5 }} ],
+                 "weft": [ {{ "tag": "v26.11.1", "commit": "{}", "abi": "f470b1cbb1f9ad91" }}, {{ "tag": 5 }} ],
                  "mods": [{}],
                  "revoked": [ {{ "sha256": "{}" }}, {{ "reason": "no hash" }} ] }}"#,
+            "c".repeat(40),
             mods.join(","),
             "f".repeat(64)
         );
@@ -812,5 +846,41 @@ pub(crate) mod tests {
         // A `revoked` that isn't a list can't be read safely: the whole index is refused.
         let bad = br#"{ "schema": 1, "generated": "2026-11-04T00:00:00Z", "revoked": { "x": 1 } }"#;
         assert!(matches!(parse(bad), Err(ModsError::IndexInvalid(_))));
+    }
+
+    /// `weft[]` entries follow the documented rule: a short or missing commit drops the entry.
+    #[test]
+    fn weft_entries_need_a_full_commit() {
+        let entry = |commit: &str| WeftAbi {
+            tag: "v26.11.1".into(),
+            commit: commit.into(),
+            abi: "0123456789abcdef".into(),
+        };
+        let index = Index {
+            schema: 1,
+            generated: "2026-11-04T00:00:00Z".into(),
+            weft: vec![entry(&"a".repeat(40)), entry("cceea78"), entry("")],
+            mods: vec![],
+            revoked: vec![],
+        };
+        let kept = sanitize(index).weft;
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].commit, "a".repeat(40));
+    }
+
+    #[test]
+    fn workflow_paths() {
+        assert!(is_workflow_path(".github/workflows/release.yml"));
+        assert!(is_workflow_path(".github/workflows/build-mods.yaml"));
+        for bad in [
+            "release.yml",
+            ".github/workflows/../x.yml",
+            ".github/workflows/a/b.yml",
+            ".github/workflows/.yml",
+            ".github/workflows/x.sh",
+            ".github/workflows/x y.yml",
+        ] {
+            assert!(!is_workflow_path(bad), "{bad}");
+        }
     }
 }

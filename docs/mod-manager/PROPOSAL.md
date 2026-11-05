@@ -185,7 +185,7 @@ Each build has exactly one tier. As built:
 
 | Badge | Meaning | What was checked |
 |---|---|---|
-| **Reviewed** (green) | In the signed Weft mod index, with a recorded review (`reviewed.by`) | Index signature ✔, SHA-256 equals the index pin ✔, zip structure ✔. Provenance is shown as verified only when the index records it (`provenanceVerified`). |
+| **Reviewed** (green) | In the signed Weft mod index, with a recorded review (`reviewed.by`) | Index signature ✔, SHA-256 equals the index pin ✔, zip structure ✔. Provenance is shown as the index's record only when the index records all of it (`buildRecord: "recorded"`). |
 | **Unreviewed** (grey) | From a GitHub repo the player added as a source; nobody reviewed it | The `<id>.mod.json` agrees with GitHub's record of the release ✔, SHA-256 equals GitHub's `digest` (from the same server as the file) ✔, zip structure ✔. A provenance claim in the `.mod.json` is shown as the publisher's claim, not verified. |
 | **Unverified** (red) | A file from the player's computer that isn't in the catalogue | Zip structure only. Typed confirmation needed (mockup 3). A local file whose hash is in the catalogue installs with that build's tier instead. |
 
@@ -283,7 +283,7 @@ design; this is where the build differs from it, or settles what they left open.
 ### Changed from the proposal
 
 - **Renamed tier.** "CI-built" became **Unreviewed**: a source's release proves nothing about CI until it carries an attestation, so the name only claims what is known.
-- **Provenance** counts as verified (`provenanceVerified`) only when the signed index records it; the index CI runs `gh attestation verify` when a version is added. A source's own `provenance` claim is passed on but never verified, and without either the UI says "No build record". The launcher doesn't verify attestations itself.
+- **Provenance** is shown as a record (`buildRecord: "recorded"`) only when the signed index records all of it: the GitHub Actions repo, workflow and commit, and when its CI checked the attestation (`gh attestation verify`, run when a version is added). The row says it is the index's record, not the launcher's check. A record missing any of these is `incomplete` and shows as unknown; a source's own `provenance` claim is passed on as `claimed`, never a record; without either the UI says "No build record". The launcher doesn't verify attestations itself. See INDEX_FORMAT, Provenance.
 - **Reviewed means reviewed.** An index version without a `reviewed` record is dropped.
 - **Matching is by ABI, not tag**, and compares published metadata: the `abi` an entry declares against the version's. Builds from untagged Weft commits fit every release with the same ABI. The launcher doesn't read the compiled library (that would mean loading it), and `fitsVersion` is `null` when the version's ABI is unknown.
 - **Zip sizes are the declared ones.** The archive checks use the central directory's sizes; the launcher never inflates the library (INDEX_FORMAT, "Size limits").

@@ -329,5 +329,22 @@
       ["not a url", false],
       ["", false]
     ]
+  },
+  "buildRecords": {
+    "rust": "catalog.rs build_record, index::Provenance::is_complete",
+    "cases": [
+      {"what": "a whole record in the signed index", "fromIndex": true, "provenance": {"kind": "github-attestation", "repo": "Zorro909/weft-mods", "workflow": ".github/workflows/release.yml", "ref": "refs/heads/main", "verified_at": "2026-11-04T18:00:00Z"}, "want": "recorded"},
+      {"what": "no ref is still whole: the ref isn't shown", "fromIndex": true, "provenance": {"kind": "github-attestation", "repo": "Zorro909/weft-mods", "workflow": ".github/workflows/release.yml", "verified_at": "2026-11-04T18:00:00Z"}, "want": "recorded"},
+      {"what": "the same record from a source is only its claim", "fromIndex": false, "provenance": {"kind": "github-attestation", "repo": "Zorro909/weft-mods", "workflow": ".github/workflows/release.yml", "ref": "refs/heads/main", "verified_at": "2026-11-04T18:00:00Z"}, "want": "claimed"},
+      {"what": "nothing given", "fromIndex": true, "provenance": null, "want": "none"},
+      {"what": "nothing given by a source", "fromIndex": false, "provenance": null, "want": "none"},
+      {"what": "a kind the launcher doesn't know", "fromIndex": true, "provenance": {"kind": "unknown", "repo": "Zorro909/weft-mods", "workflow": ".github/workflows/release.yml", "ref": "refs/heads/main", "verified_at": "2026-11-04T18:00:00Z"}, "want": "incomplete"},
+      {"what": "no repo", "fromIndex": true, "provenance": {"kind": "github-attestation", "workflow": ".github/workflows/release.yml", "ref": "refs/heads/main", "verified_at": "2026-11-04T18:00:00Z"}, "want": "incomplete"},
+      {"what": "a repo that isn't owner/name", "fromIndex": true, "provenance": {"kind": "github-attestation", "repo": "weft-mods", "workflow": ".github/workflows/release.yml", "ref": "refs/heads/main", "verified_at": "2026-11-04T18:00:00Z"}, "want": "incomplete"},
+      {"what": "no workflow", "fromIndex": true, "provenance": {"kind": "github-attestation", "repo": "Zorro909/weft-mods", "ref": "refs/heads/main", "verified_at": "2026-11-04T18:00:00Z"}, "want": "incomplete"},
+      {"what": "a workflow outside .github/workflows", "fromIndex": true, "provenance": {"kind": "github-attestation", "repo": "Zorro909/weft-mods", "workflow": "scripts/build.yml", "ref": "refs/heads/main", "verified_at": "2026-11-04T18:00:00Z"}, "want": "incomplete"},
+      {"what": "no check time", "fromIndex": true, "provenance": {"kind": "github-attestation", "repo": "Zorro909/weft-mods", "workflow": ".github/workflows/release.yml", "ref": "refs/heads/main"}, "want": "incomplete"},
+      {"what": "a check time that isn't RFC 3339", "fromIndex": true, "provenance": {"kind": "github-attestation", "repo": "Zorro909/weft-mods", "workflow": ".github/workflows/release.yml", "ref": "refs/heads/main", "verified_at": "2026-11-04"}, "want": "incomplete"}
+    ]
   }
 }

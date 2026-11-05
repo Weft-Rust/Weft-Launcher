@@ -204,6 +204,7 @@ const SECTIONS: &[&str] = &[
     "shadowing",
     "revocations",
     "iconHosts",
+    "buildRecords",
 ];
 
 #[test]
@@ -712,6 +713,36 @@ fn icon_hosts() {
             crate::download::icon_url_allowed(url),
             want,
             "icon from {url}"
+        );
+    }
+}
+
+#[test]
+fn build_records() {
+    let r = Rules::load();
+    let s = r.section("buildRecords");
+    only("buildRecords", s, &["rust", "cases"]);
+    for case in arr(&s["cases"]) {
+        let case = obj(case);
+        only(
+            "buildRecords case",
+            case,
+            &["what", "fromIndex", "provenance", "want"],
+        );
+        let what = text(&case["what"]);
+        let provenance: Option<super::index::Provenance> = parse(&case["provenance"]);
+        let from_index = case["fromIndex"].as_bool().expect("fromIndex is a bool");
+        let want: super::catalog::BuildRecord = match text(&case["want"]) {
+            "none" => super::catalog::BuildRecord::None,
+            "claimed" => super::catalog::BuildRecord::Claimed,
+            "incomplete" => super::catalog::BuildRecord::Incomplete,
+            "recorded" => super::catalog::BuildRecord::Recorded,
+            other => panic!("rules.json buildRecords: unknown record {other:?}"),
+        };
+        assert_eq!(
+            super::catalog::build_record(provenance.as_ref(), from_index),
+            want,
+            "{what}"
         );
     }
 }

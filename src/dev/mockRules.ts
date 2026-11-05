@@ -7,6 +7,7 @@
 import { compareVersions } from "../mods/select";
 import type {
   AppErrorPayload,
+  BuildRecord,
   Catalog,
   CatalogMod,
   CatalogVersion,
@@ -631,4 +632,43 @@ export function copyPreview(
     picks,
     res,
   };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Build records: catalog.rs `build_record` and index::Provenance::is_complete
+
+/** A provenance object as the index (or a source's `<id>.mod.json`) writes it. */
+export interface RawProvenance {
+  kind: string;
+  repo?: string | null;
+  workflow?: string | null;
+  ref?: string | null;
+  verified_at?: string | null;
+}
+
+/** index::is_repo: `owner/name`, each 1–100 of `A–Z a–z 0–9 . - _`, neither `.` nor `..`. */
+function isRepo(s: string): boolean {
+  const halves = s.split("/");
+  const part = (p: string) => p.length > 0 && p.length <= 100 && p !== "." && p !== ".." && /^[A-Za-z0-9._-]+$/.test(p);
+  return halves.length === 2 && part(halves[0]) && part(halves[1]);
+}
+
+/** index::is_workflow_path: `.github/workflows/<name>.yml` or `.yaml`, nothing above it. */
+function isWorkflowPath(s: string): boolean {
+  if (!s.startsWith(".github/workflows/")) return false;
+  const name = s.slice(".github/workflows/".length);
+  return /\.ya?ml$/.test(name) && name.length > 4 && !name.startsWith(".") && /^[A-Za-z0-9._-]+$/.test(name);
+}
+
+/** index::is_rfc3339, for the forms an index writes. */
+function isRfc3339(s: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/.test(s) && !Number.isNaN(Date.parse(s));
+}
+
+/** catalog::build_record: a record only when the signed index has all of it. */
+export function buildRecord(p: RawProvenance | null, fromIndex: boolean): BuildRecord {
+  if (!p) return "none";
+  if (!fromIndex) return "claimed";
+  const whole = p.kind === "github-attestation" && !!p.repo && isRepo(p.repo) && !!p.workflow && isWorkflowPath(p.workflow) && !!p.verified_at && isRfc3339(p.verified_at);
+  return whole ? "recorded" : "incomplete";
 }

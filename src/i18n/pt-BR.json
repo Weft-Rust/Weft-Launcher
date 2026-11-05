@@ -180,7 +180,7 @@
     "ckNotIndex": "Não está no índice de mods do Weft",
     "ckNotIndexDetail": "Publicado por {0}. Ninguém revisou.",
     "ckPinned": "Download fixado pelo SHA-256 {0} do índice assinado",
-    "ckBuilt": "Compilado pelo GitHub Actions a partir de código público",
+    "ckBuilt": "O índice assinado registra: compilado pelo GitHub Actions em {0} @ {1}, conferido por {2} em {3}",
     "ckNoBuild": "Sem registro de compilação",
     "ckNoBuildDetail": "Nada mostra de qual código este arquivo foi compilado",
     "ckFits": "A interface de mods declarada corresponde a esta versão",
@@ -278,7 +278,7 @@
     "ckWontInstall": "Não pode ser instalado: {0}",
     "ckPinnedGithub": "Download fixado pela soma de verificação SHA-256 do GitHub {0}",
     "ckPinnedGithubDetail": "A soma de verificação vem do mesmo servidor que o arquivo. Ela detecta um download corrompido, não um arquivo trocado.",
-    "ckBuiltDetail": "{0} @ {1} · {2}",
+    "ckBuiltDetail": "Workflow {0} · o launcher não confere a compilação por conta própria",
     "ckBuiltClaimed": "Compilado pelo GitHub Actions, segundo o repositório",
     "ckBuiltClaimedDetail": "Afirmado pelo repositório, não verificado: {0} @ {1} · {2}",
     "ckDepInstall": "Precisa de {0}: instala {1} junto",
@@ -532,7 +532,9 @@
     "tabInstalledLabel_other": "Instalados em {0}: {n} mods",
     "typedNotPassed_many": "Sem prova de segurança ({n}):",
     "typedNotPassed_other": "Sem prova de segurança ({n}):",
-    "removeDoubleClick": "Um clique duplo não remove {0}. Pressione Remover de novo para confirmar."
+    "removeDoubleClick": "Um clique duplo não remove {0}. Pressione Remover de novo para confirmar.",
+    "ckBuiltIncomplete": "O índice assinado tem um registro de compilação incompleto",
+    "ckBuiltIncompleteDetail": "Faltam o repositório, o workflow, o commit ou a data da conferência, então não se sabe como este arquivo foi compilado"
   },
   "sizeUnits": {
     "B": "B",

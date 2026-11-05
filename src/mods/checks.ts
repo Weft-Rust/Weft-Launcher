@@ -69,28 +69,42 @@ export function buildChecks(v: CatalogVersion, indexFrom: string | null = null):
   // The file name shows; the whole path is a hover or a Tab away, so two workflows of the same name differ.
   const path = v.provenance?.workflow;
   const workflow: Arg = path ? { code: path, short: path.split("/").pop() ?? path } : "—";
-  if (v.provenance && v.provenanceVerified) {
-    rows.push({
-      id: "provenance",
-      state: "yes",
-      title: { key: "mods.ckBuilt" },
-      detail: { key: "mods.ckBuiltDetail", args: [v.provenance.repo ?? v.sourceRepo, commit(v.sourceCommit), workflow] },
-    });
-  } else if (v.provenance) {
-    // The repo's own <id>.mod.json says so. Nothing checked it, so it can't be a green check.
-    rows.push({
-      id: "provenance",
-      state: "unknown",
-      title: { key: "mods.ckBuiltClaimed" },
-      detail: {
-        key: "mods.ckBuiltClaimedDetail",
-        args: [v.provenance.repo ?? v.sourceRepo, commit(v.sourceCommit), workflow],
-      },
-    });
-  } else {
-    rows.push({ id: "provenance", state: "unknown", title: { key: "mods.ckNoBuild" }, detail: { key: "mods.ckNoBuildDetail" } });
-  }
+  rows.push(buildRecordCheck(v, workflow));
   return rows;
+}
+
+/**
+ * What is known of how a build was made. Only a whole record in the signed index is a yes, and it
+ * says whose word it is: the index records a GitHub Actions build that its CI checked; the
+ * launcher checks no attestation itself. Anything less is unknown, never yes.
+ */
+function buildRecordCheck(v: CatalogVersion, workflow: Arg): CheckRow {
+  const p = v.provenance;
+  switch (v.buildRecord) {
+    case "recorded":
+      // `recorded` means the backend found every one of these (catalog.rs, `Provenance::is_complete`).
+      return {
+        id: "provenance",
+        state: "yes",
+        title: {
+          key: "mods.ckBuilt",
+          args: [p?.repo ?? v.sourceRepo, commit(v.sourceCommit), v.reviewed?.by ?? "—", p?.verifiedAt ? { day: p.verifiedAt } : "—"],
+        },
+        detail: { key: "mods.ckBuiltDetail", args: [workflow] },
+      };
+    case "incomplete":
+      return { id: "provenance", state: "unknown", title: { key: "mods.ckBuiltIncomplete" }, detail: { key: "mods.ckBuiltIncompleteDetail" } };
+    case "claimed":
+      // The repo's own <id>.mod.json says so. Nothing checked it, so it can't be a green check.
+      return {
+        id: "provenance",
+        state: "unknown",
+        title: { key: "mods.ckBuiltClaimed" },
+        detail: { key: "mods.ckBuiltClaimedDetail", args: [p?.repo ?? v.sourceRepo, commit(v.sourceCommit), workflow] },
+      };
+    case "none":
+      return { id: "provenance", state: "unknown", title: { key: "mods.ckNoBuild" }, detail: { key: "mods.ckNoBuildDetail" } };
+  }
 }
 
 /** How the download is pinned. Only the signed index pins it independently of the file's server. */

@@ -8,7 +8,7 @@ use ts_rs::TS;
 
 use super::archive::current_platform;
 use super::index::{
-    Channel, Freshness, Index, IndexMod, IndexVersion, Platform, WeftAbi, same_repo,
+    Channel, Freshness, Index, IndexMod, IndexVersion, Platform, Provenance, WeftAbi, same_repo,
 };
 use super::sources::NoModsReason;
 use crate::error::AppError;
@@ -60,11 +60,28 @@ pub struct CatalogVersion {
     pub size: u64,
     pub url: String,
     pub provenance: Option<ProvenanceView>,
-    /// True only when `provenance` came from the signed index. A source's own `<id>.mod.json`
-    /// may claim a provenance; that claim is shown, but it is false here.
-    pub provenance_verified: bool,
+    /// What `provenance` is worth: only a complete record in the signed index is `recorded`.
+    pub build_record: BuildRecord,
     pub reviewed: Option<ReviewedView>,
     pub trust: Trust,
+}
+
+/// Where a build's provenance comes from, and whether it says enough to be shown as a record.
+/// The launcher never verifies an attestation itself: at best the signed index records that its
+/// CI did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum BuildRecord {
+    /// No provenance at all.
+    None,
+    /// The publisher's own `<id>.mod.json` says so. Nothing checked it.
+    Claimed,
+    /// The signed index has a provenance record, but not a whole one: a kind the launcher doesn't
+    /// know, or no repo, workflow or check time, or one that is malformed.
+    Incomplete,
+    /// The signed index records a GitHub Actions build: its repo, workflow and commit, and when
+    /// the index CI checked the attestation.
+    Recorded,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -264,6 +281,16 @@ pub struct HeldCatalog {
 #[derive(Default, Clone)]
 pub struct CatalogState(pub Arc<Mutex<HeldCatalog>>);
 
+/// What a build's provenance is worth: a record only when the signed index has all of it.
+pub fn build_record(provenance: Option<&Provenance>, from_index: bool) -> BuildRecord {
+    match provenance {
+        None => BuildRecord::None,
+        Some(_) if !from_index => BuildRecord::Claimed,
+        Some(p) if p.is_complete() => BuildRecord::Recorded,
+        Some(_) => BuildRecord::Incomplete,
+    }
+}
+
 fn version_view(v: &IndexVersion, trust: Trust, from_index: bool) -> CatalogVersion {
     CatalogVersion {
         version: v.version.clone(),
@@ -285,7 +312,7 @@ fn version_view(v: &IndexVersion, trust: Trust, from_index: bool) -> CatalogVers
             git_ref: p.git_ref.clone(),
             verified_at: p.verified_at.clone(),
         }),
-        provenance_verified: from_index && v.provenance.is_some(),
+        build_record: build_record(v.provenance.as_ref(), from_index),
         // Only the index records reviews; a source can't claim one.
         reviewed: v
             .reviewed
@@ -576,16 +603,16 @@ pub(crate) mod tests {
         assert_eq!(catalog.sources[0].mods, 0);
     }
 
-    /// Provenance is verified only when the signed index recorded it; a source's own claim is
-    /// passed on but never marked verified, and a source can't claim a review.
+    /// Provenance is a record only when the signed index recorded all of it; a source's own claim
+    /// is passed on but never a record, and a source can't claim a review.
     #[test]
-    fn only_the_index_verifies_provenance() {
+    fn only_the_index_records_provenance() {
         let provenance = Provenance {
             kind: "github-attestation".into(),
             repo: Some("Zorro909/weft-mods".into()),
             workflow: Some(".github/workflows/release.yml".into()),
             git_ref: None,
-            verified_at: None,
+            verified_at: Some("2026-11-04T18:00:00Z".into()),
         };
         let mut reviewed = index_mod("cogwork", "Zorro909/weft-mods", &"a".repeat(64));
         reviewed.versions[0].provenance = Some(provenance.clone());
@@ -606,12 +633,61 @@ pub(crate) mod tests {
             vec![source("Someone/lanterns", vec![claimed])],
         );
         let v = |sha: char| catalog.find(&sha.to_string().repeat(64)).unwrap().1;
-        assert!(v('a').provenance_verified);
-        assert!(!v('b').provenance_verified);
+        assert_eq!(v('a').build_record, BuildRecord::Recorded);
+        assert_eq!(v('b').build_record, BuildRecord::None);
         assert!(v('c').provenance.is_some());
-        assert!(!v('c').provenance_verified);
+        assert_eq!(v('c').build_record, BuildRecord::Claimed);
         assert!(v('c').reviewed.is_none());
         assert_eq!(v('c').trust, Trust::Unreviewed);
+    }
+
+    /// A provenance record in the signed index that doesn't say all of it (another kind, no
+    /// workflow, no or a malformed check time, a repo that isn't one) is incomplete: never shown
+    /// as a recorded build.
+    #[test]
+    fn an_incomplete_index_record_is_not_a_record() {
+        let whole = Provenance {
+            kind: "github-attestation".into(),
+            repo: Some("Zorro909/weft-mods".into()),
+            workflow: Some(".github/workflows/release.yml".into()),
+            git_ref: Some("refs/heads/main".into()),
+            verified_at: Some("2026-11-04T18:00:00Z".into()),
+        };
+        type Spoil = fn(&mut Provenance);
+        let cases: [(&str, Spoil); 8] = [
+            ("unknown kind", |p| p.kind = "unknown".into()),
+            ("no repo", |p| p.repo = None),
+            ("repo not a repo", |p| p.repo = Some("not a repo".into())),
+            ("no workflow", |p| p.workflow = None),
+            ("workflow outside", |p| {
+                p.workflow = Some("../evil.yml".into())
+            }),
+            ("workflow not yaml", |p| {
+                p.workflow = Some(".github/workflows/x.sh".into())
+            }),
+            ("no check time", |p| p.verified_at = None),
+            ("bad check time", |p| {
+                p.verified_at = Some("yesterday".into())
+            }),
+        ];
+        for (i, (why, spoil)) in cases.iter().enumerate() {
+            let mut p = whole.clone();
+            spoil(&mut p);
+            let sha = format!("{:064x}", i + 1);
+            let mut m = index_mod("cogwork", "Zorro909/weft-mods", &sha);
+            m.versions[0].provenance = Some(p);
+            let index = Index {
+                schema: 1,
+                generated: "2026-11-04T00:00:00Z".into(),
+                weft: vec![],
+                mods: vec![m],
+                revoked: vec![],
+            };
+            let catalog = build(Some(&index), status(), vec![]);
+            let v = catalog.find(&sha).unwrap().1;
+            assert_eq!(v.build_record, BuildRecord::Incomplete, "{why}");
+            assert_eq!(v.trust, Trust::Reviewed, "{why}: the review still stands");
+        }
     }
 
     #[test]

@@ -77,7 +77,7 @@ function catalog(name: keyof typeof rules.catalogs): Catalog {
         size: 10,
         url: "",
         provenance: null,
-        provenanceVerified: false,
+        buildRecord: "none",
         reviewed: null,
         trust: "reviewed",
       })),
@@ -272,5 +272,13 @@ describe("plan tokens and fit (contract R4 §2, §5)", () => {
 describe("icon hosts (rules.json iconHosts, the backend's icon_url_allowed)", () => {
   it("allows GitHub's hosts and nothing else", () => {
     for (const [url, allowed] of rules.iconHosts.cases as [string, boolean][]) expect(iconUrlAllowed(url), url).toBe(allowed);
+  });
+});
+
+describe("build records (rules.json buildRecords, the backend's build_record)", () => {
+  it("is a record only when the signed index has all of it", () => {
+    for (const c of rules.buildRecords.cases as { what: string; fromIndex: boolean; provenance: R.RawProvenance | null; want: string }[]) {
+      expect(R.buildRecord(c.provenance, c.fromIndex), c.what).toBe(c.want);
+    }
   });
 });

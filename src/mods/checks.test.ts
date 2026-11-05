@@ -44,19 +44,28 @@ const ctx = {
 };
 
 describe("provenance", () => {
-  it("is a green check only when the signed index vouches for it", () => {
-    expect(row(buildChecks(build("1.0.0")), "provenance")?.state).toBe("yes");
+  it("is a green check only when the signed index records all of it, and says it is the index's record", () => {
+    const r = row(buildChecks(build("1.0.0")), "provenance")!;
+    expect(r.state).toBe("yes");
+    expect(r.title.key).toBe("mods.ckBuilt");
+    // Repo @ commit, who checked it, and when: the index's words, not the launcher's check.
+    expect(r.title.args).toEqual(["Zorro909/weft-mods", expect.objectContaining({ code: "cceea7805df5902d62017d2008d1bb29ed84e152" }), "Zorro909", { day: "2026-11-04T18:00:00Z" }]);
+  });
+
+  it("is unknown, never green, when the index's record is incomplete", () => {
+    const r = row(buildChecks(build("1.0.0", { buildRecord: "incomplete" })), "provenance")!;
+    expect(r).toMatchObject({ state: "unknown", title: { key: "mods.ckBuiltIncomplete" } });
   });
 
   it("is unknown, never green, when only the repo claims it", () => {
-    const claimed = build("1.0.0", { trust: "unreviewed", reviewed: null, provenanceVerified: false });
+    const claimed = build("1.0.0", { trust: "unreviewed", reviewed: null, buildRecord: "claimed" });
     const r = row(buildChecks(claimed), "provenance")!;
     expect(r.state).toBe("unknown");
     expect(r.title.key).toBe("mods.ckBuiltClaimed");
   });
 
   it("says 'no build record' as unknown", () => {
-    const r = row(buildChecks(build("1.0.0", { provenance: null })), "provenance")!;
+    const r = row(buildChecks(build("1.0.0", { provenance: null, buildRecord: "none" })), "provenance")!;
     expect(r).toMatchObject({ state: "unknown", title: { key: "mods.ckNoBuild" } });
   });
 });

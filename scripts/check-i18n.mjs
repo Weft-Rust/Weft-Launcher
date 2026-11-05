@@ -141,19 +141,32 @@ for (const code of Object.keys(mapping)) {
 
 // The trust words, one term per language: a player learns them from the badges, so every message
 // that names one says it the same way. Stems, compared without case, so inflected forms pass.
+//
+// Russian keeps the three tiers apart, as three steps a reader recognises, and never with the
+// stem of the mechanical checks («провер…»: the signature, the file, the version), which a
+// tier word would be confused with: Reviewed «Одобрен» (approved by the index's reviewers),
+// Unreviewed «Без модерации» (published, nobody moderated it), Unverified «Происхождение
+// неизвестно» (a file of unknown origin, from the player's computer; not «источник», which is
+// what an added GitHub repo is called).
+const TIER_FORMS = { ru: [/провер/i] };
 const GLOSSARY = [
-  { en: /\bunverified\b/i, term: { ru: "без проверки", "pt-BR": "não verificad", es: "sin verificar" } },
-  { en: /\bunreviewed\b|nobody reviewed/i, term: { ru: "не провер", "pt-BR": "revis", es: "revis" } },
+  { en: /\bunverified\b/i, term: { ru: "происхожд", "pt-BR": "não verificad", es: "sin verificar" }, not: TIER_FORMS },
+  { en: /\bunreviewed\b|nobody reviewed|\bnot reviewed\b/i, term: { ru: "модерац", "pt-BR": "revis", es: "revis" }, not: TIER_FORMS },
+  // The tier's own word (capitalised in English), and what it means: someone reviewed exactly this file.
+  { en: /\bReviewed\b|reviewed exactly/, term: { ru: "одобр", "pt-BR": "revis", es: "revis" }, not: TIER_FORMS },
   { en: /\brevok|\brevocation/i, term: { ru: "отозв", "pt-BR": "retirad", es: "retirad" } },
 ];
 const FORBIDDEN = { ru: [/отзыв/i, /неизвестн\S* файл/i] };
 const flat = Object.fromEntries(locales.map((l) => [l, flatten(load(l))]));
 for (const [key, english] of Object.entries(flat.en)) {
-  for (const { en: pattern, term } of GLOSSARY) {
+  for (const { en: pattern, term, not = {} } of GLOSSARY) {
     if (!pattern.test(english)) continue;
     for (const [locale, stem] of Object.entries(term)) {
       const text = flat[locale][key];
       if (text !== undefined && !text.toLowerCase().includes(stem)) problems.push(`${locale}: ${key} should say "${stem}…" for "${english.match(pattern)[0]}"`);
+      for (const word of not[locale] ?? []) {
+        if (text !== undefined && word.test(text)) problems.push(`${locale}: ${key} names a tier with ${word}, the word of the mechanical checks`);
+      }
     }
   }
 }

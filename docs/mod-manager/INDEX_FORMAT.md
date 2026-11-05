@@ -97,7 +97,7 @@ JSON Schemas for both files, for an editor or a publishing CI: [`schema/index.sc
 | `deps[]` | `[]` | `{ "id": … }` of every mod it needs. `base` ships with Weft and is never installed. |
 | `platforms[]` | `[]` | Which libraries the zip has (table below). An unknown platform string is ignored. |
 | `asset` | required | `name`, `url`, `size` and `sha256` of the zip, all required. |
-| `provenance` | `null` | The attestation the index CI checked with `gh attestation verify`. `kind` is required; `repo`, `workflow`, `ref` and `verified_at` default to `null`. |
+| `provenance` | `null` | The attestation the index CI checked with `gh attestation verify`. `kind` is required; `repo`, `workflow`, `ref` and `verified_at` default to `null`. See [Provenance](#provenance) for what the launcher shows. |
 | `reviewed` | required in the index | `by` and `at`: who reviewed exactly these bytes, and when. Not read from sources. |
 | `revoked[]` | `[]` | Builds that must never be used again. Must be a list: anything else refuses the whole index. |
 | `revoked[].sha256` | required | The build's hash, in any case. |
@@ -111,7 +111,7 @@ A version that breaks any of these is left out. The rest of the index is still u
 - `id` matches `[a-z0-9_]{1,64}` and is not `base`.
 - `version` is semver (see the table).
 - `source.repo` is `owner/name`, each part 1–100 of `A–Z a–z 0–9 - _ .`, and neither `.` nor `..`.
-- `source.commit` is a full commit hash: 40 lowercase hex characters, or 64 in a SHA-256 repository. So is `weft.commit` when it isn't empty.
+- `source.commit` is a full commit hash: 40 lowercase hex characters, or 64 in a SHA-256 repository. So is `weft.commit` when it isn't empty, and every `weft[].commit` (an entry with any other commit is dropped).
 - `published` is RFC 3339 when it isn't empty.
 - `tag`, `weft.tag` and `weft[].tag` are 1–100 of `A–Z a–z 0–9 . - _`, and don't start with `.`.
 - `asset.name` is `<id>.zip`.
@@ -174,7 +174,7 @@ Then:
 - If GitHub marks the release a prerelease, a `channel` of `release` becomes `prerelease`.
 - The `published` time comes from GitHub when it has one.
 - `reviewed` is never taken from a source: such builds are always **Unreviewed**.
-- `provenance` is passed on as the publisher's claim, with `provenanceVerified: false`. Only provenance recorded in the signed index counts as verified.
+- `provenance` is passed on as the publisher's claim (`buildRecord: "claimed"`), never as a record. Only provenance recorded in the signed index can be one (see [Provenance](#provenance)).
 - The downloaded bytes must hash to `asset.sha256`, as for the index.
 - Draft releases are ignored.
 
@@ -188,6 +188,19 @@ When several releases publish the same mod:
 - A version string, or a zip `sha256`, that a newer release already published is skipped in older releases.
 
 A source mod is its own catalogue entry (`source:<owner/repo>:<id>`), even when the index has a mod with the same `id` (`index:<id>`). Dependencies are looked up in the index first, then in the same source. A source build whose `sha256` is also in the index shows once, as Reviewed.
+
+## Provenance
+
+The launcher never verifies an attestation itself. The index CI runs `gh attestation verify` when it adds a version, and records what it checked in `provenance`; the signature over the index is what makes that record the index's word. The launcher shows it as the index's record, in those words ("The signed index records: built by GitHub Actions in `repo` @ `commit`, checked by `reviewed.by` on `verified_at`"), and only when the record is whole:
+
+| `buildRecord` | When | Shown as |
+|---|---|---|
+| `recorded` | In the signed index, `kind` is `github-attestation`, `repo` is `owner/name`, `workflow` is `.github/workflows/<name>.yml` (or `.yaml`), and `verified_at` is RFC 3339. `source.commit` is a full hash already (a rule above). `ref` is optional. | ✓, worded as the index's record |
+| `incomplete` | In the signed index, but any of the above is missing or malformed, or `kind` is another one. | ? (unknown): "an incomplete build record" |
+| `claimed` | From a source's `<id>.mod.json`, whatever it says. | ? (unknown): "the repo says" |
+| `none` | No `provenance`. | ? (unknown): "No build record" |
+
+An incomplete record doesn't drop the version: the review still stands, and only the build row is unknown. The rule is `catalog::build_record` in the backend, and the shared cases in `src/dev/fixtures/rules.json` (`buildRecords`) hold the dev mock to it.
 
 ## Publishing from your own repo
 

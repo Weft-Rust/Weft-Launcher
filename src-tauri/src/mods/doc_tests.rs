@@ -65,7 +65,7 @@ fn the_index_example_parses_and_keeps_everything() {
     let catalog = catalog::build(Some(&index), status, vec![]);
     let v = &catalog.mods[0].versions[0];
     assert_eq!(v.trust, Trust::Reviewed);
-    assert!(v.provenance_verified);
+    assert_eq!(v.build_record, catalog::BuildRecord::Recorded);
     assert_eq!(v.platforms.len(), 3);
 }
 
