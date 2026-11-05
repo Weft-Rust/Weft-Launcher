@@ -221,6 +221,19 @@ mod tests {
     }
 
     #[test]
+    fn an_error_status_is_said_first_in_the_detail() {
+        // The page reads the status from here (src/mods/select.ts `httpStatus`): keep it first.
+        let e = AppError::from(ModsError::Http {
+            status: 404,
+            url: "https://zorro909.github.io/weft-mods-index/v1/index.json".into(),
+        });
+        assert_eq!(
+            e.detail.as_deref(),
+            Some("HTTP 404 (https://zorro909.github.io/weft-mods-index/v1/index.json)")
+        );
+    }
+
+    #[test]
     fn download_failures_keep_their_meaning() {
         let url = "https://github.com/a/b/releases/download/t/x.zip";
         let code = |e: DownloadError| AppError::from(ModsError::from_download(e, url)).code;

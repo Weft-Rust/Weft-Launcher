@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  httpStatus,
+  buildBySha,
   compareVersions,
   copyDonors,
   fittingVersions,
@@ -146,5 +148,24 @@ describe("networkDown", () => {
 
   it("is not down when the index answered and only a source lost its connection", () => {
     expect(networkDown(catalog([], { sources: [offline] }), null)).toBe(false);
+  });
+});
+
+describe("httpStatus", () => {
+  it("reads the status the backend puts first in an HttpStatus detail", () => {
+    expect(httpStatus({ code: "HttpStatus", detail: "HTTP 404 (https://example.org/index.json)" })).toBe("404");
+    expect(httpStatus({ code: "HttpStatus", detail: null })).toBeNull();
+    expect(httpStatus({ code: "Network", detail: "HTTP 404 (x)" })).toBeNull();
+    expect(httpStatus(null)).toBeNull();
+  });
+});
+
+describe("buildBySha", () => {
+  it("finds a mod's catalogue build by hash, and nothing for another mod's", () => {
+    const v = build("0.2.0");
+    const c = catalog([catalogMod("cogwork", [build("0.1.0"), v])]);
+    expect(buildBySha(c, "cogwork", v.sha256)).toBe(v);
+    expect(buildBySha(c, "hearth", v.sha256)).toBeUndefined();
+    expect(buildBySha(null, "cogwork", v.sha256)).toBeUndefined();
   });
 });

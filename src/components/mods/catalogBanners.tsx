@@ -5,6 +5,7 @@ import type { Catalog, ErrorCode, SourceStatus } from "../../mods/types";
 import type { BannerItem } from "./BannerStack";
 import { showError } from "../../i18n/errors";
 import { ErrorDetails } from "../ErrorText";
+import { httpStatus } from "../../mods/select";
 
 type T = (key: MessageKey, ...args: string[]) => string;
 
@@ -85,7 +86,10 @@ export function indexProblem(index: Catalog["index"], t: T, formatDay: (iso: str
 export function indexSummary(index: Catalog["index"], t: T, formatDay: (iso: string | null) => string): string | null {
   if (index.freshness === "fresh" && !index.error) return null;
   if (index.freshness === "unavailable" || !index.generated) {
-    return index.error && cause(index.error.code) === "network" && !refused(index.error.code) ? t("mods.indexUnreachableShort") : t("mods.indexUnavailableShort");
+    if (index.error && cause(index.error.code) === "network" && !refused(index.error.code)) return t("mods.indexUnreachableShort");
+    // The server answered: which status it said is the first thing to know.
+    const status = httpStatus(index.error);
+    return status ? t("mods.indexUnavailableStatusShort", status) : t("mods.indexUnavailableShort");
   }
   const day = formatDay(index.signedAt ?? index.generated);
   if (index.freshness === "stale" && !index.error) return t("mods.indexStaleShort", day);

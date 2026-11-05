@@ -517,7 +517,9 @@
     "homeModsOwn_one": "Mods for {0}: {1}, and {n} file from your own folder",
     "homeModsOwn_other": "Mods for {0}: {1}, and {n} files from your own folder",
     "homeModsOnlyOwn_one": "No mods for {0}, but {n} file from your own folder loads",
-    "homeModsOnlyOwn_other": "No mods for {0}, but {n} files from your own folder load"
+    "homeModsOnlyOwn_other": "No mods for {0}, but {n} files from your own folder load",
+    "indexUnavailableStatusShort": "No mod index (server said {0}): no Reviewed mods",
+    "browseNoIndex": "Reviewed mods appear here once the Weft mod index can be fetched."
   },
   "sizeUnits": {
     "B": "B",

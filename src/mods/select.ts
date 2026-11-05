@@ -145,6 +145,15 @@ export function buildBySha(catalog: Catalog | null, id: string, sha256: string):
   return undefined;
 }
 
+/**
+ * The status a server answered with, for an `HttpStatus` error: its detail starts "HTTP 404"
+ * (src-tauri/src/mods/error.rs keeps it so). Null for any other error.
+ */
+export function httpStatus(error: { code: string; detail: string | null } | null | undefined): string | null {
+  if (error?.code !== "HttpStatus") return null;
+  return /^HTTP (\d{3})\b/.exec(error.detail ?? "")?.[1] ?? null;
+}
+
 export function shortSha(sha: string): string {
   return `${sha.slice(0, 8)}…${sha.slice(-4)}`;
 }

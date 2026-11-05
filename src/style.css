@@ -576,6 +576,7 @@ button:disabled { cursor: not-allowed; }
 .source-error { grid-column: 1 / -1; margin-top: 8px; }
 .inline-error.with-action { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
 .copy-list { margin-top: 12px; }
+.browse-note { margin: 12px 0 0; color: var(--g5); }
 .copy-item { display: grid; gap: 2px; min-width: 0; }
 .copy-item-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
 .copy-item .progress-container { width: 240px; }

@@ -28,6 +28,7 @@ export function BrowseList({ report, locked }: BrowseListProps) {
   const listId = useId().replace(/:/g, "");
   const tag = report.tag;
   const offline = networkDown(catalog, catalogError);
+  const noIndex = !!catalog && (catalog.index.freshness === "unavailable" || !catalog.index.generated);
   const abi = report.versionAbi;
 
   const rows = useMemo(() => {
@@ -88,6 +89,7 @@ export function BrowseList({ report, locked }: BrowseListProps) {
         </label>
       </div>
 
+      {/* No index: every card is from a source, and where Reviewed mods would be, says so. */}
       {rows.length === 0 ? (
         <div className="empty-state">
           <p>
@@ -186,6 +188,11 @@ export function BrowseList({ report, locked }: BrowseListProps) {
             );
           })}
         </ul>
+      )}
+      {noIndex && !query && (
+        <p className="browse-note" data-testid="browse-no-index">
+          {t("mods.browseNoIndex")}
+        </p>
       )}
       {open && <InstallDialog tag={tag} mod={open} allowPrerelease={prereleases} onClose={() => setOpen(null)} />}
     </>

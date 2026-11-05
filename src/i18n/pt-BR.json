@@ -551,7 +551,9 @@
     "homeModsOwn_other": "Mods para {0}: {1} e {n} arquivos da sua pasta",
     "homeModsOnlyOwn_one": "Sem mods para {0}, mas {n} arquivo da sua pasta carrega",
     "homeModsOnlyOwn_many": "Sem mods para {0}, mas {n} arquivos da sua pasta carregam",
-    "homeModsOnlyOwn_other": "Sem mods para {0}, mas {n} arquivos da sua pasta carregam"
+    "homeModsOnlyOwn_other": "Sem mods para {0}, mas {n} arquivos da sua pasta carregam",
+    "indexUnavailableStatusShort": "Sem índice de mods (servidor: {0}): sem mods revisados",
+    "browseNoIndex": "Os mods revisados aparecem aqui quando o índice de mods do Weft puder ser baixado."
   },
   "sizeUnits": {
     "B": "B",

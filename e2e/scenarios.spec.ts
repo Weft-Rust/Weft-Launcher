@@ -129,7 +129,10 @@ const CHECKS: Record<string, Checks> = {
       await expect(lead).toHaveClass(/warn/);
       await expect(lead.locator(".banner-actions button")).toHaveCount(1);
       // Pages answered 404: the network works, so it never says unreachable or offline.
-      if (en) await expect(lead).toContainText("No mod index: no Reviewed mods");
+      if (en) await expect(lead).toContainText("No mod index (server said 404): no Reviewed mods");
+      // Under the cards, where Reviewed mods would be: why there are none, and when they come.
+      await expect(page.getByTestId("browse-no-index")).toBeVisible();
+      if (en) await expect(page.getByTestId("browse-no-index")).toHaveText("Reviewed mods appear here once the Weft mod index can be fetched.");
       await expect(page.locator(".mod-card .trust-reviewed")).toHaveCount(0);
     },
   },

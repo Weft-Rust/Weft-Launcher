@@ -1256,7 +1256,7 @@ test.describe("network down is not index down", () => {
     await open(page, "scenario=indexdown");
     await goToTab(page, MODS_TAB);
     await browse(page);
-    await expect(page.locator(".banners")).toContainText("No mod index: no Reviewed mods");
+    await expect(page.locator(".banners")).toContainText("No mod index (server said 404): no Reviewed mods");
     await expect(page.locator(".banners")).not.toContainText("unreachable");
     await expect(page.locator(".mods-panel")).not.toContainText("needs internet");
   });
