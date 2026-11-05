@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import { useI18n } from "../../i18n/useI18n";
 import type { MessageKey } from "../../i18n";
 import type { CheckRow, CheckState } from "../../mods/checks";
@@ -6,6 +6,7 @@ import { PixelIcon } from "../PixelIcon";
 import { CHECK, CROSS, EQUALS, QUESTION } from "./glyphs";
 import { RichText } from "./RichText";
 import { TrustBadge } from "./TrustBadge";
+import { FullValues } from "../Truncate";
 
 const GLYPH: Record<CheckState, string[]> = { yes: CHECK, no: CROSS, unknown: QUESTION, same: EQUALS };
 const SPOKEN: Record<CheckState, MessageKey> = { yes: "mods.ckPassed", no: "mods.ckFailed", unknown: "mods.ckUnknown", same: "mods.ckSame" };
@@ -23,16 +24,29 @@ export function CheckMark({ state, said }: { state: CheckState; said?: MessageKe
   );
 }
 
+/** Whether a row carries a shortened value (a hash, a commit) whose full form can be shown. */
+const hasCode = (c: CheckRow) => [c.title, c.detail].some((m) => m?.args?.some((a) => typeof a === "object" && "code" in a));
+
 /**
  * What was checked, one line each. A list, so a screen reader reads it as one, each row with its
  * result first. A row that couldn't be found out offers Retry, when there is a way to retry.
+ *
+ * The checks that passed fold into one line ("5 checks passed · Show"), so what failed or is
+ * unknown stays in view above the dialog's buttons in a small window. That line's one control
+ * shows them, and every shortened hash and commit in the list whole: one tab stop for all of it.
  */
 export function CheckList({ checks, label, onRetry, retrying = false }: { checks: CheckRow[]; label: string; onRetry?: () => void; retrying?: boolean }) {
-  const { t } = useI18n();
+  const { t, tn } = useI18n();
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  const passed = checks.filter((c) => c.state === "yes" || c.state === "same");
+  const folds = passed.length >= 2;
+  const codes = checks.some(hasCode);
   return (
-    <ul className="checks" aria-label={label}>
+    <FullValues.Provider value={open}>
+    <ul className="checks" aria-label={label} id={listId}>
       {checks.map((c) => (
-        <li key={c.id} className={`check check-${c.state}`} data-check={c.id}>
+        <li key={c.id} className={`check check-${c.state}`} data-check={c.id} hidden={folds && !open && passed.includes(c)}>
           <span className="check-mark" aria-hidden="true">
             <PixelIcon rows={GLYPH[c.state]} />
           </span>
@@ -61,7 +75,21 @@ export function CheckList({ checks, label, onRetry, retrying = false }: { checks
           </span>
         </li>
       ))}
+      {(folds || codes) && (
+        <li className={`check check-fold${folds ? " check-yes" : ""}`} data-check="fold">
+          <span className="check-mark" aria-hidden="true">
+            {folds && <PixelIcon rows={GLYPH.yes} />}
+          </span>
+          <span>
+            {folds && <>{tn("mods.checksPassed", passed.length)} · </>}
+            <button className="link-btn check-fold-btn" aria-expanded={open} aria-controls={listId} onClick={() => setOpen(!open)}>
+              {open ? t("mods.checksHide") : folds ? t("mods.checksShow") : t("mods.checksShowValues")}
+            </button>
+          </span>
+        </li>
+      )}
     </ul>
+    </FullValues.Provider>
   );
 }
 

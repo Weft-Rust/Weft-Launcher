@@ -1,4 +1,4 @@
-import { ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ReactNode, createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 /**
@@ -75,14 +75,20 @@ interface TruncateProps {
   /** Lines before the ellipsis. */
   lines?: 1 | 2 | 3;
   children?: ReactNode;
+  /**
+   * A tab stop of its own when cut, so the keyboard reaches the full text: only for text that
+   * appears once on a page. In a list's rows and cards it isn't one; the row shows the text whole
+   * while focus is in it (style.css, `[data-focus-scope]:focus-within`), so a row stays a few Tabs.
+   */
+  focusable?: boolean;
+  id?: string;
 }
 
 /**
- * Text that may be cut off with an ellipsis. When it is, the full text shows on hover and on
- * focus, and it becomes a tab stop so the keyboard can reach it. Screen readers get the full text
- * anyway: the ellipsis is only drawn.
+ * Text that may be cut off with an ellipsis. When it is, the full text shows on hover, and on
+ * focus where it is `focusable`. Screen readers get the full text anyway: the ellipsis is only drawn.
  */
-export function Truncate({ text, className = "", lines = 1, children }: TruncateProps) {
+export function Truncate({ text, className = "", lines = 1, children, focusable = false, id }: TruncateProps) {
   const ref = useRef<HTMLSpanElement>(null);
   const [cut, setCut] = useState(false);
 
@@ -99,7 +105,7 @@ export function Truncate({ text, className = "", lines = 1, children }: Truncate
   const { handlers, tip } = useTip(text, cut);
   return (
     <>
-      <span ref={ref} className={`truncate lines-${lines} ${className}`} tabIndex={cut ? 0 : undefined} {...handlers}>
+      <span ref={ref} id={id} className={`truncate lines-${lines} ${className}${cut ? " is-cut" : ""}`} tabIndex={cut && focusable ? 0 : undefined} {...handlers}>
         {children ?? text}
       </span>
       {tip}
@@ -107,13 +113,23 @@ export function Truncate({ text, className = "", lines = 1, children }: Truncate
   );
 }
 
-/** A shortened hash, commit or interface id. The full value is a hover or a Tab away. */
+/**
+ * Whether shortened values show whole: a check list's one "details" control turns it on, so the
+ * keyboard reaches every full hash and commit with one press instead of a Tab per value.
+ */
+export const FullValues = createContext(false);
+
+/**
+ * A shortened hash, commit or interface id. The full value is a hover away, whole where
+ * FullValues is on, and always what a screen reader hears. Never a tab stop of its own.
+ */
 export function Code({ full, short }: { full: string; short: string }) {
-  const { handlers, tip } = useTip(full, short !== full);
-  if (short === full) return <code>{full}</code>;
+  const whole = useContext(FullValues);
+  const { handlers, tip } = useTip(full, short !== full && !whole);
+  if (short === full || whole) return <code className={short === full ? undefined : "code-full"}>{full}</code>;
   return (
     <>
-      <code className="code-short" tabIndex={0} {...handlers}>
+      <code className="code-short" {...handlers}>
         <span aria-hidden="true">{short}</span>
         <span className="sr-only">{full}</span>
       </code>

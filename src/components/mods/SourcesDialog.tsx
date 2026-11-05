@@ -214,7 +214,7 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
           return (
             <li className={`source-row${asking ? " confirming" : ""}`} key={repo} data-repo={repo}>
               <span className="source-title">
-                <Truncate className="source-name" text={repo} />
+                <Truncate focusable className="source-name" text={repo} />
                 <span className="badge channel">{t("mods.sourceBadgeRepo")}</span>
               </span>
               <span className={`source-meta${s?.error ? " bad" : none ? " warn" : ""}`} data-testid="source-meta">

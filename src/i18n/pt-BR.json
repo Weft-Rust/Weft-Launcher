@@ -549,7 +549,13 @@
     "crashAllOff_other": "{n} mods de {0} desativados. Pressione Jogar para tentar sem eles.",
     "crashAllOn_one": "{n} mod de {0} reativado.",
     "crashAllOn_many": "{n} de mods de {0} reativados.",
-    "crashAllOn_other": "{n} mods de {0} reativados."
+    "crashAllOn_other": "{n} mods de {0} reativados.",
+    "checksPassed_one": "{n} verificação aprovada",
+    "checksPassed_many": "{n} de verificações aprovadas",
+    "checksPassed_other": "{n} verificações aprovadas",
+    "checksShow": "Mostrar",
+    "checksHide": "Ocultar",
+    "checksShowValues": "Mostrar valores completos"
   },
   "sizeUnits": {
     "B": "B",

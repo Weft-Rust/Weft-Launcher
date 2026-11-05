@@ -131,14 +131,19 @@ export function BrowseList({ report, locked }: BrowseListProps) {
                   {/* The name opens the mod's details: its whole summary, authors, versions and
                       checks, in one place rather than a tooltip per field. */}
                   <div className="mod-card-title">
-                    <button className="mod-name-btn" onClick={() => setOpen(mod)} aria-label={t("mods.detailsLabel", mod.name)}>
+                    <button
+                      className="mod-name-btn"
+                      onClick={() => setOpen(mod)}
+                      aria-label={t("mods.detailsLabel", mod.name)}
+                      aria-describedby={shown ? `${cardId}-tier` : undefined}
+                    >
                       <Truncate className="mod-name" text={mod.name} />
                     </button>
                   </div>
                   {/* The tier, the channel and the version (or why there is none to install),
                       each whole: what doesn't fit beside the others goes to the next line. */}
                   <div className="mod-badges">
-                    {shown && <TrustBadge trust={shown.trust} />}
+                    {shown && <TrustBadge trust={shown.trust} hintId={`${cardId}-tier`} />}
                     {best && <ChannelBadge channel={best.channel} />}
                     <span className="mod-card-version" data-must-fit>
                       {what}

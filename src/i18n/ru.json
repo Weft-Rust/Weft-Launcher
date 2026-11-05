@@ -581,7 +581,14 @@
     "crashAllOn_one": "Снова включён {n} мод для {0}.",
     "crashAllOn_few": "Снова включено {n} мода для {0}.",
     "crashAllOn_many": "Снова включено {n} модов для {0}.",
-    "crashAllOn_other": "Снова включено {n} мода для {0}."
+    "crashAllOn_other": "Снова включено {n} мода для {0}.",
+    "checksPassed_one": "{n} проверка пройдена",
+    "checksPassed_few": "{n} проверки пройдены",
+    "checksPassed_many": "{n} проверок пройдено",
+    "checksPassed_other": "{n} проверки пройдено",
+    "checksShow": "Показать",
+    "checksHide": "Скрыть",
+    "checksShowValues": "Показать полные значения"
   },
   "sizeUnits": {
     "B": "Б",

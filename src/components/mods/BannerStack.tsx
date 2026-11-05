@@ -67,7 +67,7 @@ export function BannerStack({ full, quiet }: { full: BannerItem[]; quiet: Banner
                     <span className="banner-cause" data-must-fit>
                       {first.cause}
                     </span>
-                    {first.subject && <Truncate className="banner-subject" text={first.subject} />}
+                    {first.subject && <Truncate focusable className="banner-subject" text={first.subject} />}
                   </>
                 ) : (
                   first.text

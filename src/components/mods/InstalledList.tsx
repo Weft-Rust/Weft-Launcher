@@ -36,6 +36,9 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
   const { t, tm } = useI18n();
   const { setEnabled, remove, isBusy, progressOf, nameIn, catalog } = useMods();
   const hintId = useId();
+  // The tier's meaning and the row's details, heard from the switch: the badge isn't a tab stop.
+  const tierId = useId();
+  const metaId = useId();
   const meta = modMeta(mod, tag, nameIn(tag), mod.status === "missingDeps" ? depStates(mod, report, catalog) : undefined, shadowOf(report, mod.id));
   const metaText = meta.parts.map(tm).join(" ");
   const working = isBusy(tag, mod.id);
@@ -99,7 +102,7 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
         </span>
         <span className="mod-badges">
           <ChannelBadge channel={mod.channel} />
-          {revoked ? <RevokedBadge reason={mod.revokedReason} /> : <TrustBadge trust={mod.trust} />}
+          {revoked ? <RevokedBadge reason={mod.revokedReason} hintId={tierId} /> : <TrustBadge trust={mod.trust} hintId={tierId} />}
         </span>
       </div>
       {/* The version, then what the launcher knows: a reason is never cut, other details (a
@@ -125,9 +128,11 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
           </button>
         )}
         {wide ? (
-          <span className="mod-reason">{metaText}</span>
+          <span className="mod-reason" id={metaId}>
+            {metaText}
+          </span>
         ) : (
-          <Truncate className="mod-meta-text" text={metaText} />
+          <Truncate className="mod-meta-text" text={metaText} id={metaId} />
         )}
         {!updating && mod.update && !canUpdate && updateWhy && (
           <span className="mod-update-why" data-must-fit>
@@ -142,6 +147,7 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
           role="switch"
           aria-checked={mod.enabled}
           aria-label={mod.name}
+          aria-describedby={`${tierId} ${metaId}`}
           disabled={disabled || revoked}
           onClick={onToggle}
           aria-expanded={askOn ? true : undefined}

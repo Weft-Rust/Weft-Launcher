@@ -72,7 +72,8 @@ export function Dialog({ title, subtitle, onClose, locked = false, children, foo
     };
 
     const onKey = (e: KeyboardEvent) => {
-      const popupOpen = e.target instanceof Element && !!e.target.closest('[aria-expanded="true"]');
+      // An open menu or list takes Escape first; a disclosure (a list shown in place) doesn't.
+      const popupOpen = e.target instanceof Element && !!e.target.closest('[aria-haspopup][aria-expanded="true"], [role=listbox], [role=menu]');
       // The focused element's own tooltip goes first: that element hides it on this Escape, and
       // the next one closes the dialog. Only a tip that belongs to the focused element counts,
       // never one the mouse left elsewhere.

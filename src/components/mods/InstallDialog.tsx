@@ -134,7 +134,7 @@ export function InstallDialog({ tag, mod, initialSha, allowPrerelease = false, o
           <TrustBadge trust={v.trust} /> <ChannelBadge channel={v.channel} />
           <span>{formatSize(v.size)}</span>
           <span>·</span>
-          <Truncate className="dialog-sub-by" text={t("mods.by", authors)} />
+          <Truncate focusable className="dialog-sub-by" text={t("mods.by", authors)} />
         </>
       }
       footer={

@@ -147,7 +147,7 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
         )}
         {report && effectiveTag && (
           <p className="mods-line">
-            <Truncate text={names.length ? t("mods.homeMods", effectiveTag, formatList(names)) : t("mods.homeModsNone", effectiveTag)} />
+            <Truncate focusable text={names.length ? t("mods.homeMods", effectiveTag, formatList(names)) : t("mods.homeModsNone", effectiveTag)} />
             <button className="link-btn" onClick={onGoToMods}>
               {names.length ? t("mods.homeChange") : t("mods.homeAdd")}
             </button>

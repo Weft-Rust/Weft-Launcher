@@ -196,7 +196,7 @@ export async function confirmRemove(_page: Page, button: Locator) {
  * Elements marked `data-must-fit` (a tier word, a reason, a version, a cause, an installed mod's
  * name, an error) that don't show whole: their text is wider or taller than their own box, or an
  * ancestor that clips cuts them. Ancestors that scroll end the search: what is in a scroller is
- * reached by scrolling. Empty when every one is whole.
+ * reached by scrolling. So does a fixed ancestor, which only the window clips. Empty when every one is whole.
  */
 export const unfit = (page: Page) =>
   page.evaluate(() => {
@@ -213,7 +213,11 @@ export const unfit = (page: Page) =>
         const s = getComputedStyle(a);
         const overflow = s.overflowX + " " + s.overflowY;
         if (/auto|scroll/.test(overflow)) break;
-        if (!/hidden|clip/.test(overflow)) continue;
+        if (!/hidden|clip/.test(overflow)) {
+          // A fixed box (a dialog's scrim) is placed by the window: no ancestor above it clips it.
+          if (s.position === "fixed") break;
+          continue;
+        }
         const c = a.getBoundingClientRect();
         if (r.left < c.left - 0.5 || r.right > c.right + 0.5 || r.top < c.top - 0.5 || r.bottom > c.bottom + 0.5) {
           bad.push(`${name}: cut by .${String(a.className).split(" ").join(".")}`);

@@ -319,7 +319,7 @@ test.describe("every install shows what it does", () => {
     await page.locator(".mod-card", { hasText: "Glowmoss" }).locator("button.btn-primary").click();
     const claimed = page.locator(".checks li", { hasText: "the repo says" });
     await expect(claimed).toHaveClass(/check-unknown/);
-    const spoken = await page.locator(".checks li").evaluateAll((rows) => rows.map((r) => r.querySelector(".sr-only")?.textContent ?? ""));
+    const spoken = await page.locator(".checks li:not([data-check=fold])").evaluateAll((rows) => rows.map((r) => r.querySelector(".sr-only")?.textContent ?? ""));
     expect(spoken.length).toBeGreaterThan(0);
     for (const s of spoken) expect(s).toMatch(/Passed|Failed|Unknown|Unreviewed/);
     // Nobody reviewed it: heard as the tier's word, not as a failed check.
@@ -889,7 +889,7 @@ test.describe("keyboard", () => {
     await opener.click();
     await expect(page.locator(dialog)).toBeVisible();
     // The plan is in before anything is counted: the tab order is the final one.
-    await expect(page.locator(`${dialog} .checks .check`).first()).toBeVisible();
+    await expect(page.locator(`${dialog} .checks .check:not([hidden])`).first()).toBeVisible();
     const first = await focused(page);
     expect(first.inDialog).toBe(true);
     expect(first.text).toBe("Cancel");
@@ -909,47 +909,38 @@ test.describe("keyboard", () => {
     await expect(opener).toBeFocused();
   });
 
-  test("Escape on a hash first closes its tooltip, then the dialog", async ({ page }) => {
+  test("one control shows the checks that passed and every full hash, with no tab stop per value", async ({ page }) => {
     await open(page, "scenario=mods");
     await goToTab(page, MODS_TAB);
-    const opener = page.locator(".mod-row[data-mod=structures] .update-btn-row");
-    await opener.click();
-    const hash = page.locator(`${dialog} .code-short`).first();
-    await expect(hash).toBeVisible();
-    await hash.focus();
-    await expect(page.locator(".tip")).toHaveCount(1);
-    // First Escape: the tip goes, the dialog and focus stay.
+    await page.locator(".mod-row[data-mod=lanterns] .update-btn-row").click();
+    const d = page.locator(dialog);
+    const fold = d.locator(".check-fold");
+    await expect(fold).toContainText(/\d+ checks passed · Show/);
+    // What failed or isn't known is in view; what passed is folded.
+    await expect(d.locator(".check-unknown:not([hidden])").first()).toBeVisible();
+    await expect(d.locator(".check-yes[hidden]").first()).toBeAttached();
+    // No hash, commit or badge in the dialog is a tab stop.
+    expect(await d.locator(".code-short[tabindex], .badge[tabindex]").count()).toBe(0);
+    const button = fold.locator("button");
+    await expect(button).toHaveAttribute("aria-expanded", "false");
+    await button.focus();
+    await page.keyboard.press("Enter");
+    await expect(button).toHaveAttribute("aria-expanded", "true");
+    await expect(button).toHaveText("Hide");
+    await expect(d.locator(".check[hidden]")).toHaveCount(0);
+    // Every shortened value is whole now.
+    await expect(d.locator(".code-short")).toHaveCount(0);
+    expect(await d.locator(".code-full").evaluateAll((c) => c.some((x) => /^[0-9a-f]{64}$/.test(x.textContent ?? "")))).toBe(true);
+    await expectWhole(page, "checks shown whole");
     await page.keyboard.press("Escape");
-    await expect(page.locator(".tip")).toHaveCount(0);
-    await expect(page.locator(dialog)).toHaveCount(1);
-    await expect(hash).toBeFocused();
-    // Second Escape: the dialog closes, and focus goes back to the opener.
-    await page.keyboard.press("Escape");
-    await expect(page.locator(dialog)).toHaveCount(0);
-    await expect(opener).toBeFocused();
-  });
-
-  test("a tooltip the mouse left elsewhere doesn't hold a dialog open", async ({ page }) => {
-    await open(page, "scenario=mods");
-    await goToTab(page, MODS_TAB);
-    await page.locator(".mod-row[data-mod=structures] .update-btn-row").click();
-    const hashes = page.locator(`${dialog} .code-short`);
-    await expect.poll(() => hashes.count()).toBeGreaterThanOrEqual(2);
-    // The mouse rests on one hash while the keyboard is on another: one tip, the focused one's.
-    await hashes.nth(0).hover();
-    await expect(page.locator(".tip")).toHaveCount(1);
-    await hashes.nth(1).focus();
-    await expect(page.locator(".tip")).toHaveCount(1);
-    await page.keyboard.press("Escape");
-    await expect(page.locator(".tip")).toHaveCount(0);
-    await page.keyboard.press("Escape");
-    await expect(page.locator(dialog)).toHaveCount(0);
+    await expect(d).toHaveCount(0);
   });
 
   test("a tooltip under the mouse doesn't stop Escape on Cancel", async ({ page }) => {
     await open(page, "scenario=mods");
     await goToTab(page, MODS_TAB);
-    await page.locator(".mod-row[data-mod=structures] .update-btn-row").click();
+    // Lanterns is Unreviewed: its download pin is unknown, so that row (with its hash) shows.
+    await page.locator(".mod-row[data-mod=lanterns] .update-btn-row").click();
     await page.locator(`${dialog} .code-short`).first().hover();
     await expect(page.locator(".tip")).toHaveCount(1);
     await page.locator(`${dialog} [data-autofocus]`).focus();

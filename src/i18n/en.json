@@ -517,7 +517,12 @@
     "crashAllOff_one": "Turned off {n} mod for {0}. Press Play to try without it.",
     "crashAllOff_other": "Turned off {n} mods for {0}. Press Play to try without them.",
     "crashAllOn_one": "Turned {n} mod for {0} back on.",
-    "crashAllOn_other": "Turned {n} mods for {0} back on."
+    "crashAllOn_other": "Turned {n} mods for {0} back on.",
+    "checksPassed_one": "{n} check passed",
+    "checksPassed_other": "{n} checks passed",
+    "checksShow": "Show",
+    "checksHide": "Hide",
+    "checksShowValues": "Show full values"
   },
   "sizeUnits": {
     "B": "B",

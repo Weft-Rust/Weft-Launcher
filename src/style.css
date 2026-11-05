@@ -531,6 +531,9 @@ button:disabled { cursor: not-allowed; }
 .dialog-field-value { color: var(--a3); }
 .checks { display: grid; gap: 6px; margin-top: 16px; }
 .check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; align-items: start; line-height: 24px; }
+.check[hidden] { display: none; }
+.check-fold { color: var(--g5); }
+.check-fold:not(.check-yes) .check-mark { background: none; }
 .check-mark { width: 24px; height: 24px; display: grid; place-items: center; }
 .check-yes .check-mark { background: var(--v2); color: var(--ink); }
 .check-no .check-mark { background: var(--r2); color: var(--ink); }
@@ -609,8 +612,12 @@ button:disabled { cursor: not-allowed; }
 .truncate.lines-1 { display: inline-block; max-width: 100%; vertical-align: bottom; white-space: nowrap; text-overflow: ellipsis; }
 .truncate.lines-2 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
 .truncate.lines-3 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow-wrap: anywhere; }
-.truncate[tabindex]:focus-visible, .code-short:focus-visible { outline: var(--px) solid var(--pale); outline-offset: 0; }
+.truncate[tabindex]:focus-visible { outline: var(--px) solid var(--pale); outline-offset: 0; }
+/* A row with focus in it shows its cut details whole: the keyboard reads them there, with no tab
+   stop per line. (A card's summary is whole in its details, one press on its name.) */
+.mod-row:focus-within .truncate.is-cut { display: block; white-space: normal; overflow: visible; overflow-wrap: anywhere; -webkit-line-clamp: unset; }
 .code-short { cursor: help; }
+.code-full { overflow-wrap: anywhere; }
 .tip {
   position: fixed; z-index: 40; max-width: 320px; padding: 4px 8px;
   background: var(--ink); color: var(--pale); box-shadow: 0 0 0 var(--px) var(--g3);
