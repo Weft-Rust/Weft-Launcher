@@ -41,6 +41,11 @@ describe("bannerPlan", () => {
     expect(ids(p.toasts)).toEqual(["notice:3", "error"]);
   });
 
+  it("says a damaged list of sources before the sources it lists", () => {
+    const p = bannerPlan({ ...base, sourcesDamaged: true, sources: ["a/b"], unmanaged: true });
+    expect(ids(p.quiet)).toEqual(["sourcesDamaged", "source:a/b", "unmanaged"]);
+  });
+
   it("ranks copies in the player's folder before the folder itself", () => {
     const p = bannerPlan({ ...base, shadowed: true, unmanaged: true, abiUnknown: true });
     expect(ids(p.quiet)).toEqual(["abi", "shadowed", "unmanaged"]);

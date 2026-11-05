@@ -52,6 +52,7 @@ export function catalog(mods: CatalogMod[], extra: Partial<Catalog> = {}): Catal
     sources: [],
     weft: [],
     platform: "linux-x64",
+    sourcesError: null,
     ...extra,
   };
 }

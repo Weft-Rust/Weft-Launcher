@@ -69,14 +69,14 @@ export const FLAGS: Flag[] = [
     name: "fail",
     values: ["install", "network", "toolarge", "dep", "meanwhile", "catalog", "sources"],
     description:
-      "Comma-separated. Installs fail at the hash check, mid-download, before it, or while downloading a dependency; `meanwhile` publishes a newer Glowmoss after the first plan, so a plan with Glowmoss in it is refused as changed and planned again; the catalogue or the source list fails to load.",
+      "Comma-separated. Installs fail at the hash check, mid-download, before it, or while downloading a dependency; `meanwhile` publishes a newer Glowmoss after the first plan, so a plan with Glowmoss in it is refused as changed and planned again; the catalogue fails to load; `sources` finds the list of sources damaged (kept aside, `ModSourcesDamaged`).",
   },
   {
     name: "file",
     values: ["unverified", "known", "notamod", "revoked", "revokedlate", "wrongplatform"],
     description: "What From file picks; `revokedlate` is revoked by the index while it is being installed.",
   },
-  { name: "shadow", values: ["<mod id>"], description: "The player's own mods folder has a copy of that mod, which loads when the launcher's is off or revoked. Showing the folder stands for the player deleting it." },
+  { name: "shadow", values: ["<mod id>"], description: "The player's own mods folder has a copy of that mod, which loads when the launcher's is off or revoked. Showing the folder only opens it; tests stand in for the player deleting the file with `window.mockPlayer.deleteFile(name)`." },
   {
     name: "revocations",
     values: ["messy"],

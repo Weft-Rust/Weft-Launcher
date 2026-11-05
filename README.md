@@ -88,9 +88,9 @@ Pick a state with `?scenario=` and adjust it with flags, which combine: `?scenar
 | `source` | `ok`, `notfound`, `ratelimited`, `offline` | State of the added GitHub source. |
 | `revoked` | `<mod id>` | Revokes the installed builds of that mod. |
 | `abi` | `error` | The game version's mod interface can't be found out. |
-| `fail` | `install`, `network`, `toolarge`, `dep`, `meanwhile`, `catalog`, `sources` | Comma-separated. Installs fail at the hash check, mid-download, before it, or while downloading a dependency; `meanwhile` publishes a newer Glowmoss after the first plan, so a plan with Glowmoss in it is refused as changed and planned again; the catalogue or the source list fails to load. |
+| `fail` | `install`, `network`, `toolarge`, `dep`, `meanwhile`, `catalog`, `sources` | Comma-separated. Installs fail at the hash check, mid-download, before it, or while downloading a dependency; `meanwhile` publishes a newer Glowmoss after the first plan, so a plan with Glowmoss in it is refused as changed and planned again; the catalogue fails to load; `sources` finds the list of sources damaged (kept aside, `ModSourcesDamaged`). |
 | `file` | `unverified`, `known`, `notamod`, `revoked`, `revokedlate`, `wrongplatform` | What From file picks; `revokedlate` is revoked by the index while it is being installed. |
-| `shadow` | `<mod id>` | The player's own mods folder has a copy of that mod, which loads when the launcher's is off or revoked. Showing the folder stands for the player deleting it. |
+| `shadow` | `<mod id>` | The player's own mods folder has a copy of that mod, which loads when the launcher's is off or revoked. Showing the folder only opens it; tests stand in for the player deleting the file with `window.mockPlayer.deleteFile(name)`. |
 | `revocations` | `messy` | Revocations come with uppercase hashes, no reason or time, and one entry that isn't a hash: they still revoke, and only that one is dropped. |
 | `chain` | `1` | Adds Chimneys and Junctions, which need mods that need others. |
 | `crash` | `wrongVersion`, `loadFailed`, `notAMod`, `wrongName`, `missingDep`, `initPanicked`, `exit` | Play starts the game and it stops with this failure; `exit` is a crash that names no mod. |

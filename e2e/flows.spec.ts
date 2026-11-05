@@ -74,7 +74,12 @@ test.describe("launch safety", () => {
     await goToTab(page, MODS_TAB);
     const blocker = page.locator(".blockers.in-banner .blocker", { hasText: "cogwork-old.zip" });
     await blocker.locator("button", { hasText: "Show cogwork-old.zip" }).click();
+    // Showing the folder alone changes nothing.
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.waitForTimeout(300);
+    await expect(blocker).toHaveCount(1);
     // The player deletes it in the folder that opened; back in the launcher, it looks again.
+    await page.evaluate(() => (window as unknown as { mockPlayer: { deleteFile(f: string): void } }).mockPlayer.deleteFile("cogwork-old.zip"));
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(blocker).toHaveCount(0);
     await expect(page.locator(".mod-row[data-mod=cogwork]")).not.toHaveAttribute("data-shadowed", "true");
@@ -256,8 +261,8 @@ test.describe("operations", () => {
   test("progress names the file, and Cancel stops it calmly with nothing changed", async ({ page }) => {
     const d = await updateLanterns(page, "scenario=mods&slow=1");
     await d.locator(".dialog-actions .btn-primary").click();
-    // The dependency comes first: file 1 of 2.
-    await expect(d.locator(".progress-label")).toHaveText(/^File 1 of 2: Glowmoss, (waiting|downloading \d+%)/);
+    // As the backend works: the build asked for first, then what it needs. File 1 of 2.
+    await expect(d.locator(".progress-label")).toHaveText(/^File 1 of 2: Lanterns, downloading \d+%/);
     await d.locator(".progress-cancel").click();
     await expect(d.getByTestId("cancelled-note")).toHaveText("Cancelled. Nothing was changed.", { timeout: 15_000 });
     await expect(d.locator(".inline-error, [role=alert]")).toHaveCount(0);
@@ -336,6 +341,50 @@ test.describe("keyboard", () => {
     await page.keyboard.press("Home");
     await page.keyboard.press("ArrowLeft");
     expect((await focused(page)).text).toMatch(/^Release Notes/);
+  });
+
+  test("arrows move from the tab that has focus, not the one selected", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    // Mods is selected; focus is on Home.
+    await page.locator(".tab-btn").first().focus();
+    await page.keyboard.press("ArrowRight");
+    expect((await focused(page)).text).toMatch(/^Versions/);
+    await page.keyboard.press("ArrowLeft");
+    expect((await focused(page)).text).toMatch(/^Home/);
+  });
+
+  test("Tab and Shift+Tab go through an error's Details inside a dialog, in order", async ({ page }) => {
+    await open(page, "scenario=mods&fail=sources");
+    await goToTab(page, MODS_TAB);
+    await page.locator(".header-actions button", { hasText: "Sources" }).click();
+    const summary = page.locator(`${dialog} .inline-error summary`);
+    await expect(summary).toBeVisible();
+    // The dialog's tab stops in document order.
+    const stops = await page.locator(dialog).evaluate((d) =>
+      [...d.querySelectorAll<HTMLElement>("button, input, summary, [href], [tabindex]")]
+        .filter((e) => e.tabIndex >= 0 && !(e as HTMLButtonElement).disabled && e.getClientRects().length > 0)
+        .map((e) => e.textContent?.trim() || e.getAttribute("placeholder") || e.tagName)
+    );
+    const at = stops.indexOf("Details");
+    expect(at, "Details is a tab stop").toBeGreaterThan(0);
+    const name = () => page.evaluate(() => { const a = document.activeElement as HTMLElement; return a.textContent?.trim() || a.getAttribute("placeholder") || a.tagName; });
+    await summary.focus();
+    await page.keyboard.press("Tab");
+    expect(await name()).toBe(stops[at + 1]);
+    await page.keyboard.press("Shift+Tab");
+    expect(await name()).toBe("Details");
+    await page.keyboard.press("Shift+Tab");
+    expect(await name()).toBe(stops[at - 1]);
+    // All the way round, forward, through Details and back to where it started.
+    await summary.focus();
+    const seen: string[] = [];
+    for (let i = 0; i < stops.length; i++) {
+      await page.keyboard.press("Tab");
+      seen.push(await name());
+    }
+    expect(seen.at(-1)).toBe("Details");
+    expect(new Set(seen).size).toBe(stops.length);
   });
 
   test("Installed/Browse switch follows the arrows", async ({ page }) => {
@@ -432,6 +481,10 @@ test.describe("degraded states", () => {
     await page.locator(".header-actions button", { hasText: "Sources" }).click();
     await expect(page.getByTestId("index-meta")).toContainText(/signed Sep 21: revocations since then may be missing/);
     const index = page.locator(".source-row").first();
+    // The index has its own state, never a mod's green Reviewed: signed, and amber when old.
+    await expect(index.locator(".badge[class*=trust-]")).toHaveCount(0);
+    await expect(index.locator(".index-badge")).toHaveClass(/stale/);
+    await expect(index.locator(".index-badge")).toHaveText("Signed Sep 21 · may be out of date");
     await expect(index.locator("button", { hasText: "Retry" })).toHaveCount(1);
     const source = page.locator(".source-row", { hasText: "lantern-dev/lanterns" });
     await expect(source).toContainText("GitHub is limiting requests, so lantern-dev/lanterns couldn't be refreshed.");
@@ -460,6 +513,54 @@ test.describe("degraded states", () => {
     await input.fill("nobody/nothing-here");
     await page.keyboard.press("Enter");
     await expect(page.locator(`${dialog} .inline-error`)).toContainText("No such GitHub repo: nobody/nothing-here");
+  });
+});
+
+test.describe("sources", () => {
+  test("a fresh index is signed and verified, not Reviewed", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    await page.locator(".header-actions button", { hasText: "Sources" }).click();
+    const badge = page.locator(".source-row").first().locator(".index-badge");
+    await expect(badge).toHaveClass(/ok/);
+    await expect(badge).toHaveText("Signed · verified Nov 4");
+    await expect(page.locator(`${dialog} .trust-reviewed`)).toHaveCount(0);
+  });
+
+  test("a source added is checked while the dialog is open, and one with no mods says why", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    await page.locator(".header-actions button", { hasText: "Sources" }).click();
+    await page.locator(`${dialog} input`).fill("glow-team/fireflies");
+    await page.keyboard.press("Enter");
+    const row = page.locator(".source-row[data-repo='glow-team/fireflies']");
+    await expect(row).toHaveCount(1);
+    // Before Close: what GitHub has there, and what a source needs.
+    await expect(row.getByTestId("source-meta")).toHaveText(
+      "No compatible mod releases found: no release has an <id>.zip with its <id>.mod.json. What a source needs",
+      { timeout: 10_000 }
+    );
+    await expect(row.getByTestId("source-meta")).toHaveClass(/warn/);
+    await expect(row.locator(".link-btn", { hasText: "What a source needs" })).toHaveCount(1);
+  });
+
+  test("a damaged list of sources is kept and said, and a new one can be started", async ({ page }) => {
+    await open(page, "scenario=mods&fail=sources");
+    await goToTab(page, MODS_TAB);
+    // Said on the Mods tab too, never shown as "no sources".
+    await browse(page);
+    const toggle = page.locator(".banner-toggle");
+    if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
+    await expect(page.locator(".banner-group .banner", { hasText: "Your list of sources couldn't be read" })).toHaveCount(1);
+    await page.locator(".header-actions button", { hasText: "Sources" }).click();
+    const d = page.locator(dialog);
+    await expect(d.locator(".inline-error")).toContainText("Your list of mod sources couldn't be read, so it was set aside and kept.");
+    await d.locator(".inline-error summary").click();
+    await expect(d.locator(".inline-error code")).toContainText("sources.damaged-");
+    await d.locator("input").fill("lantern-dev/lanterns");
+    await page.keyboard.press("Enter");
+    await expect(d.locator(".source-row[data-repo='lantern-dev/lanterns']")).toHaveCount(1);
+    await expect(d.locator(".inline-error")).toHaveCount(0);
   });
 });
 

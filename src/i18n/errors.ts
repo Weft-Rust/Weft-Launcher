@@ -48,6 +48,7 @@ export const ERROR_KEY: Record<ErrorCode, MessageKey> = {
   ModsBlocked: 'errors.modsBlocked',
   ModSourceInvalid: 'errors.modSourceInvalid',
   ModSourceNotFound: 'errors.modSourceNotFound',
+  ModSourcesDamaged: 'errors.modSourcesDamaged',
   ModSourceRateLimited: 'errors.modSourceRateLimited',
   ModDownloadNotFound: 'errors.modDownloadNotFound',
   ModTooLarge: 'errors.modTooLarge',

@@ -22,6 +22,8 @@ export interface BannerFacts {
   refreshFailed: boolean;
   /** Sources whose last refresh failed, by repo. */
   sources: string[];
+  /** The list of sources couldn't be read; it was kept aside. */
+  sourcesDamaged?: boolean;
   /** The version's mod interface couldn't be found out. */
   abiUnknown: boolean;
   /** Copies in the player's own folder load instead of managed mods that are off. */
@@ -59,6 +61,7 @@ export function bannerPlan(f: BannerFacts): { full: Placed[]; quiet: Placed[]; t
   }
   if (f.refreshFailed) quiet.push({ id: "refresh", rank: 0 });
   if (f.indexTrouble || (f.index !== null && f.index !== "fresh")) quiet.push({ id: "index", rank: 0.5 });
+  if (f.sourcesDamaged) quiet.push({ id: "sourcesDamaged", rank: 1.5 });
   for (const repo of f.sources) quiet.push({ id: `source:${repo}`, rank: 2 });
   if (f.abiUnknown) quiet.push({ id: "abi", rank: 3 });
   if (f.shadowed) quiet.push({ id: "shadowed", rank: 3.5 });

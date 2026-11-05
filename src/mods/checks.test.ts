@@ -274,6 +274,7 @@ describe("fileChecks", () => {
     summary: null,
     fitsSystem: true,
     catalogMatch: null,
+    revoked: false,
     revokedReason: null,
     replaces: null,
     planToken: "plan-f",
@@ -303,8 +304,8 @@ describe("fileChecks", () => {
   it("refuses files that aren't mods, are for another system or were revoked", () => {
     expect(fileVerdict(inspection({ archive: null })).usable).toBe(false);
     expect(fileVerdict(inspection({ fitsSystem: false })).usable).toBe(false);
-    expect(fileVerdict(inspection({ revokedReason: "bad" })).usable).toBe(false);
-    expect(row(fileChecks(inspection({ revokedReason: "bad" }), "v"), "revoked")?.state).toBe("no");
+    expect(fileVerdict(inspection({ revoked: true, revokedReason: "bad" })).usable).toBe(false);
+    expect(row(fileChecks(inspection({ revoked: true, revokedReason: "bad" }), "v"), "revoked")?.state).toBe("no");
   });
 });
 
@@ -319,6 +320,7 @@ describe("file fit and replacing (contract R4 §5)", () => {
     summary: null,
     fitsSystem: true,
     catalogMatch: null,
+    revoked: false,
     revokedReason: null,
     replaces: null,
     planToken: "plan-f",

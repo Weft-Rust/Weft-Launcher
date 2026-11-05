@@ -78,7 +78,7 @@
     "executableNotFound": "Ejecutable no encontrado: {0}",
     "processSpawnFailed": "No se pudo iniciar el juego.",
     "logDirCreateFailed": "No se pudo crear la carpeta de registros.",
-    "gameFolderNotFound": "Carpeta del juego no encontrada: {0}",
+    "gameFolderNotFound": "Aún no se conoce la carpeta del juego. Inicia el juego una vez y el launcher la encontrará.",
     "unsupportedPlatform": "Ubicación de la carpeta del juego no confirmada en esta plataforma",
     "openerError": "No se pudo abrir.",
     "indexSignatureInvalid": "El índice de mods no pasó la comprobación de firma.",
@@ -106,7 +106,8 @@
     "modLockInvalid": "La lista de mods de esta versión está dañada, así que el launcher no la cambiará. Elimina la carpeta de mods de la versión o reinstala la versión.",
     "modUrlRefused": "Un enlace de descarga no apuntaba adonde dice la ficha del mod, así que el launcher lo rechazó. No se descargó nada.",
     "modIconInvalid": "El icono de este mod no es un PNG pequeño, así que no se muestra.",
-    "details": "Detalles"
+    "details": "Detalles",
+    "modSourcesDamaged": "No se pudo leer tu lista de fuentes de mods, así que se apartó y se guardó. Vuelve a añadir tus fuentes; la lista antigua está en Detalles."
   },
   "mods": {
     "title": "Mods",
@@ -455,7 +456,27 @@
     "toastsLabel": "Lo que acaba de pasar",
     "blockerLead": "Impide Jugar:",
     "blockWrongVersionTag": "Compilado para {0}.",
-    "blockWrongVersion": "Compilado para otra versión del juego."
+    "blockWrongVersion": "Compilado para otra versión del juego.",
+    "noReason": "No se indicó ningún motivo",
+    "statusRevokedNoReason": "Retirado del índice y desactivado. No se indicó ningún motivo.",
+    "ckRevokedNoReason": "Retirado del índice. No se indicó ningún motivo.",
+    "blockShadowedRevokedNoReason": "Retirado del índice, pero la copia de tu carpeta de mods ({0}) se cargaría en su lugar. No se indicó ningún motivo.",
+    "indexBadgeSigned": "Firmado · verificado el {0}",
+    "indexBadgeStale": "Firmado el {0} · puede estar desactualizado",
+    "indexBadgeCopy": "Copia firmada del {0}",
+    "indexBadgeNone": "Sin verificar",
+    "sourceBadgeRepo": "Repositorio de GitHub",
+    "sourcesChecking": "comprobando…",
+    "sourceNoMods": "No se encontraron versiones de mods compatibles:",
+    "sourceNoModsNoReleases": "todavía no tiene versiones publicadas.",
+    "sourceNoModsNoFiles": "ninguna versión tiene un <id>.zip con su <id>.mod.json.",
+    "sourceNoModsUnreadable": "no se pudo leer el <id>.mod.json de una versión.",
+    "sourceNoModsNoDigest": "GitHub no tiene el SHA-256 de sus zips, así que no se pueden comprobar.",
+    "sourceNoModsDisagrees": "el <id>.mod.json de una versión no coincide con esa versión en GitHub.",
+    "sourceNoModsInvalid": "sus versiones rompen una regla que cumple todo mod.",
+    "sourceFormatLink": "Qué necesita una fuente",
+    "sourcesDamaged": "No se pudo leer tu lista de fuentes; se guardó aparte. Vuelve a añadir tus fuentes en Fuentes.",
+    "sourcesDamagedShort": "No se pudo leer tu lista de fuentes"
   },
   "sizeUnits": {
     "B": "B",

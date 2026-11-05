@@ -336,11 +336,10 @@ export function ModsProvider({ children }: { children: ReactNode }) {
   const install = useCallback(
     (tag: string, plan: InstallPlan) => {
       const modId = plan.target.id;
-      // Dependencies are fetched first.
-      const first = plan.install[0] ?? plan.target;
+      // As the backend works (`plan::resolve`): the build asked for first, then what it needs.
       return run(
         { kind: "mod", tag, id: modId },
-        { sha256: first.sha256, modId: first.id, count: plan.install.length + 1 },
+        { sha256: plan.target.sha256, modId, count: plan.install.length + 1 },
         (operationId) => modsApi.install(tag, plan.target.sha256, plan.planToken, operationId),
         (r) => pushNotice(tag, describeChange(r, modId, tag, namer(r)))
       );
@@ -353,7 +352,8 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       const modId = inspection.archive?.id ?? "";
       return run(
         { kind: "mod", tag, id: modId },
-        { sha256: plan?.install[0]?.sha256 ?? inspection.sha256, modId: plan?.install[0]?.id ?? modId, count: (plan?.install.length ?? 0) + 1 },
+        // The file itself is checked first, then what it needs is fetched.
+        { sha256: inspection.sha256, modId, count: (plan?.install.length ?? 0) + 1 },
         (operationId) => modsApi.installFile(tag, path, inspection.sha256, inspection.planToken, operationId),
         (r) => pushNotice(tag, describeChange(r, modId, tag, namer(r)))
       );
@@ -396,7 +396,8 @@ export function ModsProvider({ children }: { children: ReactNode }) {
     (preview: CopyPreview) => {
       const { from, to } = preview;
       const items = preview.items.filter((i) => i.outcome === "install");
-      const first = preview.deps[0] ?? items[0];
+      // The copied mods first, in the source set's order, then what they need.
+      const first = items[0] ?? preview.deps[0];
       return run(
         { kind: "copy", tag: to },
         first ? { sha256: first.sha256 ?? "", modId: first.id, count: items.length + preview.deps.length } : null,

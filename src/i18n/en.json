@@ -78,7 +78,7 @@
     "executableNotFound": "Executable not found: {0}",
     "processSpawnFailed": "Couldn't start the game.",
     "logDirCreateFailed": "Couldn't create the log folder.",
-    "gameFolderNotFound": "Game folder not found: {0}",
+    "gameFolderNotFound": "The game folder isn't known yet. Start the game once, and the launcher finds it.",
     "unsupportedPlatform": "Game folder location not confirmed on this platform",
     "openerError": "Couldn't open it.",
     "indexSignatureInvalid": "The mod index failed its signature check.",
@@ -106,7 +106,8 @@
     "modLockInvalid": "This version's mod list is damaged, so the launcher won't change it. Remove the version's mods folder or reinstall the version.",
     "modUrlRefused": "A download link didn't point where the mod's listing says it should, so the launcher refused it. Nothing was downloaded.",
     "modIconInvalid": "This mod's icon isn't a small PNG, so it isn't shown.",
-    "details": "Details"
+    "details": "Details",
+    "modSourcesDamaged": "Your list of mod sources couldn't be read, so it was set aside and kept. Add your sources again; the old list is behind Details."
   },
   "mods": {
     "title": "Mods",
@@ -436,7 +437,27 @@
     "toastsLabel": "What just happened",
     "blockerLead": "Stops Play:",
     "blockWrongVersionTag": "Built for {0}.",
-    "blockWrongVersion": "Built for another game version."
+    "blockWrongVersion": "Built for another game version.",
+    "noReason": "No reason given",
+    "statusRevokedNoReason": "Pulled from the index and turned off. No reason given.",
+    "ckRevokedNoReason": "Pulled from the index. No reason given.",
+    "blockShadowedRevokedNoReason": "Pulled from the index, but your own mods folder's copy ({0}) would load instead. No reason given.",
+    "indexBadgeSigned": "Signed · verified {0}",
+    "indexBadgeStale": "Signed {0} · may be out of date",
+    "indexBadgeCopy": "Signed copy from {0}",
+    "indexBadgeNone": "Not verified",
+    "sourceBadgeRepo": "GitHub repo",
+    "sourcesChecking": "checking…",
+    "sourceNoMods": "No compatible mod releases found:",
+    "sourceNoModsNoReleases": "it has no releases yet.",
+    "sourceNoModsNoFiles": "no release has an <id>.zip with its <id>.mod.json.",
+    "sourceNoModsUnreadable": "a release's <id>.mod.json couldn't be read.",
+    "sourceNoModsNoDigest": "GitHub has no SHA-256 for its zips, so they can't be checked.",
+    "sourceNoModsDisagrees": "a release's <id>.mod.json doesn't match that release on GitHub.",
+    "sourceNoModsInvalid": "its releases break a rule every mod follows.",
+    "sourceFormatLink": "What a source needs",
+    "sourcesDamaged": "Your list of sources couldn't be read; it was kept aside. Add your sources again in Sources.",
+    "sourcesDamagedShort": "Your list of sources couldn't be read"
   },
   "sizeUnits": {
     "B": "B",

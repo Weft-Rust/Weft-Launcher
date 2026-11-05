@@ -60,11 +60,17 @@ export function findBuild(catalog: Catalog, sha256: string): { mod: CatalogMod; 
   return undefined;
 }
 
-/** Hashes compare without case (contract R4 §6). */
-export function revocation(catalog: Catalog, sha256: string): string | null {
+/**
+ * The catalogue's revocation of a hash, compared without case (contract R4 §6). Revoked is the
+ * record, never whether it gave a reason: `reason` may be null.
+ */
+export function revocation(catalog: Catalog, sha256: string): { sha256: string; reason: string | null } | null {
   const s = sha256.toLowerCase();
-  return catalog.revoked.find((r) => r.sha256.toLowerCase() === s)?.reason ?? null;
+  return catalog.revoked.find((r) => r.sha256.toLowerCase() === s) ?? null;
 }
+
+/** For an error's detail, the backend's own words. */
+const detailOf = (reason: string | null) => reason ?? "no reason given";
 
 /** One `revoked[]` entry as the index sends it: `at` and `reason` may be missing or null. */
 export interface RawRevocation {
@@ -73,15 +79,14 @@ export interface RawRevocation {
   at?: string | null;
 }
 
-export const NO_REASON = "No reason given";
-
 /**
  * `index::format` revocations, failing closed (contract R4 §6): hashes are lowercased, a missing
- * reason or time gets its default, and an entry is dropped only when its hash can't be a SHA-256
- * at all; `dropped` lists those, for the log.
+ * or empty reason is none (the page says "No reason given" in the player's language), a missing
+ * time unknown, and an entry is dropped only when its hash can't be a SHA-256 at all; `dropped`
+ * lists those, for the log.
  */
-export function readRevocations(entries: RawRevocation[]): { kept: { sha256: string; reason: string; at: string | null }[]; dropped: unknown[] } {
-  const kept: { sha256: string; reason: string; at: string | null }[] = [];
+export function readRevocations(entries: RawRevocation[]): { kept: { sha256: string; reason: string | null; at: string | null }[]; dropped: unknown[] } {
+  const kept: { sha256: string; reason: string | null; at: string | null }[] = [];
   const dropped: unknown[] = [];
   for (const e of entries) {
     const sha = typeof e.sha256 === "string" ? e.sha256.trim().toLowerCase() : "";
@@ -89,15 +94,17 @@ export function readRevocations(entries: RawRevocation[]): { kept: { sha256: str
       dropped.push(e.sha256);
       continue;
     }
-    const reason = typeof e.reason === "string" && e.reason.trim() ? e.reason : NO_REASON;
+    const reason = typeof e.reason === "string" && e.reason.trim() ? e.reason.trim() : null;
     kept.push({ sha256: sha, reason, at: typeof e.at === "string" ? e.at : null });
   }
   return { kept, dropped };
 }
 
-/** Revoked in the catalogue, or remembered in the lock (contract R3 §2). */
-export function entryRevocation(catalog: Catalog, e: Entry): string | null {
-  return revocation(catalog, e.sha256) ?? e.revoked?.reason ?? null;
+/** Revoked in the catalogue, or remembered in the lock (contract R3 §2), and why if it said. */
+export function entryRevocation(catalog: Catalog, e: Entry): { reason: string | null } | null {
+  if (e.revoked) return { reason: e.revoked.reason };
+  const r = revocation(catalog, e.sha256);
+  return r ? { reason: r.reason } : null;
 }
 
 const accepts = (fit: Fit, v: CatalogVersion) => v.abi === fit.abi && (v.platforms as string[]).includes(fit.platform);
@@ -162,10 +169,11 @@ export function report(
   const blockingReasons: Record<string, BlockingReason> = {};
   const shadowed: ShadowedMod[] = [];
   const mods: InstalledMod[] = lock.map((e) => {
-    const revokedReason = entryRevocation(catalog, e);
+    const revoked = entryRevocation(catalog, e);
+    const revokedReason = revoked?.reason ?? null;
     const missingDeps = e.deps.filter((d) => !BUILTIN.includes(d) && !enabled.has(d));
     const status: ModStatus =
-      revokedReason !== null
+      revoked !== null
         ? "revoked"
         : !e.enabled
           ? "off"
@@ -201,11 +209,11 @@ export function report(
 export function applyRevocations(lock: Entry[], catalog: Catalog, at: string): boolean {
   let changed = false;
   for (const e of lock) {
-    const reason = revocation(catalog, e.sha256);
-    if (reason === null) continue;
+    const r = revocation(catalog, e.sha256);
+    if (r === null) continue;
     if (e.enabled || !e.revoked) changed = true;
     e.enabled = false;
-    e.revoked ??= { reason, at };
+    e.revoked ??= { reason: r.reason, at };
   }
   return changed;
 }
@@ -481,7 +489,7 @@ export function consentOf(lock: Entry[], res: Resolution, abi: string | null, tu
 export function checkInstallable(catalog: Catalog, mod: CatalogMod, v: CatalogVersion, fit: Fit): AppErrorPayload | null {
   if (BUILTIN.includes(mod.id)) return err("ModIdReserved", mod.id);
   const r = revocation(catalog, v.sha256);
-  if (r !== null) return err("ModRevoked", `${mod.name}: ${r}`);
+  if (r !== null) return err("ModRevoked", `${mod.name}: ${detailOf(r.reason)}`);
   if (!(v.platforms as string[]).includes(fit.platform)) return err("ModNotForPlatform", mod.name);
   if (v.abi !== fit.abi) return err("ModIncompatible", mod.name);
   return null;
@@ -528,7 +536,7 @@ export function setEnabled(lock: Entry[], catalog: Catalog, id: string, enabled:
   if (!entry) throw err("ModNotInstalled", id);
   const revoked = (e: Entry) => {
     const r = entryRevocation(catalog, e);
-    return r === null ? null : err("ModRevoked", `${e.name}: ${r}`);
+    return r === null ? null : err("ModRevoked", `${e.name}: ${detailOf(r.reason)}`);
   };
   const alsoEnabled: string[] = [];
   const alsoDisabled: string[] = [];

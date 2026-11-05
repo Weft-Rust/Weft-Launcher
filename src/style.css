@@ -417,6 +417,12 @@ button:disabled { cursor: not-allowed; }
 .trust-unverified { background: var(--r3); color: var(--ink); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--r2); }
 /* Small text at 4.5:1 or more: #b9c1d3 on --g2 is 6.6:1, ink on #e0705a 5.2:1. */
 .badge.channel { background: var(--g2); color: #b9c1d3; }
+/* The index's own state, never a mod's tier: signed and checked (7.6:1), old or a saved copy
+   (amber, ink on --a2 8:1), or never verified (5.7:1). */
+.badge.index-badge.ok { background: var(--g2); color: var(--v3); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g1); }
+.badge.index-badge.stale { background: var(--a2); color: var(--ink); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--a1); }
+.badge.index-badge.none { background: var(--g2); color: var(--r3); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g1); }
+.source-meta.warn { color: var(--a3); }
 .badge.revoked { background: #e0705a; color: var(--ink); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--r1); }
 
 .mod-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }

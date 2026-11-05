@@ -10,7 +10,8 @@
 
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
-import { COMMANDS, EVENTS } from "../mods/ipc";
+import { EVENTS } from "../mods/ipc";
+import type { CommandSignatures } from "../mods/bindings/commands";
 import { parseRepo, sameRepo } from "../mods/select";
 import { SCENARIOS } from "./scenarios";
 import { CRASH_LOGS } from "./crashes";
@@ -28,6 +29,7 @@ import type {
   FailureKind,
   FileInspection,
   ModProgress,
+  NoModsReason,
   ProgressStage,
 } from "../mods/types";
 
@@ -229,6 +231,7 @@ const catalog: Catalog = {
             : sourceFlag === "offline"
               ? err("Network", "offline")
               : null,
+      noMods: null,
     },
   ],
   weft: [
@@ -236,6 +239,7 @@ const catalog: Catalog = {
     { tag: OLD, commit: "34fa22b0000000000000000000000000000000000", abi: ABI[OLD] },
   ],
   platform: PLATFORM,
+  sourcesError: null,
 };
 if (sourceFlag === "notfound") {
   catalog.mods = catalog.mods.filter((m) => m.origin.kind !== "source");
@@ -470,10 +474,9 @@ async function runInstall(
   const fit = fitOf(tag) ?? fail("AbiUnavailable", tag);
   if (token() !== expected) fail("ModChangedMeanwhile", tag);
   const res = R.resolve(catalog, lockOf(tag), wanted, fit);
-  // Dependencies first, then what was asked for.
-  const order = [...res.picks.filter((p) => !res.wanted.includes(p.mod.id)), ...res.picks.filter((p) => res.wanted.includes(p.mod.id))];
-  const files = order.map((p, i) => ({ sha256: p.v.sha256, id: p.mod.id, index: i + 1, count: order.length }));
-  for (const [i, p] of order.entries()) {
+  // In the backend's order (`plan::resolve`): what was asked for first, then what it needs.
+  const files = res.picks.map((p, i) => ({ sha256: p.v.sha256, id: p.mod.id, index: i + 1, count: res.picks.length }));
+  for (const [i, p] of res.picks.entries()) {
     if (!skipFetch.includes(p.v.sha256)) await fetchBuild(op, files[i], !res.wanted.includes(p.mod.id));
   }
   op.check();
@@ -530,14 +533,25 @@ function removeMod(tag: string, id: string): ChangeResult {
   return result(tag, { alsoDisabled: out.alsoDisabled, undo: id });
 }
 
-/** Contract R3 §6: the entry back exactly as it was, while its file is still in the store. */
-function restoreMod(tag: string, id: string): ChangeResult {
+/**
+ * Contract R3 §6: the entry back exactly as it was, while its file is still in the store. Runs as
+ * the page's operation, like `service::restore`: the stored file is checked (`verifying`), then
+ * written (`installing`), and a cancel before that leaves it removed.
+ */
+async function restoreMod(tag: string, id: string, operationId: string): Promise<ChangeResult> {
   if (running.has(tag)) fail("GameRunning", tag);
   const entry = removed[tag];
   if (!entry || entry.id !== id) fail("ModNotInstalled", id);
-  R.put(lockOf(tag), { ...entry! });
-  removed[tag] = undefined;
-  return result(tag);
+  return operation(operationId, async (op) => {
+    const file = { sha256: entry!.sha256, id, index: 1, count: 1 };
+    await progress(op, file, "verifying", 0);
+    await sleep(150);
+    op.check();
+    await progress(op, file, "installing", 100);
+    R.put(lockOf(tag), { ...entry! });
+    removed[tag] = undefined;
+    return result(tag);
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -574,7 +588,8 @@ function inspectBare(tag: string): Omit<FileInspection, "planToken"> {
       fitsSystem: true,
       // Contract R4 §5: unknown when the version's interface is.
       catalogMatch: { key: mod.key, name: mod.name, fitsVersion: abi === null ? null : v.abi === abi, build: v },
-      revokedReason: R.revocation(catalog, v.sha256),
+      revoked: R.revocation(catalog, v.sha256) !== null,
+      revokedReason: R.revocation(catalog, v.sha256)?.reason ?? null,
       replaces: lock.find((e) => e.id === "cogwork")?.name ?? null,
     };
   }
@@ -588,6 +603,7 @@ function inspectBare(tag: string): Omit<FileInspection, "planToken"> {
     summary: "Makes torches brighter.",
     fitsSystem: true,
     catalogMatch: null,
+    revoked: false,
     revokedReason: null,
     replaces: lock.find((e) => e.id === "mytweak")?.name ?? null,
   };
@@ -606,7 +622,7 @@ function inspectBare(tag: string): Omit<FileInspection, "planToken"> {
   if (kind === "wrongplatform") {
     return { ...base, fitsSystem: false, archive: { ...base.archive!, libraries: ["mytweak.dll"], platforms: ["windows-x64"] } };
   }
-  if (kind === "revoked") return { ...base, revokedReason: "Steals saved logins. Removed on 2026-11-03." };
+  if (kind === "revoked") return { ...base, revoked: true, revokedReason: "Steals saved logins. Removed on 2026-11-03." };
   return base;
 }
 
@@ -618,7 +634,7 @@ async function installFile(tag: string, sha256: string, planToken: string, opera
   const info = inspect(tag);
   if (info.sha256 !== sha256) fail("ModFileChanged");
   if (!info.archive) throw info.problem;
-  if (info.revokedReason) fail("ModRevoked", info.revokedReason);
+  if (info.revoked) fail("ModRevoked", info.revokedReason ?? "no reason given");
   if (running.has(tag)) fail("GameRunning", tag);
   if (info.planToken !== planToken) fail("ModChangedMeanwhile", tag);
   return operation(operationId, async (op) => {
@@ -636,7 +652,7 @@ async function installFile(tag: string, sha256: string, planToken: string, opera
     await sleep(300);
     // Contract R4 §2: revocation is checked again at commit, for an unknown file by its hash.
     const late = R.revocation(catalog, sha256);
-    if (late) fail("ModRevoked", late);
+    if (late) fail("ModRevoked", late.reason ?? "no reason given");
     const lock = lockOf(tag);
     const existing = lock.find((e) => e.id === fileEntry.id);
     R.put(lock, { ...fileEntry, enabled: existing?.enabled ?? true, installedAt: new Date().toISOString() });
@@ -697,115 +713,157 @@ function iconUrl(id: string): string {
 
 /** Repos that exist, as GitHub spells them. `add_mod_source` asks GitHub; anything else is a 404. */
 const KNOWN_REPOS = [LANTERN_REPO, "Zorro909/weft-mods", "glow-team/fireflies"];
-const RESTORE = "restore_mod";
+/** What GitHub has in repos added here: `glow-team/fireflies` publishes releases without mods. */
+const EMPTY_REPOS: Record<string, NoModsReason> = { "glow-team/fireflies": "noModFiles" };
+
+/** The mock's own file of sources, which `fail=sources` damages. */
+const DAMAGED_SOURCES = "/home/player/.local/share/weft-launcher/mods/sources.damaged-1762300800.json";
+let sourcesDamaged = failures.has("sources");
+if (sourcesDamaged) {
+  catalog.sources = [];
+  catalog.mods = catalog.mods.filter((m) => m.origin.kind !== "source");
+  catalog.sourcesError = err("ModSourcesDamaged", DAMAGED_SOURCES);
+}
+
+type Handlers = {
+  [K in keyof CommandSignatures]: (args: CommandSignatures[K]["args"]) => Promise<CommandSignatures[K]["result"]> | CommandSignatures[K]["result"];
+};
+
+/**
+ * Every backend command, typed by the generated `CommandSignatures`: a command added, renamed or
+ * changed in Rust fails `tsc` here until the mock follows.
+ */
+const handlers: Handlers = {
+  list_versions: () =>
+    versions.map((tag, i) => ({
+      tag,
+      name: tag,
+      published_at: i === 0 ? "2026-11-01T12:00:00Z" : "2026-10-20T12:00:00Z",
+      body: i === 0 ? "## What's new\n- A **mod manager** in the launcher\n- Faster world loading" : "",
+      prerelease: false,
+      asset: { name: `Weft-${tag}-linux-x64.tar.gz`, url: "", size: 48_000_000, sha256: "a".repeat(64) },
+      from_cache: false,
+    })),
+  install_version: () => fail("AlreadyInstalled"),
+  get_installed_versions: () => versions.map((tag) => ({ tag, path: `/versions/${tag}`, executable: "weft", installed_at: "2026-11-02T10:00:00Z" })),
+  remove_version: async ({ tag }) => {
+    await sleep(300);
+    versions.splice(versions.indexOf(tag), 1);
+    delete locks[tag];
+  },
+  launch_version: ({ tag }) => launch(tag),
+  get_running_versions: () => [...running],
+  open_game_folder: () => undefined,
+  open_log: () => undefined,
+  // Opening the folder only opens it; the player deleting a file there is `mockPlayer.deleteFile`.
+  open_player_mods_folder: () => undefined,
+  list_mod_catalog: async ({ forceRefresh }) => {
+    await sleep(forceRefresh ? 400 : 0);
+    if (failures.has("catalog")) fail("Network", "the catalogue request timed out");
+    return structuredClone(catalog);
+  },
+  get_mod_sources: async () => {
+    await sleep(150);
+    if (sourcesDamaged) fail("ModSourcesDamaged", DAMAGED_SOURCES);
+    return catalog.sources.map((s) => s.repo);
+  },
+  add_mod_source: async ({ repo: input }) => {
+    await sleep(500);
+    const repo = parseRepo(input) ?? fail("ModSourceInvalid", input);
+    if (sourceFlag === "ratelimited") fail("ModSourceRateLimited", repo);
+    const canonical = KNOWN_REPOS.find((k) => sameRepo(k, repo)) ?? fail("ModSourceNotFound", repo);
+    // A damaged list stays where it was set aside; this starts a new one.
+    if (sourcesDamaged) {
+      sourcesDamaged = false;
+      catalog.sourcesError = null;
+    }
+    if (!catalog.sources.some((s) => sameRepo(s.repo, canonical))) {
+      catalog.sources.push({ repo: canonical, mods: 0, freshness: "unavailable", checked: null, error: null, noMods: null });
+      addedSources.add(canonical);
+    }
+    return catalog.sources.map((s) => s.repo);
+  },
+  remove_mod_source: async ({ repo }) => {
+    await sleep(400);
+    if (sourcesDamaged) fail("ModSourcesDamaged", DAMAGED_SOURCES);
+    // Mods installed from it stay installed; they just stop getting updates.
+    catalog.sources = catalog.sources.filter((s) => !sameRepo(s.repo, repo));
+    catalog.mods = catalog.mods.filter((m) => m.origin.kind !== "source" || !sameRepo(m.origin.repo, repo));
+    return catalog.sources.map((s) => s.repo);
+  },
+  get_mod_profile: ({ tag }) => report(tag),
+  get_mod_icon: ({ url }) => iconUrl(url.replace("mock://", "")),
+  plan_mod_install: async ({ tag, sha256 }) => {
+    await sleep(120);
+    return R.planInstall(catalog, lockOf(tag), tag, sha256, fitOf(tag), running.has(tag));
+  },
+  install_mod: ({ tag, sha256, planToken, operationId }) => installMod(tag, sha256, planToken, operationId),
+  inspect_mod_file: async ({ tag }) => {
+    await sleep(300);
+    return inspect(tag);
+  },
+  install_mod_file: ({ tag, sha256, planToken, operationId }) => installFile(tag, sha256, planToken, operationId),
+  set_mod_enabled: async ({ tag, id, enabled }) => {
+    await sleep(150);
+    return setEnabled(tag, id, enabled);
+  },
+  remove_mod: async ({ tag, id }) => {
+    await sleep(150);
+    return removeMod(tag, id);
+  },
+  restore_mod: ({ tag, id, operationId }) => restoreMod(tag, id, operationId),
+  preview_copy_mod_profile: async ({ from, to }) => {
+    await sleep(200);
+    return previewCopy(from, to).preview;
+  },
+  copy_mod_profile: ({ from, to, planToken, operationId }) => copyProfile(from, to, planToken, operationId),
+  cancel_mod_operation: ({ operationId }) => {
+    const op = operations.get(operationId);
+    if (op) op.cancelled = true;
+    return !!op;
+  },
+};
+
+/** Sources added in this session: refreshing the catalogue fetches them, as GitHub would answer. */
+const addedSources = new Set<string>();
+function refreshAddedSources() {
+  for (const s of catalog.sources) {
+    if (!addedSources.has(s.repo)) continue;
+    s.freshness = "fresh";
+    s.checked = new Date().toISOString();
+    s.noMods = EMPTY_REPOS[s.repo] ?? null;
+  }
+}
+
+/** What the player does outside the launcher, for tests: `window.mockPlayer.deleteFile(name)`. */
+const mockPlayer = {
+  /** Deletes a file from the player's own mods folder, as they would after Show folder. */
+  deleteFile(file: string) {
+    const at = playerFolder.findIndex((f) => f.file === file);
+    if (at >= 0) playerFolder.splice(at, 1);
+  },
+};
+
+/** The plugin commands the page calls, which aren't the backend's own. */
+const plugins: Record<string, () => unknown> = {
+  "plugin:app|version": () => "1.2.0",
+  "plugin:updater|check": () => null,
+  "plugin:dialog|open": () => (flag("file") === "known" ? "/home/player/Downloads/cogwork.zip" : "/home/player/Downloads/mytweak.zip"),
+  "plugin:opener|open_url": () => null,
+  "plugin:opener|open_path": () => null,
+};
 
 export function installMockBackend() {
   mockWindows("main");
+  (window as unknown as { mockPlayer: typeof mockPlayer }).mockPlayer = mockPlayer;
   mockIPC(
     async (cmd, raw) => {
-      const args = (raw ?? {}) as Record<string, any>;
-      switch (cmd) {
-        case "plugin:app|version":
-          return "1.2.0";
-        case "plugin:updater|check":
-          return null;
-        case "plugin:dialog|open":
-          return flag("file") === "known" ? "/home/player/Downloads/cogwork.zip" : "/home/player/Downloads/mytweak.zip";
-        case "plugin:opener|open_url":
-        case "plugin:opener|open_path":
-          return null;
-        case COMMANDS.listVersions:
-          return versions.map((tag, i) => ({
-            tag,
-            name: tag,
-            published_at: i === 0 ? "2026-11-01T12:00:00Z" : "2026-10-20T12:00:00Z",
-            body: i === 0 ? "## What's new\n- A **mod manager** in the launcher\n- Faster world loading" : "",
-            prerelease: false,
-            asset: { name: `Weft-${tag}-linux-x64.tar.gz`, url: "", size: 48_000_000, sha256: "a".repeat(64) },
-            from_cache: false,
-          }));
-        case COMMANDS.getInstalledVersions:
-          return versions.map((tag) => ({ tag, path: `/versions/${tag}`, executable: "weft", installed_at: "2026-11-02T10:00:00Z" }));
-        case COMMANDS.removeVersion:
-          await sleep(300);
-          versions.splice(versions.indexOf(args.tag), 1);
-          delete locks[args.tag];
-          return null;
-        case COMMANDS.getRunningVersions:
-          return [...running];
-        case COMMANDS.launchVersion:
-          await launch(args.tag);
-          return null;
-        case COMMANDS.openPlayerModsFolder: {
-          // The player, shown their folder, deletes the stray copy: the next profile is without it.
-          const at = playerFolder.findIndex((f) => f.id === shadowId);
-          if (at >= 0) playerFolder.splice(at, 1);
-          return null;
-        }
-        case COMMANDS.openLog:
-        case COMMANDS.openGameFolder:
-          return null;
-        case COMMANDS.listModCatalog:
-          await sleep(args.forceRefresh ? 400 : 0);
-          if (failures.has("catalog")) fail("Network", "the catalogue request timed out");
-          return catalog;
-        case COMMANDS.getModSources:
-          await sleep(150);
-          if (failures.has("sources")) fail("Io", "mod-sources.json: permission denied");
-          return catalog.sources.map((s) => s.repo);
-        case COMMANDS.addModSource: {
-          await sleep(500);
-          const repo = parseRepo(String(args.repo)) ?? fail("ModSourceInvalid", String(args.repo));
-          if (sourceFlag === "ratelimited") fail("ModSourceRateLimited", repo);
-          const canonical = KNOWN_REPOS.find((k) => sameRepo(k, repo)) ?? fail("ModSourceNotFound", repo);
-          if (!catalog.sources.some((s) => sameRepo(s.repo, canonical))) {
-            catalog.sources.push({ repo: canonical, mods: 0, freshness: "fresh", checked: new Date().toISOString(), error: null });
-          }
-          return catalog.sources.map((s) => s.repo);
-        }
-        case COMMANDS.removeModSource:
-          await sleep(400);
-          // Mods installed from it stay installed; they just stop getting updates.
-          catalog.sources = catalog.sources.filter((s) => !sameRepo(s.repo, args.repo));
-          catalog.mods = catalog.mods.filter((m) => m.origin.kind !== "source" || !sameRepo(m.origin.repo, args.repo));
-          return catalog.sources.map((s) => s.repo);
-        case COMMANDS.getModProfile:
-          return report(args.tag);
-        case COMMANDS.getModIcon:
-          return iconUrl(String(args.url).replace("mock://", ""));
-        case COMMANDS.planModInstall:
-          await sleep(120);
-          return R.planInstall(catalog, lockOf(args.tag), args.tag, args.sha256, fitOf(args.tag), running.has(args.tag));
-        case COMMANDS.installMod:
-          return installMod(args.tag, args.sha256, args.planToken, args.operationId);
-        case COMMANDS.inspectModFile:
-          await sleep(300);
-          return inspect(args.tag);
-        case COMMANDS.installModFile:
-          return installFile(args.tag, args.sha256, args.planToken, args.operationId);
-        case COMMANDS.setModEnabled:
-          await sleep(150);
-          return setEnabled(args.tag, args.id, !!args.enabled);
-        case COMMANDS.removeMod:
-          await sleep(150);
-          return removeMod(args.tag, args.id);
-        case RESTORE:
-          await sleep(150);
-          return restoreMod(args.tag, args.id);
-        case COMMANDS.previewCopyModProfile:
-          await sleep(200);
-          return previewCopy(args.from, args.to).preview;
-        case COMMANDS.copyModProfile:
-          return copyProfile(args.from, args.to, args.planToken, args.operationId);
-        case COMMANDS.cancelModOperation: {
-          const op = operations.get(String(args.operationId));
-          if (op) op.cancelled = true;
-          return !!op;
-        }
-        default:
-          console.warn("mock backend: unhandled", cmd, args);
-          return null;
-      }
+      if (cmd in plugins) return plugins[cmd]();
+      if (cmd === "list_mod_catalog" && (raw as { forceRefresh?: boolean } | undefined)?.forceRefresh) refreshAddedSources();
+      const handler = handlers[cmd as keyof Handlers] as ((args: unknown) => unknown) | undefined;
+      // A command this mock doesn't know is a bug in the mock, never a silent null.
+      if (!handler) throw new Error(`mock backend: no command ${cmd}`);
+      return handler(raw ?? {});
     },
     { shouldMockEvents: true }
   );

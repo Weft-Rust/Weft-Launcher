@@ -34,7 +34,7 @@ export function TrustBadge({ trust }: { trust: Trust }) {
 export function RevokedBadge({ reason }: { reason: string | null }) {
   const { t } = useI18n();
   return (
-    <span className="badge revoked" title={t("mods.badgeRevokedHint", (reason ?? "").trim())}>
+    <span className="badge revoked" title={t("mods.badgeRevokedHint", (reason ?? "").trim() || t("mods.noReason"))}>
       <PixelIcon rows={CROSS} />
       {t("mods.badgeRevoked")}
     </span>

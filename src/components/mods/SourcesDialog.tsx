@@ -4,20 +4,67 @@ import { useI18n } from "../../i18n/useI18n";
 import { showError, type Shown } from "../../i18n/errors";
 import { ErrorText } from "../ErrorText";
 import { useMods } from "../../hooks/useMods";
-import { modsApi } from "../../mods/api";
+import { asAppError, modsApi } from "../../mods/api";
 import { parseRepo, sameRepo } from "../../mods/select";
 import { Dialog } from "../Dialog";
 import { Truncate } from "../Truncate";
-import { TrustBadge } from "./TrustBadge";
+import { PixelIcon } from "../PixelIcon";
+import { BANG, CHECK } from "./glyphs";
 import { indexProblem, sourceProblem } from "./catalogBanners";
+import type { Catalog, NoModsReason, SourceStatus } from "../../mods/types";
+import type { MessageKey } from "../../i18n";
 
 const INDEX_REPO = "https://github.com/Zorro909/weft-mods-index";
+/** What a repo must publish to be a source. */
+const SOURCE_FORMAT = "https://github.com/Zorro909/Weft-Launcher/blob/master/docs/mod-manager/INDEX_FORMAT.md#publishing-from-your-own-repo";
+
+const NO_MODS: Record<NoModsReason, MessageKey> = {
+  noReleases: "mods.sourceNoModsNoReleases",
+  noModFiles: "mods.sourceNoModsNoFiles",
+  unreadable: "mods.sourceNoModsUnreadable",
+  noDigest: "mods.sourceNoModsNoDigest",
+  disagrees: "mods.sourceNoModsDisagrees",
+  invalid: "mods.sourceNoModsInvalid",
+};
+
+/**
+ * The index's own state, not a mod's tier: a mod is Reviewed; the index is signed, and its
+ * signature checked on a day. Amber when that signature is old, or only a saved copy is used.
+ */
+function IndexBadge({ index }: { index: Catalog["index"] | undefined }) {
+  const { t, formatDay } = useI18n();
+  if (!index || index.freshness === "unavailable" || !index.generated) {
+    return (
+      <span className="badge index-badge none" data-state="none">
+        <PixelIcon rows={BANG} />
+        {t("mods.indexBadgeNone")}
+      </span>
+    );
+  }
+  const day = formatDay(index.signedAt ?? index.generated);
+  const ok = index.freshness === "fresh" && !index.error;
+  return (
+    <span className={`badge index-badge ${ok ? "ok" : "stale"}`} data-state={ok ? "ok" : index.freshness}>
+      <PixelIcon rows={ok ? CHECK : BANG} />
+      {t(ok ? "mods.indexBadgeSigned" : index.freshness === "stale" ? "mods.indexBadgeStale" : "mods.indexBadgeCopy", day)}
+    </span>
+  );
+}
+
+/** A source's line: how many mods, when checked, and when there are none, why. */
+function sourceMeta(s: SourceStatus | undefined, checking: boolean, t: (k: MessageKey, ...a: string[]) => string, tn: (k: "mods.sourcesMods", n: number) => string, formatDay: (iso: string | null) => string) {
+  if (!s || (!s.checked && !s.error)) return checking ? t("mods.sourcesChecking") : t("mods.sourcesNotChecked");
+  if (s.mods === 0 && s.noMods) return `${t("mods.sourceNoMods")} ${t(NO_MODS[s.noMods])}`;
+  return [tn("mods.sourcesMods", s.mods), s.checked ? t("mods.sourcesChecked", formatDay(s.checked)) : ""].filter(Boolean).join(" · ");
+}
 
 export function SourcesDialog({ onClose }: { onClose: () => void }) {
   const { t, tn, formatDay } = useI18n();
   const { catalog, catalogError, catalogLoading, refreshCatalog } = useMods();
   const [repos, setRepos] = useState<string[] | null>(null);
   const [loadError, setLoadError] = useState<Shown | null>(null);
+  // The list couldn't be read and was kept aside: adding a source starts a new one.
+  const [damaged, setDamaged] = useState(false);
   const [input, setInput] = useState("");
   const [error, setError] = useState<Shown | null>(null);
   const [adding, setAdding] = useState(false);
@@ -32,8 +79,14 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
     setLoadError(null);
     modsApi
       .sources()
-      .then(setRepos)
-      .catch((err) => setLoadError(showError(err)));
+      .then((r) => {
+        setRepos(r);
+        setDamaged(false);
+      })
+      .catch((err) => {
+        setLoadError(showError(err));
+        setDamaged(asAppError(err).code === "ModSourcesDamaged");
+      });
   }, []);
   useEffect(load, [load]);
 
@@ -49,8 +102,11 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
     setError(null);
     try {
       setRepos(await modsApi.addSource(repo));
+      setLoadError(null);
+      setDamaged(false);
       setInput("");
-      setChanged(true);
+      // Asked at once, so the dialog says what the new source has before it closes.
+      refreshCatalog();
     } catch (err) {
       setError(showError(err));
     } finally {
@@ -112,7 +168,7 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
       <p className="dialog-summary">{t("mods.sourcesIntro")}</p>
       <ul className="source-list">
         <li className="source-row">
-          <TrustBadge trust="reviewed" />
+          <IndexBadge index={index} />
           <span className="source-name">{t("mods.sourcesIndex")}</span>
           <span className={`source-meta${index?.error || index?.freshness === "stale" ? " bad" : ""}`} data-testid="index-meta">
             {indexMeta}
@@ -138,18 +194,21 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
           const s = status(repo);
           const asking = confirming !== null && sameRepo(confirming, repo);
           const working = removing !== null && sameRepo(removing, repo);
+          const none = !!s && !s.error && s.mods === 0 && !!s.noMods;
           return (
-            <li className={`source-row${asking ? " confirming" : ""}`} key={repo}>
-              <TrustBadge trust="unreviewed" />
+            <li className={`source-row${asking ? " confirming" : ""}`} key={repo} data-repo={repo}>
+              <span className="badge channel">{t("mods.sourceBadgeRepo")}</span>
               <Truncate className="source-name" text={repo} />
-              <span className={`source-meta${s?.error ? " bad" : ""}`}>
-                {s?.error
-                  ? sourceProblem(s, t, formatDay)
-                  : s
-                    ? [tn("mods.sourcesMods", s.mods), s.checked ? t("mods.sourcesChecked", formatDay(s.checked)) : ""]
-                        .filter(Boolean)
-                        .join(" · ")
-                    : t("mods.sourcesNotChecked")}
+              <span className={`source-meta${s?.error ? " bad" : none ? " warn" : ""}`} data-testid="source-meta">
+                {s?.error ? sourceProblem(s, t, formatDay) : sourceMeta(s, catalogLoading, t, tn, formatDay)}
+                {none && (
+                  <>
+                    {" "}
+                    <button className="link-btn" onClick={() => openUrl(SOURCE_FORMAT)}>
+                      {t("mods.sourceFormatLink")}
+                    </button>
+                  </>
+                )}
               </span>
               {s?.error && !asking && <span className="source-row-retry">{retry}</span>}
               {asking ? (
@@ -186,7 +245,7 @@ export function SourcesDialog({ onClose }: { onClose: () => void }) {
       </ul>
       {repos === null &&
         (loadError ? (
-          <ErrorText error={loadError} lead={t("mods.sourcesLoadFailedLead")}>
+          <ErrorText error={loadError} lead={damaged ? undefined : t("mods.sourcesLoadFailedLead")}>
             <button className="btn-secondary btn-small" onClick={load}>
               {t("mods.retry")}
             </button>

@@ -143,6 +143,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
     indexTrouble: !!catalog?.index.error,
     refreshFailed: !!catalog && !!mods.catalogError,
     sources: (catalog?.sources ?? []).filter((x) => x.error).map((x) => x.repo),
+    sourcesDamaged: !!catalog?.sourcesError,
     abiUnknown: !!report?.abiError,
     shadowed: shadowedOff.length > 0,
     unmanaged: (report?.unmanaged.length ?? 0) > 0,

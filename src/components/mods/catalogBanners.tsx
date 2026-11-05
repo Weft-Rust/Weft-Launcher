@@ -118,6 +118,25 @@ export function useCatalogBanners(onManageSources: () => void): Record<string, B
       actions: retry,
     };
   }
+  if (catalog.sourcesError) {
+    // Kept aside, never read as "no sources": where it is, behind Details.
+    out.sourcesDamaged = {
+      id: "sourcesDamaged",
+      tone: "warn",
+      text: (
+        <>
+          {t("mods.sourcesDamaged")}
+          {catalog.sourcesError.detail && <ErrorDetails detail={catalog.sourcesError.detail} label={t("errors.details")} />}
+        </>
+      ),
+      summary: t("mods.sourcesDamagedShort"),
+      actions: (
+        <button className="btn-flat" onClick={onManageSources}>
+          {t("mods.manageSources")}
+        </button>
+      ),
+    };
+  }
   for (const s of catalog.sources.filter((x) => x.error)) {
     const text = sourceProblem(s, t, formatDay);
     out[`source:${s.repo}`] = {

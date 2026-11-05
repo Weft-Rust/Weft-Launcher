@@ -257,8 +257,9 @@ export function replaceNotes(plan: InstallPlan): RichMsg[] {
 export function fileChecks(inspection: FileInspection, tag: string, indexFrom: string | null = null): CheckRow[] {
   const rows: CheckRow[] = [];
   const { archive, catalogMatch: known } = inspection;
-  if (inspection.revokedReason) {
-    rows.push({ id: "revoked", state: "no", title: { key: "mods.ckRevoked", args: [inspection.revokedReason] } });
+  if (inspection.revoked) {
+    const why = (inspection.revokedReason ?? "").trim();
+    rows.push({ id: "revoked", state: "no", title: why ? { key: "mods.ckRevoked", args: [why] } : { key: "mods.ckRevokedNoReason" } });
   }
   if (known) {
     rows.push({ id: "known", state: "yes", title: { key: "mods.ckFileKnown", args: [known.name, known.build.version] } });
@@ -311,7 +312,7 @@ export function platformLabel(p: string): string {
 export function fileVerdict(inspection: FileInspection): { usable: boolean; needsTyping: boolean } {
   const { archive, catalogMatch: known } = inspection;
   // Unknown fit isn't "no": the plan's own problem (if any) says whether it can install.
-  const usable = !!archive && inspection.fitsSystem && !inspection.revokedReason && (known === null || known.fitsVersion !== false);
+  const usable = !!archive && inspection.fitsSystem && !inspection.revoked && (known === null || known.fitsVersion !== false);
   return { usable, needsTyping: usable && known === null };
 }
 

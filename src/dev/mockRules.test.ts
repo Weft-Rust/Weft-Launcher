@@ -89,6 +89,7 @@ function catalog(name: keyof typeof rules.catalogs): Catalog {
     sources: [],
     weft: [],
     platform: "linux-x64",
+    sourcesError: null,
   };
 }
 

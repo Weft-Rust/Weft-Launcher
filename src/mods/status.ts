@@ -91,6 +91,12 @@ export function missingDepsReasons(mod: InstalledMod, tag: string, name: NameOf,
     .map(([ids, key]) => ({ key, count: ids.length, args: [names(ids, name), tag] }) as Msg);
 }
 
+/** Why a build was pulled, in the index's words, or that it gave none (in the player's language). */
+export function revokedMsg(reason: string | null): Msg {
+  const r = (reason ?? "").trim();
+  return r ? { key: "mods.statusRevoked", args: [r] } : { key: "mods.statusRevokedNoReason" };
+}
+
 /** The line under a mod's name: what the launcher knows about it, or what is wrong. */
 export function modMeta(
   mod: InstalledMod,
@@ -127,7 +133,7 @@ function baseMeta(mod: InstalledMod, tag: string, name: NameOf, states?: Map<str
       return { parts: missingDepsReasons(mod, tag, name, states), bad: true };
     case "revoked":
       // The index's reason is its own sentence; ours stands apart from it.
-      return { parts: [{ key: "mods.statusRevoked", args: [(mod.revokedReason ?? "").trim()] }], bad: true };
+      return { parts: [revokedMsg(mod.revokedReason)], bad: true };
     case "unchecked":
       return {
         parts: [
@@ -210,13 +216,18 @@ export function blockers(report: ProfileReport | undefined, name: NameOf, catalo
       case "shadowedRevoked": {
         // Turning it off can't help: it is off. The player's own copy has to go.
         const shadow = shadowOf(report, mod.id);
-        reasons = [{ key: "mods.blockShadowedRevoked", args: [shadow?.file ?? mod.id, mod.name, (mod.revokedReason ?? "").trim()] }];
+        const why = (mod.revokedReason ?? "").trim();
+        reasons = [
+          why
+            ? { key: "mods.blockShadowedRevoked", args: [shadow?.file ?? mod.id, mod.name, why] }
+            : { key: "mods.blockShadowedRevokedNoReason", args: [shadow?.file ?? mod.id, mod.name] },
+        ];
         if (mod.update) fixes.push({ kind: "update", id: mod.id, name: mod.name, version: mod.update.version, sha256: mod.update.sha256 });
         fixes.push({ kind: "showFolder", id: mod.id, name: mod.name, file: shadow?.file ?? "" });
         return [{ mod, reasons, fixes }];
       }
       case "revoked":
-        reasons = [{ key: "mods.statusRevoked", args: [(mod.revokedReason ?? "").trim()] }];
+        reasons = [revokedMsg(mod.revokedReason)];
         break;
       case "wrongVersion":
         // Under "won't start", the build is the whole reason.

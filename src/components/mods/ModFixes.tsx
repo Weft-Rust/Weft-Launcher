@@ -41,9 +41,26 @@ export function useReviewDialog(tag: string | null) {
 
 export type Review = ReturnType<typeof useReviewDialog>;
 
+/**
+ * Once the player's own folder was shown, the launcher looks at it again each time they come back
+ * to the window: only they can remove a file there, and they may take more than one trip.
+ */
+function useLookAgainOnReturn(tag: string) {
+  const { loadProfile } = useMods();
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const again = () => loadProfile(tag);
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
+  }, [armed, tag, loadProfile]);
+  return () => setArmed(true);
+}
+
 function useFix(tag: string, review: Review) {
-  const { setEnabled, profile, loadProfile } = useMods();
+  const { setEnabled, profile } = useMods();
   const [error, setError] = useState<Shown | null>(null);
+  const lookAgain = useLookAgainOnReturn(tag);
   const apply = async (fix: Fix) => {
     setError(null);
     if (fix.kind === "install") return review.openInstall(fix.mod, fix.sha256);
@@ -52,19 +69,19 @@ function useFix(tag: string, review: Review) {
       return mod && review.openUpdate(mod, fix.sha256);
     }
     if (fix.kind === "showFolder") {
-      // Only the player can remove their own file; the launcher looks again once they're back.
+      // Only the player can remove their own file; the launcher looks again when they're back.
+      lookAgain();
       try {
         await modsApi.openPlayerModsFolder();
       } catch (err) {
         setError(showError(err));
       }
-      window.addEventListener("focus", () => loadProfile(tag), { once: true });
       return;
     }
     const r = await setEnabled(tag, fix.id, fix.kind === "turnOn");
     if (r.status === "failed") setError(r.shown);
   };
-  return { apply, error };
+  return { apply, error, lookAgain };
 }
 
 /** The buttons for a list of fixes: turn off, turn on, install a dependency, update. */
@@ -236,7 +253,7 @@ export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNotice
   const { t, tm } = useI18n();
   const { profile, nameIn, catalog } = useMods();
   const { clearCrash } = useGameState();
-  const { apply, error } = useFix(crash.tag, review);
+  const { apply, error, lookAgain } = useFix(crash.tag, review);
   const [actionError, setActionError] = useState<Shown | null>(null);
   const failure = crash.modFailure;
   const report = profile(crash.tag);
@@ -274,7 +291,13 @@ export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNotice
           </button>
         )}
         {outside && (
-          <button className="btn-secondary btn-small" onClick={() => attempt(modsApi.openPlayerModsFolder)}>
+          <button
+            className="btn-secondary btn-small"
+            onClick={() => {
+              lookAgain();
+              attempt(modsApi.openPlayerModsFolder);
+            }}
+          >
             {t("mods.openModsFolder")}
           </button>
         )}
