@@ -434,7 +434,9 @@ button:disabled { cursor: not-allowed; }
 .mod-ask-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .mod-row > .mod-icon { grid-area: icon; align-self: start; }
 .mod-row.is-off { background: #20252f; }
-.mod-row.is-off :is(.mod-name, .mod-icon) { opacity: .55; }
+/* Off: the switch and its word say so. The name turns a solid grey that still reads (5.6:1), never faded by opacity. */
+.mod-row.is-off .mod-name { color: var(--g5); }
+.mod-row.is-off .mod-icon { opacity: .55; }
 .mod-row.has-problem { box-shadow: inset var(--px) 0 0 var(--r2); }
 .mod-icon { width: 48px; height: 48px; display: grid; place-items: center; background: var(--ink); flex: none; }
 .mod-icon img { image-rendering: pixelated; }

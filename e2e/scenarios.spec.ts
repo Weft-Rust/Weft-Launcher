@@ -246,7 +246,7 @@ for (const locale of LOCALES) {
         // A row's reason is never cut after a few letters: it has a line of its own, two when needed.
         if (scenario.name !== "long") expect(await cutReasons(page), "reasons cut short").toEqual([]);
         await checks.installed?.(page, en);
-        expect(await lowContrast(page), "small text under 4.5:1").toEqual([]);
+        expect(await lowContrast(page), "text under 4.5:1 (3:1 when large)").toEqual([]);
         await browse(page);
         await expect(page.locator(".mod-card").first()).toBeVisible();
         await expectFits(page);
@@ -260,7 +260,7 @@ for (const locale of LOCALES) {
         expect(await page.locator(".mod-card-by[data-must-fit]").count()).toBe(await page.locator(".mod-card").count());
         await checks.browse?.(page, en);
         await expectWhole(page, "Browse");
-        expect(await lowContrast(page), "small text under 4.5:1").toEqual([]);
+        expect(await lowContrast(page), "text under 4.5:1 (3:1 when large)").toEqual([]);
       }
       expect(errors).toEqual([]);
     });

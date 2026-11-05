@@ -1,7 +1,7 @@
 // The flows the mod manager's safety depends on, and keyboard use, against the mock backend.
 import { expect, test, type Page } from "@playwright/test";
 import trace from "../src/dev/fixtures/trace.json" with { type: "json" };
-import { LOCALES, MODS_TAB, VERSIONS_TAB, browse, confirmRemove, cutButtons, expectWhole, focused, fullRows, goToTab, open, settled, spoken, tops } from "./helpers";
+import { LOCALES, MODS_TAB, VERSIONS_TAB, browse, confirmRemove, cutButtons, expectWhole, focused, fullRows, goToTab, lowContrast, open, settled, spoken, tops } from "./helpers";
 
 const dialog = "[role=dialog]";
 
@@ -790,6 +790,31 @@ test.describe("remove and undo", () => {
     const back = page.locator(".mod-row", { hasText: "Showcase" });
     await expect(back.locator(".toggle")).toHaveAttribute("aria-checked", "false");
     await expect.poll(async () => (await focused(page)).row).toBe("showcase");
+  });
+});
+
+test.describe("contrast", () => {
+  test("an off mod's name reads as well as small text: a solid colour, not faded", async ({ page }) => {
+    await open(page, "scenario=chain");
+    await goToTab(page, MODS_TAB);
+    const off = page.locator(".mod-row.is-off");
+    expect(await off.count()).toBeGreaterThan(0);
+    // Opacity anywhere above the name counts: what is measured is what is seen.
+    expect(await off.locator(".mod-name").evaluateAll((n) => n.map((e) => getComputedStyle(e).opacity))).not.toContain("0.55");
+    expect(await lowContrast(page, 4.5, 4.5, ".mod-row.is-off"), "off rows under 4.5:1").toEqual([]);
+    // And the whole page at WCAG AA: 4.5:1, 3:1 for large text.
+    expect(await lowContrast(page)).toEqual([]);
+  });
+
+  test("the contrast check composites opacity and measures large text", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    // Fade one name as the off rows used to be: amber at .55 on the row is 3.9:1, under 4.5:1.
+    await page.locator(".mod-row .mod-name").first().evaluate((e) => (e.parentElement!.style.opacity = "0.55"));
+    expect(await lowContrast(page, 4.5, 4.5, ".mod-row")).not.toEqual([]);
+    // A 24px name at 0.3 is under 3:1 too: large text is checked, not skipped.
+    await page.locator(".mod-row .mod-name").first().evaluate((e) => (e.parentElement!.style.opacity = "0.3"));
+    expect((await lowContrast(page, 4.5, 3, ".mod-row")).some((t) => t.includes("(large)"))).toBe(true);
   });
 });
 

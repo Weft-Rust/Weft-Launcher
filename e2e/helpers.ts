@@ -144,43 +144,63 @@ export const tops = (page: Page, selectors: string[]) =>
 export const spoken = (page: Page) => page.getByTestId("live-region");
 
 /**
- * Text set at 16px or less that is on screen and has less than 4.5:1 contrast with what is behind
- * it. The background is the first opaque one up the tree; text on an image isn't checked.
+ * Text on screen with less contrast than WCAG AA asks against what is behind it: 4.5:1, or 3:1
+ * for large text (24px and up, or 18.66px and up in bold). What is seen is what is measured: the
+ * colour's own alpha and the opacity of the element and every ancestor are composited over the
+ * background, the first opaque one up the tree. Text on an image, disabled controls and text
+ * that is being animated (a pulse) aren't checked. `within` limits it to text inside a selector.
  */
-export const lowContrast = (page: Page, min = 4.5) =>
-  page.evaluate((min) => {
-    const rgb = (c: string) => (c.match(/[\d.]+/g) ?? []).map(Number);
-    const lum = ([r, g, b]: number[]) => {
-      const f = (v: number) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
-      return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
-    };
-    const bg = (el: Element | null): number[] | null => {
-      for (; el; el = el.parentElement) {
+export const lowContrast = (page: Page, min = 4.5, large = 3, within = "body") =>
+  page.evaluate(
+    ([min, large, within]) => {
+      const rgb = (c: string) => (c.match(/[\d.]+/g) ?? []).map(Number);
+      const lum = ([r, g, b]: number[]) => {
+        const f = (v: number) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+      };
+      const bg = (el: Element | null): number[] | null => {
+        for (; el; el = el.parentElement) {
+          const s = getComputedStyle(el);
+          if (s.backgroundImage !== "none" && el !== document.body && el !== document.documentElement) return null;
+          const c = rgb(s.backgroundColor);
+          if (c.length >= 3 && (c.length < 4 || c[3] === 1)) return c;
+        }
+        return [0, 0, 0];
+      };
+      const opacity = (el: Element | null) => {
+        let a = 1;
+        for (; el; el = el.parentElement) a *= parseFloat(getComputedStyle(el).opacity);
+        return a;
+      };
+      const animated = new Set(document.getAnimations().map((a) => (a.effect as KeyframeEffect | null)?.target).filter(Boolean));
+      const moving = (el: Element | null) => {
+        for (; el; el = el.parentElement) if (animated.has(el)) return true;
+        return false;
+      };
+      const bad: string[] = [];
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const el = n.parentElement;
+        if (!el || !n.textContent?.trim() || !el.closest(within)) continue;
         const s = getComputedStyle(el);
-        if (s.backgroundImage !== "none" && el !== document.body && el !== document.documentElement) return null;
-        const c = rgb(s.backgroundColor);
-        if (c.length >= 3 && (c.length < 4 || c[3] === 1)) return c;
+        if (s.visibility === "hidden" || el.closest(".sr-only, [aria-hidden=true], :disabled, [hidden]")) continue;
+        const r = el.getBoundingClientRect();
+        if (!r.width || r.bottom < 0 || r.top > window.innerHeight) continue;
+        const back = bg(el);
+        if (!back || moving(el)) continue;
+        const [fr, fg, fb, fa = 1] = rgb(s.color);
+        const a = fa * opacity(el);
+        const seen = [fr, fg, fb].map((v, k) => v * a + back[k] * (1 - a));
+        const [hi, lo] = [lum(seen), lum(back)].sort((x, y) => y - x);
+        const ratio = (hi + 0.05) / (lo + 0.05);
+        const size = parseFloat(s.fontSize);
+        const big = size >= 24 || (size >= 18.66 && Number(s.fontWeight) >= 700);
+        if (ratio < (big ? large : min)) bad.push(`${el.className || el.tagName}: "${n.textContent.trim().slice(0, 30)}" ${ratio.toFixed(2)}${big ? " (large)" : ""}`);
       }
-      return [0, 0, 0];
-    };
-    const bad: string[] = [];
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      const el = n.parentElement;
-      if (!el || !n.textContent?.trim()) continue;
-      const s = getComputedStyle(el);
-      if (parseFloat(s.fontSize) > 16 || s.visibility === "hidden" || el.closest(".sr-only, [aria-hidden=true], :disabled, [hidden]")) continue;
-      const r = el.getBoundingClientRect();
-      if (!r.width || r.bottom < 0 || r.top > window.innerHeight) continue;
-      const back = bg(el);
-      if (!back) continue;
-      const fg = rgb(s.color);
-      const [a, b] = [lum(fg), lum(back)].sort((x, y) => y - x);
-      const ratio = (a + 0.05) / (b + 0.05);
-      if (ratio < min && parseFloat(s.opacity) === 1) bad.push(`${el.className || el.tagName}: "${n.textContent.trim().slice(0, 30)}" ${ratio.toFixed(2)}`);
-    }
-    return [...new Set(bad)];
-  }, min);
+      return [...new Set(bad)];
+    },
+    [min, large, within] as const
+  );
 
 /**
  * Remove, then confirm: two separate presses (the second click of a double-click doesn't
