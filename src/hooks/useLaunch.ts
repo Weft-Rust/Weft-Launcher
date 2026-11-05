@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ProfileReport, UiError } from "../mods/types";
 import type { Shown } from "../i18n/errors";
 import { useGameState } from "./useGameState";
-import { useMods } from "./useMods";
+import { useModProfiles } from "./useMods";
 
 /**
  * A refused start. For a refusal because of mods, `seen` is the set as it was known once the
@@ -35,7 +35,7 @@ export interface Refusal {
  */
 export function useLaunch() {
   const { launch } = useGameState();
-  const { profile, readProfile } = useMods();
+  const { profile, readProfile } = useModProfiles();
   const [launchError, setLaunchError] = useState<LaunchError | null>(null);
   const [launching, setLaunching] = useState<string | null>(null);
   const [rereading, setRereading] = useState(false);

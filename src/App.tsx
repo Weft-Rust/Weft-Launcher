@@ -11,7 +11,7 @@ import { Home } from "./pages/Home";
 import { VersionsPage } from "./pages/Versions";
 import { NotesPage } from "./pages/Notes";
 import { ModsPage } from "./pages/Mods";
-import { useMods } from "./hooks/useMods";
+import { useModProfiles } from "./hooks/useMods";
 import { getLatestTag, getNewTag } from "./utils/version";
 import { launcherApi } from "./mods/api";
 
@@ -44,7 +44,7 @@ function lastPlayed(): string | null {
 function App() {
   const { t, ready } = useI18n();
   const { installedVersions } = useInstall();
-  const { profile } = useMods();
+  const { profile } = useModProfiles();
   const [releases, setReleases] = useState<Release[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Shown | null>(null);

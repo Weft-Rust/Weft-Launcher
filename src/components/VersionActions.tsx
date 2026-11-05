@@ -1,6 +1,6 @@
 import { useInstall, InstalledVersion, InstallProgress } from "../hooks/useInstall";
 import { useGameState } from "../hooks/useGameState";
-import { useMods } from "../hooks/useMods";
+import { useModProfiles } from "../hooks/useMods";
 import { useLaunch } from "../hooks/useLaunch";
 import { useConfirmPress } from "../hooks/useConfirmPress";
 import { useI18n } from "../i18n/useI18n";
@@ -31,7 +31,7 @@ export function VersionActions({ release, installedVersion, onFixMods }: Version
   const announce = useAnnounce();
   const { t, tn } = useI18n();
   const { progress, busy: busyTags, errors, install, remove } = useInstall();
-  const { profile } = useMods();
+  const { profile } = useModProfiles();
   const report = installedVersion ? profile(release.tag) : undefined;
   const modCount = report?.mods.length ?? 0;
   const blocked = (report?.blocking.length ?? 0) > 0;

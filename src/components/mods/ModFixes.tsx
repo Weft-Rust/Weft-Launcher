@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { pagerIndex, pagerStep, type PagerAt } from "../../mods/blockerPager";
 import { useI18n } from "../../i18n/useI18n";
 import { showError, type Shown } from "../../i18n/errors";
-import { useMods } from "../../hooks/useMods";
+import { useModProfiles, useMods, useModsCatalog } from "../../hooks/useMods";
 import { modsApi } from "../../mods/api";
 import { catalogModFor } from "../../mods/select";
 import { blockers, type Fix } from "../../mods/status";
@@ -26,7 +26,7 @@ export interface ReviewRequest {
  * install goes through the review, also one click away from a problem.
  */
 export function useReviewDialog(tag: string | null) {
-  const { catalog } = useMods();
+  const { catalog } = useModsCatalog();
   const { t } = useI18n();
   const [request, setRequest] = useState<ReviewRequest | null>(null);
   /** A zip from the player's computer, in the From file dialog: what replaces a file mod. */
@@ -58,7 +58,7 @@ export type Review = ReturnType<typeof useReviewDialog>;
  * to the window: only they can remove a file there, and they may take more than one trip.
  */
 function useLookAgainOnReturn(tag: string) {
-  const { loadProfile } = useMods();
+  const { loadProfile } = useModProfiles();
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;

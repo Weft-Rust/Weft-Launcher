@@ -3,7 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useI18n } from "../../i18n/useI18n";
 import { showError, type Shown } from "../../i18n/errors";
 import { ErrorDetails, ErrorText } from "../ErrorText";
-import { useMods } from "../../hooks/useMods";
+import { useModsCatalog } from "../../hooks/useMods";
 import { parseRepo, sameRepo } from "../../mods/select";
 import { Dialog } from "../Dialog";
 import { Truncate } from "../Truncate";
@@ -60,7 +60,7 @@ function sourceMeta(s: SourceStatus | undefined, checking: boolean, t: (k: Messa
 
 export function SourcesDialog({ onClose }: { onClose: () => void }) {
   const { t, tn, formatDay } = useI18n();
-  const mods = useMods();
+  const mods = useModsCatalog();
   const { catalog, catalogError, catalogLoading, refreshCatalog, refreshSource, sourceRefreshing, sourceList: repos, sourceChange } = mods;
   const loadError = mods.sourceListError ? showError(mods.sourceListError) : null;
   // The list couldn't be read and was kept aside: adding a source starts a new one.

@@ -432,3 +432,34 @@ export function useMods(): ModsContextValue {
   if (!context) throw new Error("useMods must be used within a ModsProvider");
   return context;
 }
+
+/**
+ * The parts of the mods state, for a component that needs only one: what it uses is in its
+ * type. One context still holds them all; most components use two or three of these, so a
+ * context each would spare few renders.
+ */
+export type ModsCatalog = Pick<
+  ModsContextValue,
+  | "catalog"
+  | "catalogLoading"
+  | "catalogError"
+  | "refreshCatalog"
+  | "refreshSource"
+  | "sourceRefreshing"
+  | "pendingSources"
+  | "sourceList"
+  | "sourceListError"
+  | "loadSources"
+  | "addSource"
+  | "removeSource"
+  | "sourceChange"
+>;
+export type ModProfiles = Pick<ModsContextValue, "profile" | "profileError" | "loadProfile" | "readProfile" | "nameIn" | "notices" | "dismissNotice" | "crashSnapshot">;
+export type ModOperations = Omit<ModsContextValue, keyof ModsCatalog | keyof ModProfiles>;
+
+/** The catalogue and the player's sources. */
+export const useModsCatalog: () => ModsCatalog = useMods;
+/** Each version's set, read in order, with its notices. */
+export const useModProfiles: () => ModProfiles = useMods;
+/** Plans, changes and their progress. */
+export const useModOperations: () => ModOperations = useMods;

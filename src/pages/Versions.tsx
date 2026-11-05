@@ -1,6 +1,6 @@
 import { useI18n } from "../i18n/useI18n";
 import { useInstall } from "../hooks/useInstall";
-import { useMods } from "../hooks/useMods";
+import { useModProfiles } from "../hooks/useMods";
 import { PixelIcon } from "../components/PixelIcon";
 import { VersionActions } from "../components/VersionActions";
 import { getLocale } from "../i18n";
@@ -44,7 +44,7 @@ export function VersionsPage({
 }: VersionsPageProps) {
   const { t, tn, formatSize: fmtSize } = useI18n();
   const { installedVersions } = useInstall();
-  const { profile } = useMods();
+  const { profile } = useModProfiles();
 
   const installedMap = new Map(installedVersions.map((v) => [v.tag, v]));
 

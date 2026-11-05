@@ -1,6 +1,6 @@
 import type { MessageKey } from "../../i18n";
 import { useI18n } from "../../i18n/useI18n";
-import { useMods } from "../../hooks/useMods";
+import { useModsCatalog } from "../../hooks/useMods";
 import type { Catalog, ErrorCode, SourceStatus } from "../../mods/types";
 import type { BannerItem } from "./BannerStack";
 import { rateLimitReset, showError } from "../../i18n/errors";
@@ -108,7 +108,7 @@ export function indexSummary(index: Catalog["index"], t: T, formatDay: (iso: str
  */
 export function useCatalogBanners(onManageSources: () => void): Record<string, BannerItem> {
   const { t, formatDay } = useI18n();
-  const { catalog, catalogLoading, catalogError, refreshCatalog, refreshSource, sourceRefreshing } = useMods();
+  const { catalog, catalogLoading, catalogError, refreshCatalog, refreshSource, sourceRefreshing } = useModsCatalog();
   if (!catalog) return {};
   const retry = (
     <button className="btn-flat" onClick={refreshCatalog} disabled={catalogLoading}>
