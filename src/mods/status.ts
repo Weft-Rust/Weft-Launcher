@@ -4,7 +4,19 @@
 
 import { formatList, type Msg } from "../i18n";
 import { fittingVersions, sameRepo } from "./select";
-import type { Catalog, CatalogMod, ChangeResult, CopyResult, FailureKind, InstalledMod, ModFailure, ModStatus, ProfileReport } from "./types";
+import type {
+  BlockingReason,
+  Catalog,
+  CatalogMod,
+  ChangeResult,
+  CopyResult,
+  FailureKind,
+  InstalledMod,
+  ModFailure,
+  ModStatus,
+  ProfileReport,
+  ShadowedMod,
+} from "./types";
 
 function unreachable(x: never): never {
   throw new Error(`unhandled: ${String(x)}`);
@@ -80,7 +92,28 @@ export function missingDepsReasons(mod: InstalledMod, tag: string, name: NameOf,
 }
 
 /** The line under a mod's name: what the launcher knows about it, or what is wrong. */
-export function modMeta(mod: InstalledMod, tag: string, name: NameOf, states?: Map<string, DepState>): { parts: Msg[]; bad: boolean } {
+export function modMeta(
+  mod: InstalledMod,
+  tag: string,
+  name: NameOf,
+  states?: Map<string, DepState>,
+  shadow?: ShadowedMod
+): { parts: Msg[]; bad: boolean; shadowed: boolean } {
+  const base = baseMeta(mod, tag, name, states);
+  // Contract R4 §4: the engine loads the first copy of an id; the player's own copy wins whenever
+  // this one is off or revoked.
+  if (shadow && shadow.managed !== "on") {
+    const revoked = shadow.managed === "revoked";
+    return {
+      parts: [...base.parts, { key: revoked ? "mods.shadowRevokedRow" : "mods.shadowOffRow", args: [shadow.file] }],
+      bad: base.bad || revoked,
+      shadowed: true,
+    };
+  }
+  return { ...base, shadowed: false };
+}
+
+function baseMeta(mod: InstalledMod, tag: string, name: NameOf, states?: Map<string, DepState>): { parts: Msg[]; bad: boolean } {
   const status: ModStatus = mod.status;
   switch (status) {
     case "off":
@@ -119,6 +152,8 @@ export function modMeta(mod: InstalledMod, tag: string, name: NameOf, states?: M
 /** A one-click fix for a mod that stops the game. `install` and `update` open the review dialog. */
 export type Fix =
   | { kind: "turnOff"; id: string; name: string }
+  /** A copy in the player's own folder loads instead of a revoked mod: only the player can remove it. */
+  | { kind: "showFolder"; id: string; name: string; file: string }
   | { kind: "turnOn"; id: string; name: string }
   | { kind: "install"; id: string; name: string; mod: CatalogMod; sha256: string }
   | { kind: "update"; id: string; name: string; version: string; sha256: string };
@@ -139,6 +174,22 @@ export interface Blocker {
   fixes: Fix[];
 }
 
+/**
+ * Why a blocking mod blocks: the backend says (contract R4 §4); a report without a reason for it
+ * falls back to the mod's status.
+ */
+export function blockingReason(report: ProfileReport, mod: InstalledMod): BlockingReason {
+  const given = report.blockingReasons?.[mod.id];
+  if (given) return given;
+  if (mod.status === "missingDeps" || mod.status === "wrongVersion" || mod.status === "revoked") return mod.status;
+  return "wrongVersion";
+}
+
+/** The copy of a mod in the player's own folder that the engine would load, if there is one. */
+export function shadowOf(report: ProfileReport | undefined, id: string): ShadowedMod | undefined {
+  return report?.shadowed?.find((s) => s.id === id);
+}
+
 /** Each mod that stops this version from starting, why, and what fixes it. */
 export function blockers(report: ProfileReport | undefined, name: NameOf, catalog: Catalog | null = null): Blocker[] {
   if (!report) return [];
@@ -148,12 +199,30 @@ export function blockers(report: ProfileReport | undefined, name: NameOf, catalo
     if (!mod) return [];
     const fixes: Fix[] = [];
     let reasons: Msg[];
-    if (mod.status === "missingDeps") {
-      const states = depStates(mod, report, catalog);
-      reasons = missingDepsReasons(mod, report.tag, name, states);
-      fixes.push(...depFixes(states));
-    } else {
-      reasons = [mod.weftTag ? { key: "mods.statusWrongVersionTag", args: [mod.weftTag] } : { key: "mods.statusWrongVersion" }];
+    const why: BlockingReason = blockingReason(report, mod);
+    switch (why) {
+      case "missingDeps": {
+        const states = depStates(mod, report, catalog);
+        reasons = missingDepsReasons(mod, report.tag, name, states);
+        fixes.push(...depFixes(states));
+        break;
+      }
+      case "shadowedRevoked": {
+        // Turning it off can't help: it is off. The player's own copy has to go.
+        const shadow = shadowOf(report, mod.id);
+        reasons = [{ key: "mods.blockShadowedRevoked", args: [shadow?.file ?? mod.id, mod.name, (mod.revokedReason ?? "").trim()] }];
+        if (mod.update) fixes.push({ kind: "update", id: mod.id, name: mod.name, version: mod.update.version, sha256: mod.update.sha256 });
+        fixes.push({ kind: "showFolder", id: mod.id, name: mod.name, file: shadow?.file ?? "" });
+        return [{ mod, reasons, fixes }];
+      }
+      case "revoked":
+        reasons = [{ key: "mods.statusRevoked", args: [(mod.revokedReason ?? "").trim()] }];
+        break;
+      case "wrongVersion":
+        reasons = [mod.weftTag ? { key: "mods.statusWrongVersionTag", args: [mod.weftTag] } : { key: "mods.statusWrongVersion" }];
+        break;
+      default:
+        return unreachable(why);
     }
     if (mod.update) {
       fixes.push({ kind: "update", id: mod.id, name: mod.name, version: mod.update.version, sha256: mod.update.sha256 });
@@ -213,31 +282,47 @@ export function failureTitle(failure: ModFailure, name: string, nameOf: NameOf):
   }
 }
 
-/** The mod a crash blames, as it was when the game stopped. */
+/** The mod a crash blames, as it was when the game stopped, and what kind of failure it was. */
 export interface CrashSnapshot {
   id: string;
   sha256: string;
   enabled: boolean;
+  kind: FailureKind;
+  /** For `missingDep`: the mod it lacked. */
+  dependency: string | null;
 }
 
 export function snapshotFor(failure: ModFailure | null, report: ProfileReport | undefined): CrashSnapshot | null {
   const mod = failure?.modId ? report?.mods.find((m) => m.id === failure.modId) : undefined;
-  return mod ? { id: mod.id, sha256: mod.sha256, enabled: mod.enabled } : null;
+  if (!mod || !failure) return null;
+  return {
+    id: mod.id,
+    sha256: mod.sha256,
+    enabled: mod.enabled,
+    kind: failure.kind,
+    dependency: failure.kind === "missingDep" ? failure.other : null,
+  };
 }
 
 /**
  * Whether the problem a crash named has been dealt with: the blamed mod is off, removed or
- * replaced by another build. A crash the launcher can't tie to a mod it manages only goes away
- * when the player dismisses it or starts the game again.
+ * replaced by another build, or, for a missing dependency, that dependency is now on and usable.
+ * A crash the launcher can't tie to a mod it manages only goes away when the player dismisses it
+ * or starts the game again.
  */
 export function crashResolved(snapshot: CrashSnapshot | null, report: ProfileReport | undefined): boolean {
   if (!snapshot || !report) return false;
   const now = report.mods.find((m) => m.id === snapshot.id);
-  return !now || !now.enabled || now.sha256 !== snapshot.sha256;
+  if (!now || !now.enabled || now.sha256 !== snapshot.sha256) return true;
+  if (snapshot.kind === "missingDep" && snapshot.dependency) {
+    const dep = report.mods.find((m) => m.id === snapshot.dependency);
+    return !!dep && dep.enabled && (dep.status === "ready" || dep.status === "unchecked");
+  }
+  return false;
 }
 
 export interface NoticeText {
-  tone: "ok" | "warn";
+  tone: "ok" | "warn" | "info";
   lines: Msg[];
 }
 
@@ -271,6 +356,17 @@ export function describeChange(result: ChangeResult, primary: string | null, tag
   sideEffects(result, tag, name, lines);
   if (!lines.length) return null;
   return { tone: result.missing.length ? "warn" : "ok", lines };
+}
+
+/**
+ * A toggle that changed other mods too: what the player did, then what else. A plain toggle says
+ * nothing; its switch already does.
+ */
+export function describeToggle(result: ChangeResult, id: string, enabled: boolean, tag: string, name: NameOf): NoticeText | null {
+  const lines: Msg[] = [];
+  sideEffects(result, tag, name, lines);
+  if (!lines.length) return null;
+  return { tone: "ok", lines: [{ key: enabled ? "mods.noticeTurnedOn" : "mods.noticeTurnedOff", args: [name(id)] }, ...lines] };
 }
 
 export function describeRemove(result: ChangeResult, id: string, tag: string, name: NameOf): NoticeText {

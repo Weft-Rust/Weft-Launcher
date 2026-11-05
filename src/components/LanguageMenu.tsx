@@ -4,7 +4,7 @@ import type { Locale } from "../i18n";
 
 const OPTIONS: { code: Locale; label: string; name: string }[] = [
   { code: "en", label: "EN", name: "English" },
-  { code: "pt-BR", label: "BR", name: "Português" },
+  { code: "pt-BR", label: "PT", name: "Português" },
   { code: "es", label: "ES", name: "Español" },
   { code: "ru", label: "RU", name: "Русский" },
 ];

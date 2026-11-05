@@ -2,10 +2,11 @@
 // translation: rows are message keys with arguments, rendered by components/mods/CheckList.
 
 import { formatList, type MessageKey, type Msg } from "../i18n";
-import type { AppErrorPayload, CatalogVersion, FileInspection, InstallPlan, ModProgress, Trust } from "./types";
+import type { AppErrorPayload, CatalogVersion, CopyPreview, FileInspection, InstallPlan, ModProgress, Trust } from "./types";
 import { shortCommit, shortSha } from "./select";
 
-export type CheckState = "yes" | "no" | "unknown";
+/** "same": nothing to check, because nothing changes (a mod a copy leaves as it is). */
+export type CheckState = "yes" | "no" | "unknown" | "same";
 
 /** One argument of a message: text, a shortened value whose full form stays reachable, an error or a tier name. */
 export type Arg =
@@ -27,21 +28,28 @@ export interface CheckRow {
   detail?: RichMsg;
   /** Shown as a badge after the title, e.g. the tier of a dependency that will be installed. */
   trust?: Trust;
+  /** Something that couldn't be found out, which asking again may answer: the row offers Retry. */
+  retry?: boolean;
 }
 
 const sha = (s: string) => ({ code: s, short: shortSha(s) });
 const abi = (s: string) => ({ code: s, short: s.slice(0, 8) });
 const commit = (s: string) => ({ code: s, short: shortCommit(s) });
 
-/** Review and provenance of one catalogue build, the same wherever a build is shown. */
-export function buildChecks(v: CatalogVersion): CheckRow[] {
+/**
+ * Review and provenance of one catalogue build, the same wherever a build is shown. `indexFrom` is
+ * the day of the index the review comes from when that index isn't fresh, so an old review says so.
+ */
+export function buildChecks(v: CatalogVersion, indexFrom: string | null = null): CheckRow[] {
   const rows: CheckRow[] = [];
   if (v.trust === "reviewed" && v.reviewed) {
     rows.push({
       id: "review",
       state: "yes",
       title: { key: "mods.ckIndex" },
-      detail: { key: "mods.ckIndexDetail", args: [v.reviewed.by, v.reviewed.at] },
+      detail: indexFrom
+        ? { key: "mods.ckIndexDetailDated", args: [v.reviewed.by, v.reviewed.at, indexFrom] }
+        : { key: "mods.ckIndexDetail", args: [v.reviewed.by, v.reviewed.at] },
     });
   } else {
     rows.push({
@@ -100,18 +108,32 @@ export interface InstallCheckContext {
   trustOf: (id: string) => Trust | undefined;
   /** The version's mod interface, when it is known. */
   versionAbi: string | null;
+  /** The day of the index reviews come from, when it isn't fresh. */
+  indexFrom?: string | null;
 }
 
-/** Whether the build fits the version: only "yes" when both interfaces are known and equal. */
-function abiCheck(plan: InstallPlan, v: CatalogVersion, ctx: InstallCheckContext): CheckRow {
-  const detail: RichMsg = { key: "mods.ckFitsDetail", args: [abi(v.abi)] };
-  if (plan.problem?.code === "ModIncompatible" || (ctx.versionAbi !== null && ctx.versionAbi !== v.abi)) {
-    return { id: "abi", state: "no", title: { key: "mods.ckFileFitsNo", args: [ctx.tag] }, detail };
+/**
+ * Whether a build fits the version (contract R4 §5): "yes" and "no" only when the backend knows;
+ * unknown (null) is unknown, with Retry, never "no".
+ */
+export function fitCheck(fits: boolean | null, buildAbi: string, tag: string): CheckRow {
+  const detail: RichMsg = { key: "mods.ckFitsDetail", args: [abi(buildAbi)] };
+  if (fits === null) {
+    return { id: "abi", state: "unknown", title: { key: "mods.ckFitUnchecked", args: [tag] }, detail: { key: "mods.ckFitUncheckedDetail" }, retry: true };
   }
-  if (ctx.versionAbi === null || plan.problem?.code === "AbiUnavailable") {
-    return { id: "abi", state: "unknown", title: { key: "mods.ckFitUnchecked", args: [ctx.tag] }, detail };
-  }
+  if (!fits) return { id: "abi", state: "no", title: { key: "mods.ckFileFitsNo", args: [tag] }, detail };
   return { id: "abi", state: "yes", title: { key: "mods.ckFits" }, detail };
+}
+
+function abiCheck(plan: InstallPlan, v: CatalogVersion, ctx: InstallCheckContext): CheckRow {
+  // A plan from before R4 has no fitsVersion: fall back to what the interfaces say.
+  const fits =
+    plan.fitsVersion !== undefined
+      ? plan.fitsVersion
+      : ctx.versionAbi === null || plan.problem?.code === "AbiUnavailable"
+        ? null
+        : ctx.versionAbi === v.abi;
+  return fitCheck(fits, v.abi, ctx.tag);
 }
 
 /** What else an install brings: dependencies it downloads, turns on, or can't find. */
@@ -150,7 +172,8 @@ export function installChecks(plan: InstallPlan, v: CatalogVersion, ctx: Install
   if (plan.problem) {
     rows.push({ id: "problem", state: "no", title: { key: "mods.ckWontInstall", args: [{ error: plan.problem }] } });
   }
-  rows.push(...buildChecks(v).slice(0, 1), pinCheck(v), ...buildChecks(v).slice(1));
+  const build = buildChecks(v, ctx.indexFrom ?? null);
+  rows.push(...build.slice(0, 1), pinCheck(v), ...build.slice(1));
   rows.push(abiCheck(plan, v, ctx));
   rows.push(...planDepChecks(plan, v.deps, ctx));
   return rows;
@@ -195,13 +218,12 @@ export function weakerDeps(plan: InstallPlan, ctx: Pick<InstallCheckContext, "na
 }
 
 /**
- * The step to show while an install runs: the first file that is still downloading or being
- * checked (a dependency before the mod), else the last one being installed. With its name.
+ * The step to show while an operation runs: the file its newest event is about (contract R4 §3).
+ * Events come in the order the backend works, so a file that finished checking and waits for
+ * the final install never hides the one now downloading.
  */
-export function activeStep(entries: ModProgress[], plan: InstallPlan | null, fallbackName: string): { progress: ModProgress | undefined; name: string } {
-  const progress = entries.find((p) => p.stage !== "installing") ?? entries[entries.length - 1];
-  const item = progress && plan ? [plan.target, ...plan.install].find((i) => i.sha256 === progress.sha256) : undefined;
-  return { progress, name: item?.name ?? fallbackName };
+export function activeStep(entries: ModProgress[]): ModProgress | undefined {
+  return entries[entries.length - 1];
 }
 
 /** The lines under the checks that say what an update replaces, including a change of tier. */
@@ -220,7 +242,7 @@ export function replaceNotes(plan: InstallPlan): RichMsg[] {
 }
 
 /** A zip from the player's computer. */
-export function fileChecks(inspection: FileInspection, tag: string): CheckRow[] {
+export function fileChecks(inspection: FileInspection, tag: string, indexFrom: string | null = null): CheckRow[] {
   const rows: CheckRow[] = [];
   const { archive, catalogMatch: known } = inspection;
   if (inspection.revokedReason) {
@@ -228,12 +250,8 @@ export function fileChecks(inspection: FileInspection, tag: string): CheckRow[] 
   }
   if (known) {
     rows.push({ id: "known", state: "yes", title: { key: "mods.ckFileKnown", args: [known.name, known.build.version] } });
-    rows.push(...buildChecks(known.build));
-    rows.push(
-      known.fitsVersion
-        ? { id: "abi", state: "yes", title: { key: "mods.ckFits" }, detail: { key: "mods.ckFitsDetail", args: [abi(known.build.abi)] } }
-        : { id: "abi", state: "no", title: { key: "mods.ckFileFitsNo", args: [tag] } }
-    );
+    rows.push(...buildChecks(known.build, indexFrom));
+    rows.push(fitCheck(known.fitsVersion, known.build.abi, tag));
   } else if (archive) {
     rows.push({ id: "known", state: "no", title: { key: "mods.ckFileNotKnown" } });
     rows.push({ id: "provenance", state: "unknown", title: { key: "mods.ckNoBuild" }, detail: { key: "mods.ckNoBuildDetail" } });
@@ -280,6 +298,72 @@ export function platformLabel(p: string): string {
 /** Whether a file can be installed, and whether it needs the typed confirmation. */
 export function fileVerdict(inspection: FileInspection): { usable: boolean; needsTyping: boolean } {
   const { archive, catalogMatch: known } = inspection;
-  const usable = !!archive && inspection.fitsSystem && !inspection.revokedReason && (known === null || known.fitsVersion);
+  // Unknown fit isn't "no": the plan's own problem (if any) says whether it can install.
+  const usable = !!archive && inspection.fitsSystem && !inspection.revokedReason && (known === null || known.fitsVersion !== false);
   return { usable, needsTyping: usable && known === null };
+}
+
+/**
+ * What replacing an installed mod with a file means: the version it replaces, and a change of
+ * tier when there is one, e.g. a Reviewed build replaced by an Unverified file.
+ */
+export function fileReplaceNotes(inspection: FileInspection, installedTrust: Trust | undefined): RichMsg[] {
+  if (!inspection.replaces) return [];
+  const now: Trust = inspection.catalogMatch?.build.trust ?? "unverified";
+  if (installedTrust && installedTrust !== now) {
+    return [{ key: "mods.fileReplacesTrust", args: [inspection.replaces, { trust: installedTrust }, { trust: now }] }];
+  }
+  return [{ key: "mods.fileReplaces", args: [inspection.replaces] }];
+}
+
+/** What a player agreed to, in the terms a change to it is told in. */
+export interface ConsentView {
+  /** Builds that will be installed. */
+  builds: { id: string; name: string; version: string | null; trust: Trust | null }[];
+  /** Installed mods that will be turned on. */
+  enable: string[];
+  /** Mods that will be installed turned off. */
+  off: string[];
+}
+
+export function planConsent(plan: InstallPlan): ConsentView {
+  return {
+    builds: [plan.target, ...plan.install].map((i) => ({ id: i.id, name: i.name, version: i.version, trust: i.trust })),
+    enable: plan.enable,
+    off: plan.turnsOn || (plan.replaces && !plan.replaces.enabled) ? [] : [plan.target.id],
+  };
+}
+
+export function copyConsentView(preview: CopyPreview): ConsentView {
+  return {
+    builds: [
+      ...preview.items.filter((i) => i.outcome === "install").map((i) => ({ id: i.id, name: i.name, version: i.version, trust: i.trust })),
+      ...preview.deps.map((d) => ({ id: d.id, name: d.name, version: d.version, trust: d.trust })),
+    ],
+    enable: preview.enable,
+    off: preview.installedOff,
+  };
+}
+
+/**
+ * What changed between the plan the player saw and the one there is now, after the backend
+ * refused the old one (`ModChangedMeanwhile`). One line per change; when the difference isn't one
+ * the player can see (the version's interface, say), one line that says it changed.
+ */
+export function consentChanges(before: ConsentView, after: ConsentView, name: (id: string) => string): RichMsg[] {
+  const out: RichMsg[] = [];
+  const old = new Map(before.builds.map((b) => [b.id, b]));
+  const now = new Map(after.builds.map((b) => [b.id, b]));
+  for (const b of after.builds) {
+    const was = old.get(b.id);
+    if (!was) out.push({ key: "mods.changedAdded", args: [b.name, b.version ?? ""] });
+    else if (was.version !== b.version) out.push({ key: "mods.changedVersion", args: [b.name, b.version ?? "", was.version ?? ""] });
+    if (was && b.trust && was.trust && was.trust !== b.trust) out.push({ key: "mods.changedTrust", args: [b.name, { trust: b.trust }] });
+  }
+  for (const b of before.builds) if (!now.has(b.id)) out.push({ key: "mods.changedDropped", args: [b.name] });
+  for (const id of after.enable) if (!before.enable.includes(id)) out.push({ key: "mods.changedEnables", args: [name(id)] });
+  for (const id of before.enable) if (!after.enable.includes(id)) out.push({ key: "mods.changedNoEnable", args: [name(id)] });
+  for (const id of after.off) if (!before.off.includes(id)) out.push({ key: "mods.changedOff", args: [name(id)] });
+  for (const id of before.off) if (!after.off.includes(id)) out.push({ key: "mods.changedOn", args: [name(id)] });
+  return out.length ? out : [{ key: "mods.changedOther" }];
 }

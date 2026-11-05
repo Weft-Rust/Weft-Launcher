@@ -14,6 +14,7 @@ const preview: CopyPreview = {
   enable: ["structures"],
   installedOff: ["lanterns"],
   missing: ["signals"],
+  planToken: "plan-1",
 };
 
 const target = {

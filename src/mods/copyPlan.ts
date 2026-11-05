@@ -7,7 +7,7 @@ import type { CheckState } from "./checks";
 
 export const COPY_OUTCOME: Record<CopyItem["outcome"], { state: CheckState; key: MessageKey }> = {
   install: { state: "yes", key: "mods.copyWillInstall" },
-  alreadyThere: { state: "unknown", key: "mods.copyAlreadyThere" },
+  alreadyThere: { state: "same", key: "mods.copyAlreadyThere" },
   noBuild: { state: "no", key: "mods.copyNoBuild" },
   localFile: { state: "no", key: "mods.copyLocalFile" },
   revoked: { state: "no", key: "mods.copyRevoked" },

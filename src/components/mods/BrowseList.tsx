@@ -1,9 +1,11 @@
 import { useId, useMemo, useState } from "react";
 import { useI18n } from "../../i18n/useI18n";
-import { translateError } from "../../i18n/errors";
+import { showError } from "../../i18n/errors";
+import { activeStep } from "../../mods/checks";
+import { ErrorText } from "../ErrorText";
 import { useMods } from "../../hooks/useMods";
 import type { CatalogMod, ProfileReport } from "../../mods/types";
-import { fittingVersions, installedFor, matchesSearch } from "../../mods/select";
+import { fittingVersions, installedFor, matchesSearch, networkDown } from "../../mods/select";
 import { Truncate } from "../Truncate";
 import { ModIcon } from "./ModIcon";
 import { ModProgressBar } from "./ModProgressBar";
@@ -17,13 +19,15 @@ interface BrowseListProps {
 
 export function BrowseList({ report, locked }: BrowseListProps) {
   const { t, formatList } = useI18n();
-  const { catalog, catalogLoading, catalogError, refreshCatalog, progressFor } = useMods();
+  const { catalog, catalogLoading, catalogError, refreshCatalog, progressOf } = useMods();
   const [query, setQuery] = useState("");
   const [onlyFitting, setOnlyFitting] = useState(true);
   const [prereleases, setPrereleases] = useState(false);
   const [open, setOpen] = useState<CatalogMod | null>(null);
   const searchId = useId();
+  const listId = useId().replace(/:/g, "");
   const tag = report.tag;
+  const offline = networkDown(catalog, catalogError);
   const abi = report.versionAbi;
 
   const rows = useMemo(() => {
@@ -41,9 +45,9 @@ export function BrowseList({ report, locked }: BrowseListProps) {
   // No catalogue at all: say why and offer to try again, never "no mods fit".
   if (!catalog) {
     return catalogError && !catalogLoading ? (
-      <div className="empty-state framed-empty" role="alert">
+      <div className="empty-state framed-empty">
         <p>{t("mods.catalogFailed")}</p>
-        <p className="hint">{translateError(catalogError)}</p>
+        <ErrorText error={showError(catalogError)} className="hint" />
         <div className="empty-actions">
           <button className="btn-primary" onClick={refreshCatalog}>
             {t("mods.retry")}
@@ -93,11 +97,18 @@ export function BrowseList({ report, locked }: BrowseListProps) {
                 ? t("mods.browseEmptyFits", tag)
                 : t("mods.browseEmptyAll")}
           </p>
-          {onlyFitting && !query && catalog.mods.length > 0 && (
-            <button className="btn-secondary" onClick={() => setOnlyFitting(false)}>
-              {t("mods.showAll")}
-            </button>
-          )}
+          <div className="empty-actions">
+            {query && (
+              <button className="btn-secondary" onClick={() => setQuery("")}>
+                {t("mods.clearSearch")}
+              </button>
+            )}
+            {onlyFitting && catalog.mods.length > 0 && (
+              <button className="btn-secondary" onClick={() => setOnlyFitting(false)}>
+                {t("mods.showAll")}
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <ul className="mod-grid" aria-label={t("mods.tabBrowse")}>
@@ -106,37 +117,49 @@ export function BrowseList({ report, locked }: BrowseListProps) {
             // Installed and nothing better to offer: say so instead of a button that can't work.
             const isCurrent = installed && (!best || installed.sha256 === best.sha256);
             const onlyPre = !best && fittingVersions(catalog, mod, abi, true).length > 0;
-            const p = best ? progressFor(best.sha256) : undefined;
+            const events = progressOf({ kind: "mod", tag, id: mod.id });
+            const p = events.length ? activeStep(events) : undefined;
             const who = mod.origin.kind === "source" ? mod.origin.repo : formatList(mod.authors) || mod.id;
+            const cardId = `${listId}-${mod.key.replace(/[^A-Za-z0-9_-]/g, "_")}`;
             const what = best ? best.version : onlyPre ? t("mods.onlyPrerelease") : t("mods.notForVersion", tag);
             return (
-              <li key={mod.key} className="mod-card framed">
+              <li key={mod.key} className="mod-card framed" data-key={mod.key}>
                 <div className="mod-card-head">
                   <ModIcon id={mod.id} url={mod.icon} />
+                  {/* The name has the whole width; the tier sits on the line under it. */}
                   <div className="mod-card-title">
                     <Truncate className="mod-name" text={mod.name} />
-                    <span className="mod-badges">
-                      {shown && <TrustBadge trust={shown.trust} />}
-                      {best && <ChannelBadge channel={best.channel} />}
-                    </span>
+                  </div>
+                  <div className="mod-badges">
+                    {shown && <TrustBadge trust={shown.trust} />}
+                    {best && <ChannelBadge channel={best.channel} />}
+                    <Truncate className="mod-source" text={`${what} · ${who}`} />
                   </div>
                 </div>
                 <Truncate className="mod-summary" text={mod.summary || t("mods.noSummary")} lines={2} />
                 <div className="mod-card-foot">
-                  <Truncate className="mod-source" text={`${what} · ${who}`} />
                   {p ? (
-                    <ModProgressBar progress={p} name={mod.name} />
+                    <ModProgressBar progress={p} name={p.modId === mod.id ? mod.name : p.modId} compact />
                   ) : isCurrent ? (
                     <span className="installed-mark">{t("mods.installed")}</span>
                   ) : (
-                    <button
-                      className="btn-primary btn-small"
-                      disabled={!best || locked}
-                      onClick={() => setOpen(mod)}
-                      aria-label={t(installed ? "mods.updateLabel" : "mods.installLabel", mod.name)}
-                    >
-                      {t(installed ? "mods.updateButton" : "mods.install")}
-                    </button>
+                    <>
+                      <button
+                        className="btn-primary btn-small"
+                        disabled={!best || locked}
+                        onClick={() => setOpen(mod)}
+                        aria-label={t(installed ? "mods.updateLabel" : "mods.installLabel", mod.name)}
+                        aria-describedby={offline && best ? `${cardId}-net` : undefined}
+                      >
+                        {t(installed ? "mods.updateButton" : "mods.install")}
+                      </button>
+                      {/* A download needs the network, and it was down at the last try. */}
+                      {offline && best && (
+                        <small className="needs-net" id={`${cardId}-net`}>
+                          {t("mods.needsNetworkShort")}
+                        </small>
+                      )}
+                    </>
                   )}
                 </div>
               </li>

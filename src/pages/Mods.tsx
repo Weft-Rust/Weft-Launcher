@@ -1,7 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { useI18n } from "../i18n/useI18n";
-import { translateError } from "../i18n/errors";
+import { showError, type Shown } from "../i18n/errors";
+import { bannerPlan } from "../mods/banners";
+import { ErrorDetails } from "../components/ErrorText";
+import { announce } from "../components/LiveRegion";
 import { useInstall } from "../hooks/useInstall";
 import { useGameState } from "../hooks/useGameState";
 import { useMods, type Notice } from "../hooks/useMods";
@@ -40,7 +43,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
   const [filePath, setFilePath] = useState<string | null>(null);
   const [showSources, setShowSources] = useState(false);
   const [showCopy, setShowCopy] = useState(false);
-  const [rowError, setRowError] = useState<string | null>(null);
+  const [rowError, setRowError] = useState<Shown | null>(null);
   const [focusMod, setFocusMod] = useState<string | null>(null);
   const panel = useRef<HTMLElement>(null);
   const versionLabelId = useId();
@@ -61,6 +64,10 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
     : [];
 
   useEffect(() => setRowError(null), [tag, view]);
+  // A failed row action is said once, politely, like every result.
+  useEffect(() => {
+    if (rowError) announce(`row-error:${Date.now()}`, rowError.message);
+  }, [rowError]);
 
   if (!loaded) return <main className="page mods-page" />;
 
@@ -89,12 +96,15 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
       });
       if (typeof path === "string") setFilePath(path);
     } catch (err) {
-      setRowError(translateError(err));
+      setRowError(showError(err));
     }
   };
 
   const openFolder = () =>
-    modsApi.openPlayerModsFolder().catch((err) => setRowError(t("mods.folderFailed", translateError(err))));
+    modsApi.openPlayerModsFolder().catch((err) => {
+      const shown = showError(err);
+      setRowError({ ...shown, message: t("mods.folderFailed", shown.message) });
+    });
 
   /** Focus that was on something that went away lands on the list. */
   const settleFocus = () => panel.current?.focus({ preventScroll: true });
@@ -102,7 +112,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
   const undo = async (n: Notice) => {
     if (!n.undo) return;
     const r = await restore(tag, n.undo.id);
-    if (r.status === "failed") setRowError(r.message);
+    if (r.status === "failed") setRowError(r.shown);
     else if (r.status === "done") {
       setView("installed");
       setFocusMod(n.undo.id);
@@ -113,72 +123,94 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
   const empty = report && report.mods.length === 0;
   const loadFailed = profileError(tag);
   const blocked = (report?.blocking.length ?? 0) > 0;
+  const shadowedOff = (report?.shadowed ?? []).filter((x) => x.managed === "off");
+  const catalog = mods.catalog;
 
-  // What answers the player's last action, or must not be missed, shows in full. The rest folds
-  // away, the catalogue's problems before the player's own folder.
-  const full: BannerItem[] = [];
-  const quiet: BannerItem[] = [];
-  if (running) full.push({ id: "running", tone: "info", text: t("mods.runningBanner", tag) });
-  for (const n of notices(tag)) {
-    full.push({
-      id: `notice:${n.id}`,
-      tone: n.tone,
-      reveal: true,
-      text: n.lines.map((l, i) => (
-        <span key={i} className="banner-line">
-          {tm(l)}
-        </span>
-      )),
-      actions: (
-        <>
-          {n.undo && (
-            <button className="btn-secondary btn-small" onClick={() => undo(n)} aria-label={t("mods.undoLabel", n.undo.name)} disabled={running}>
-              {t("mods.undo")}
+  const plan = bannerPlan({
+    view,
+    running,
+    notices: notices(tag).map((n) => n.id),
+    blocked,
+    rowError: !!rowError,
+    index: catalog?.index.freshness ?? null,
+    indexTrouble: !!catalog?.index.error,
+    refreshFailed: !!catalog && !!mods.catalogError,
+    sources: (catalog?.sources ?? []).filter((x) => x.error).map((x) => x.repo),
+    abiUnknown: !!report?.abiError,
+    shadowed: shadowedOff.length > 0,
+    unmanaged: (report?.unmanaged.length ?? 0) > 0,
+  });
+
+  const showFolder = (
+    <button className="btn-secondary btn-small" onClick={openFolder}>
+      {t("mods.unmanagedShow")}
+    </button>
+  );
+  const item = (id: string): BannerItem | null => {
+    if (id === "running") return { id, tone: "info", text: t("mods.runningBanner", tag) };
+    if (id.startsWith("notice:")) {
+      const n = notices(tag).find((x) => `notice:${x.id}` === id);
+      if (!n) return null;
+      return {
+        id,
+        tone: n.tone,
+        reveal: true,
+        text: n.lines.map((l, i) => (
+          <span key={i} className="banner-line">
+            {tm(l)}
+          </span>
+        )),
+        actions: (
+          <>
+            {n.undo && (
+              <button className="btn-secondary btn-small" onClick={() => undo(n)} aria-label={t("mods.undoLabel", n.undo.name)} disabled={running}>
+                {t("mods.undo")}
+              </button>
+            )}
+            <button
+              className="btn-secondary btn-small"
+              onClick={() => {
+                dismissNotice(n.id);
+                settleFocus();
+              }}
+            >
+              {t("mods.dismiss")}
             </button>
-          )}
-          <button
-            className="btn-secondary btn-small"
-            onClick={() => {
-              dismissNotice(n.id);
-              settleFocus();
-            }}
-          >
-            {t("mods.dismiss")}
-          </button>
-        </>
-      ),
-    });
-  }
-  if (blocked) {
-    const panelItem = <BlockerPanel tag={tag} locked={running} review={review} inBanner />;
-    const summary = tn("mods.blockersShort", report!.blocking.length, tag, formatList(report!.blocking.map(name)));
-    // On Installed the fixes sit right above the rows; on Browse they fold into one line.
-    if (view === "installed") full.push({ id: "blocking", tone: "bad", text: panelItem });
-    else quiet.push({ id: "blocking", tone: "bad", text: panelItem, summary, rank: 0 });
-  }
-  if (rowError) full.push({ id: "error", tone: "bad", text: rowError, alert: true });
-  // "Reviewed mods are unavailable" ranks first, so it leads the one row on Browse and is never
-  // behind "More". The row stays one line, so two rows of cards fit under it at 960×565.
-  quiet.push(...catalogBanners.full.map((b) => ({ ...b, rank: view === "browse" ? -1 : b.rank })));
-  quiet.push(...catalogBanners.quiet);
-  if (report?.abiError) {
-    const text = t(view === "browse" ? "mods.abiUnknownBrowse" : "mods.abiUnknown", tag);
-    quiet.push({ id: "abi", tone: "info", text, summary: text, rank: 3 });
-  }
-  if (report && report.unmanaged.length > 0) {
-    quiet.push({
-      id: "unmanaged",
-      tone: "warn",
-      text: t("mods.unmanagedBanner", formatList(report.unmanaged)),
-      summary: t("mods.unmanagedSummary"),
-      rank: 4,
-      actions: (
-        <button className="btn-secondary btn-small" onClick={openFolder}>
-          {t("mods.unmanagedShow")}
-        </button>
-      ),
-    });
-  }
+          </>
+        ),
+      };
+    }
+    if (id === "error" && rowError) {
+      return {
+        id,
+        tone: "bad",
+        text: (
+          <>
+            {rowError.message}
+            {rowError.detail && <ErrorDetails detail={rowError.detail} label={t("errors.details")} />}
+          </>
+        ),
+      };
+    }
+    if (id === "blocking" && report) {
+      const summary = tn("mods.blockersShort", report.blocking.length, tag, formatList(report.blocking.map(name)));
+      return { id, tone: "bad", text: <BlockerPanel tag={tag} locked={running} review={review} inBanner />, summary };
+    }
+    if (id === "abi") {
+      const text = t(view === "browse" ? "mods.abiUnknownBrowse" : "mods.abiUnknown", tag);
+      return { id, tone: "info", text, summary: t("mods.abiUnknownShort", tag), actions: <RetryProfile tag={tag} /> };
+    }
+    if (id === "shadowed") {
+      const list = formatList(shadowedOff.map((x) => `${name(x.id)} (${x.file})`));
+      return { id, tone: "warn", text: t("mods.shadowBanner", list), summary: t("mods.shadowShort", formatList(shadowedOff.map((x) => name(x.id)))), actions: showFolder };
+    }
+    if (id === "unmanaged" && report) {
+      return { id, tone: "warn", text: t("mods.unmanagedBanner", formatList(report.unmanaged)), summary: t("mods.unmanagedSummary"), actions: showFolder };
+    }
+    return catalogBanners[id] ?? null;
+  };
+  const full = plan.full.map((p) => item(p.id)).filter((x): x is BannerItem => !!x);
+  const quiet = plan.quiet.map((p) => item(p.id)).filter((x): x is BannerItem => !!x).map((x, i) => ({ ...x, rank: i }));
 
   const count = report?.mods.length ?? 0;
   const copying = mods.isCopying(tag);
@@ -241,8 +273,9 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
       <section {...tabs.panel} className="mods-panel" ref={panel} tabIndex={-1}>
         {!report ? (
           loadFailed ? (
-            <div className="empty-state framed-empty" role="alert">
-              <p>{t("mods.profileFailed", tag, loadFailed)}</p>
+            <div className="empty-state framed-empty">
+              <p>{t("mods.profileFailed", tag, loadFailed.message)}</p>
+              {loadFailed.detail && <ErrorDetails detail={loadFailed.detail} label={t("errors.details")} />}
               <div className="empty-actions">
                 <button className="btn-primary" onClick={() => loadProfile(tag)}>
                   {t("mods.profileRetry")}
@@ -276,6 +309,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
               onError={setRowError}
               onUpdate={review.openUpdate}
               canUpdate={review.canUpdate}
+              updatesUnavailable={!catalog && mods.catalogError ? t("mods.updatesNeedCatalog") : null}
               locked={running}
               focusMod={focusMod}
               onFocused={() => setFocusMod(null)}
@@ -292,5 +326,25 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
       {showCopy && <CopyDialog tag={tag} donors={donors} onClose={() => setShowCopy(false)} />}
       {review.dialog}
     </main>
+  );
+}
+
+/** Asks for the version's set again: the mod interface may be found out this time. */
+function RetryProfile({ tag }: { tag: string }) {
+  const { t } = useI18n();
+  const { loadProfile, refreshCatalog } = useMods();
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      className="btn-secondary btn-small"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        await Promise.all([loadProfile(tag), refreshCatalog()]);
+        setBusy(false);
+      }}
+    >
+      {busy ? t("mods.retrying") : t("mods.retry")}
+    </button>
   );
 }
