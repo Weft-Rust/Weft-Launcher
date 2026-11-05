@@ -1,4 +1,4 @@
-import { t, type MessageKey } from './index';
+import { formatTime, t, type MessageKey } from './index';
 import type { ErrorCode, UiError } from '../mods/types';
 
 // Every code the backend can send, and the message for it. A Record over the closed union, so a
@@ -87,6 +87,11 @@ export interface Shown {
 export function showError(err: unknown): Shown {
   if (err === null || err === undefined) return { message: '', detail: null };
   const e = asAppError(err);
+  if (e.code === 'ModSourceRateLimited') {
+    // When GitHub said the limit ends, that is what to say: "until 14:32".
+    const until = rateLimitReset(e);
+    return { message: until ? t('errors.modSourceRateLimitedUntil', formatTime(until)) : t('errors.modSourceRateLimited'), detail: null };
+  }
   if (e.code !== 'Unknown') {
     const key = ERROR_KEY[e.code];
     if (takesDetail(key)) return { message: t(key, e.detail ?? ''), detail: null };
@@ -122,6 +127,16 @@ function drifted(err: unknown) {
 /** The sentence alone, where there is no room for Details (a check row, a banner line). */
 export function translateError(err: unknown): string {
   return showError(err).message;
+}
+
+/**
+ * When GitHub said a source's rate limit ends: the backend's detail for `ModSourceRateLimited`
+ * is "resets at <Unix seconds>" (src-tauri/src/mods/error.rs) when it said. Null otherwise.
+ */
+export function rateLimitReset(error: { code: string; detail: string | null } | null | undefined): Date | null {
+  if (error?.code !== 'ModSourceRateLimited') return null;
+  const m = /^resets at (\d+)$/.exec(error.detail ?? '');
+  return m ? new Date(Number(m[1]) * 1000) : null;
 }
 
 function takesDetail(key: MessageKey): boolean {

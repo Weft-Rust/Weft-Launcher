@@ -211,6 +211,8 @@ const indexFlag = flag("index") ?? "fresh";
 const sourceFlag = flag("source") ?? "ok";
 const INDEX_DATE = indexFlag === "fresh" ? "2026-11-04T18:00:00Z" : "2026-11-02T12:00:00Z";
 const err = (code: ErrorCode, detail: string | null = null): AppErrorPayload => ({ code, detail });
+/** GitHub's word on when a rate limit ends, as the backend passes it on: 20 minutes from now. */
+const resetsAt = () => `resets at ${Math.floor(Date.now() / 1000) + 20 * 60}`;
 
 const catalog: Catalog = {
   mods: allMods.filter((m) => !((indexFlag === "unavailable" || indexFlag === "unreachable") && m.origin.kind === "index")),
@@ -248,7 +250,7 @@ const catalog: Catalog = {
         sourceFlag === "notfound"
           ? err("ModSourceNotFound", LANTERN_REPO)
           : sourceFlag === "ratelimited"
-            ? err("ModSourceRateLimited", LANTERN_REPO)
+            ? err("ModSourceRateLimited", resetsAt())
             : sourceFlag === "offline"
               ? err("Network", "offline")
               : null,
@@ -857,7 +859,7 @@ const handlers: Handlers = {
     const late = forceRefresh && raceFlag && !raced;
     if (late) raced = true;
     const answer = { ...structuredClone(catalog), revision: ++revision };
-    if (late && raceFlag === "stale") answer.sources = answer.sources.map((x) => ({ ...x, freshness: "cached", error: err("ModSourceRateLimited", x.repo) }));
+    if (late && raceFlag === "stale") answer.sources = answer.sources.map((x) => ({ ...x, freshness: "cached", error: err("ModSourceRateLimited", resetsAt()) }));
     await sleep(late ? 2500 : forceRefresh ? 400 : 0);
     if (late && raceFlag === "error") fail("Network", "the slow refresh timed out");
     if (failures.has("catalog")) fail("Network", "the catalogue request timed out");
@@ -879,7 +881,7 @@ const handlers: Handlers = {
   add_mod_source: async ({ repo: input }) => {
     await sleep(500);
     const repo = parseRepo(input) ?? fail("ModSourceInvalid", input);
-    if (sourceFlag === "ratelimited") fail("ModSourceRateLimited", repo);
+    if (sourceFlag === "ratelimited") fail("ModSourceRateLimited", resetsAt());
     const canonical = KNOWN_REPOS.find((k) => sameRepo(k, repo)) ?? fail("ModSourceNotFound", repo);
     // A damaged list stays where it was set aside; this starts a new one.
     if (sourcesDamaged) {

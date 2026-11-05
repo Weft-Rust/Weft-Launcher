@@ -3,7 +3,7 @@
 //! catalogue says; what is checked is that the description and the zip agree with GitHub's own
 //! record of the release.
 
-use reqwest::header::{ETAG, IF_NONE_MATCH, LINK, USER_AGENT};
+use reqwest::header::{ETAG, HeaderMap, IF_NONE_MATCH, LINK, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -341,6 +341,15 @@ async fn get_mod_json(client: &reqwest::Client, url: &str) -> Option<ModJson> {
 }
 
 /// The `rel="next"` URL of a GitHub `Link` header, if it stays on the API.
+/// GitHub refused for too many requests, and said when the limit ends, when it said.
+fn rate_limited(headers: &HeaderMap) -> ModsError {
+    let reset = headers
+        .get("x-ratelimit-reset")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse().ok());
+    ModsError::SourceRateLimited { reset }
+}
+
 pub(crate) fn next_page(link: &str) -> Option<String> {
     link.split(',').find_map(|part| {
         let (url, params) = part.split_once(';')?;
@@ -423,7 +432,7 @@ async fn list_releases(
             200 => {}
             304 if page == 0 => return Ok(Listing::NotModified),
             404 => return Err(ModsError::SourceNotFound(repo.to_string())),
-            403 | 429 => return Err(ModsError::SourceRateLimited),
+            403 | 429 => return Err(rate_limited(response.headers())),
             status => return Err(ModsError::Http { status, url }),
         }
         releases.extend(response.json::<Vec<GhRelease>>().await?);
@@ -617,7 +626,7 @@ pub async fn canonical_name(
     match response.status().as_u16() {
         200 => {}
         404 => return Err(ModsError::SourceNotFound(repo.to_string())),
-        403 | 429 => return Err(ModsError::SourceRateLimited),
+        403 | 429 => return Err(rate_limited(response.headers())),
         status => return Err(ModsError::Http { status, url }),
     }
     let found: GhRepo = response.json().await?;
@@ -879,11 +888,14 @@ pub(crate) mod tests {
             checked: Some("2026-11-01T00:00:00Z".into()),
             no_mods: None,
         };
-        let got = fall_back(Some(cache), ModsError::SourceRateLimited);
+        let got = fall_back(Some(cache), ModsError::SourceRateLimited { reset: None });
         assert_eq!(got.freshness, Freshness::Cached);
         assert_eq!(got.mods.len(), 1);
         assert_eq!(got.checked.as_deref(), Some("2026-11-01T00:00:00Z"));
-        assert!(matches!(got.error, Some(ModsError::SourceRateLimited)));
+        assert!(matches!(
+            got.error,
+            Some(ModsError::SourceRateLimited { .. })
+        ));
 
         let got = fall_back(None, ModsError::SourceNotFound("a/b".into()));
         assert_eq!(got.freshness, Freshness::Unavailable);

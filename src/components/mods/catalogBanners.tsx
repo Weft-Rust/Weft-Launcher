@@ -3,7 +3,8 @@ import { useI18n } from "../../i18n/useI18n";
 import { useMods } from "../../hooks/useMods";
 import type { Catalog, ErrorCode, SourceStatus } from "../../mods/types";
 import type { BannerItem } from "./BannerStack";
-import { showError } from "../../i18n/errors";
+import { rateLimitReset, showError } from "../../i18n/errors";
+import { formatTime } from "../../i18n";
 import { ErrorDetails } from "../ErrorText";
 import { httpStatus } from "../../mods/select";
 
@@ -56,7 +57,9 @@ const SOURCE_CAUSE: Record<ReturnType<typeof cause>, MessageKey> = {
 export function sourceProblem(s: SourceStatus, t: T, formatDay: (iso: string | null) => string): string {
   const shown =
     s.freshness === "unavailable" || !s.checked ? t("mods.sourceShowingNone") : t("mods.sourceShowingFrom", formatDay(s.checked));
-  return `${t(SOURCE_CAUSE[cause(s.error?.code)], s.repo)} ${shown}`;
+  const until = rateLimitReset(s.error);
+  const why = until ? t("mods.sourceErrRateUntil", s.repo, formatTime(until)) : t(SOURCE_CAUSE[cause(s.error?.code)], s.repo);
+  return `${why} ${shown}`;
 }
 
 /** A new index arrived and was refused (bad signature, malformed, older than one accepted). */

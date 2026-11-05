@@ -120,6 +120,11 @@ export function formatList(items: string[]): string {
   return new Intl.ListFormat(currentLocale, { style: 'long', type: 'conjunction' }).format(items);
 }
 
+/** A time of day, as the language writes it: "14:32", "2:32 PM". */
+export function formatTime(d: Date): string {
+  return new Intl.DateTimeFormat(currentLocale, { hour: 'numeric', minute: '2-digit' }).format(d);
+}
+
 /** A day, short: "2 Nov" this year, "2 Nov 2025" before it. */
 export function formatDay(iso: string | null | undefined, now: Date = new Date()): string {
   if (!iso) return '';

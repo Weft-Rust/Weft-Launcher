@@ -1062,7 +1062,8 @@ test.describe("degraded states", () => {
     await expect(index.locator(".index-badge")).toHaveText("Signed Sep 21 · may be out of date");
     await expect(index.locator("button", { hasText: "Retry" })).toHaveCount(1);
     const source = page.locator(".source-row", { hasText: "lantern-dev/lanterns" });
-    await expect(source).toContainText("GitHub is limiting requests, so lantern-dev/lanterns couldn't be refreshed.");
+    // GitHub said when the limit ends: that is what the player needs.
+    await expect(source).toContainText(/GitHub is limiting requests until \d{1,2}:\d{2}( [AP]M)?, so lantern-dev\/lanterns couldn't be refreshed\./);
     await expect(source.locator("button", { hasText: "Retry" })).toHaveCount(1);
   });
 

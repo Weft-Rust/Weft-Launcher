@@ -17,9 +17,10 @@ pub enum ModsError {
     /// A mod download that GitHub refused for too many requests.
     #[error("Too many requests")]
     RateLimited,
-    /// GitHub's API refused to list a source's releases for too many requests.
+    /// GitHub's API refused to list a source's releases for too many requests. `reset`: when
+    /// GitHub said the limit ends (`x-ratelimit-reset`, Unix seconds), when it said.
     #[error("GitHub API rate limit exceeded")]
-    SourceRateLimited,
+    SourceRateLimited { reset: Option<u64> },
     #[error("Not on the server any more: {0}")]
     DownloadNotFound(String),
     #[error("Too large: {0}")]
@@ -127,7 +128,7 @@ impl ModsError {
             Io(_) => C::Io,
             Serde(_) => C::Serde,
             RateLimited => C::RateLimited,
-            SourceRateLimited => C::ModSourceRateLimited,
+            SourceRateLimited { .. } => C::ModSourceRateLimited,
             DownloadNotFound(_) => C::ModDownloadNotFound,
             TooLarge(_) => C::ModTooLarge,
             IndexSignatureInvalid(_) => C::IndexSignatureInvalid,
@@ -168,7 +169,9 @@ impl From<ModsError> for AppError {
             Io(e) => Some(e.to_string()),
             Serde(e) => Some(e.to_string()),
             Http { status, url } => Some(format!("HTTP {status} ({url})")),
-            RateLimited | SourceRateLimited | IndexRollback | FileChanged | Cancelled => None,
+            // The page reads the time from here (src/mods/select.ts `rateLimitReset`).
+            SourceRateLimited { reset } => reset.map(|r| format!("resets at {r}")),
+            RateLimited | IndexRollback | FileChanged | Cancelled => None,
             ArchiveInvalid(p) => Some(p.to_string()),
             Sha256Mismatch { expected, actual } => {
                 Some(format!("expected {expected}, got {actual}"))
@@ -218,6 +221,16 @@ mod tests {
         assert_eq!(http(403), ErrorCode::HttpStatus);
         assert_eq!(http(500), ErrorCode::HttpStatus);
         assert_eq!(http(503), ErrorCode::Network);
+    }
+
+    #[test]
+    fn a_rate_limit_says_when_it_ends() {
+        let detail = |reset| AppError::from(ModsError::SourceRateLimited { reset }).detail;
+        assert_eq!(
+            detail(Some(1_793_000_000)).as_deref(),
+            Some("resets at 1793000000")
+        );
+        assert_eq!(detail(None), None);
     }
 
     #[test]

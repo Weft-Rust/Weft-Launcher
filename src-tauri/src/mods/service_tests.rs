@@ -1349,7 +1349,11 @@ mod sources {
                 ok(br#"{ "full_name": "Someone/Lanterns" }"#.to_vec())
             }
             "/repos/a/odd" => ok(br#"{ "full_name": "../../x" }"#.to_vec()),
-            "/repos/a/limited" => (403, Vec::new(), Vec::new()),
+            "/repos/a/limited" => (
+                403,
+                vec![("x-ratelimit-reset", "1793000000".into())],
+                Vec::new(),
+            ),
             _ => (404, Vec::new(), Vec::new()),
         });
         let ctx = with_version(tmp.path(), TAG).with_github_api(&api);
@@ -1364,7 +1368,14 @@ mod sources {
 
         let failures: Vec<(&str, Expect)> = vec![
             ("a/gone", |e| matches!(e, ModsError::SourceNotFound(_))),
-            ("a/limited", |e| matches!(e, ModsError::SourceRateLimited)),
+            ("a/limited", |e| {
+                matches!(
+                    e,
+                    ModsError::SourceRateLimited {
+                        reset: Some(1_793_000_000)
+                    }
+                )
+            }),
             ("a/odd", |e| matches!(e, ModsError::SourceInvalid(_))),
             ("not a repo", |e| matches!(e, ModsError::SourceInvalid(_))),
             ("https://gitlab.com/a/b", |e| {

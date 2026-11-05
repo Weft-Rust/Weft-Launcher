@@ -88,7 +88,7 @@
     "modSourceInvalid": "Not a GitHub repo: {0}",
     "modSourceNotFound": "No such GitHub repo: {0}",
     "diskFull": "The disk is full.",
-    "modSourceRateLimited": "GitHub is limiting requests for {0}. Try again in a few minutes.",
+    "modSourceRateLimited": "GitHub is limiting requests. Try again in a few minutes.",
     "modDownloadNotFound": "The mod's file is gone from GitHub ({0}), so nothing was installed. Refresh and try again.",
     "modTooLarge": "The mod's file is larger than the launcher accepts, so nothing was installed.",
     "modIdReserved": "\"{0}\" is reserved for Weft itself and can't be a mod's id.",
@@ -99,7 +99,8 @@
     "modUrlRefused": "A download link didn't point where the mod's listing says it should, so the launcher refused it. Nothing was downloaded.",
     "modIconInvalid": "This mod's icon isn't a small PNG, so it isn't shown.",
     "details": "Details",
-    "modSourcesDamaged": "Your list of mod sources couldn't be read, so it was set aside and kept. Add your sources again; the old list is behind Details."
+    "modSourcesDamaged": "Your list of mod sources couldn't be read, so it was set aside and kept. Add your sources again; the old list is behind Details.",
+    "modSourceRateLimitedUntil": "GitHub is limiting requests until {0}. Try again then."
   },
   "mods": {
     "title": "Mods",
@@ -519,7 +520,8 @@
     "homeModsOnlyOwn_one": "No mods for {0}, but {n} file from your own folder loads",
     "homeModsOnlyOwn_other": "No mods for {0}, but {n} files from your own folder load",
     "indexUnavailableStatusShort": "No mod index (server said {0}): no Reviewed mods",
-    "browseNoIndex": "Reviewed mods appear here once the Weft mod index can be fetched."
+    "browseNoIndex": "Reviewed mods appear here once the Weft mod index can be fetched.",
+    "sourceErrRateUntil": "GitHub is limiting requests until {1}, so {0} couldn't be refreshed."
   },
   "sizeUnits": {
     "B": "B",

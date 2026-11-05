@@ -88,7 +88,7 @@
     "modSourceInvalid": "No es un repositorio de GitHub: {0}",
     "modSourceNotFound": "No existe ese repositorio de GitHub: {0}",
     "diskFull": "El disco está lleno.",
-    "modSourceRateLimited": "GitHub está limitando las peticiones a {0}. Vuelve a intentarlo en unos minutos.",
+    "modSourceRateLimited": "GitHub está limitando las peticiones. Vuelve a intentarlo en unos minutos.",
     "modDownloadNotFound": "El archivo del mod ya no está en GitHub ({0}), así que no se instaló nada. Actualiza y vuelve a intentarlo.",
     "modTooLarge": "El archivo del mod es más grande de lo que acepta el launcher, así que no se instaló nada.",
     "modIdReserved": "\"{0}\" está reservado para el propio Weft y no puede ser el id de un mod.",
@@ -99,7 +99,8 @@
     "modUrlRefused": "Un enlace de descarga no apuntaba adonde dice la ficha del mod, así que el launcher lo rechazó. No se descargó nada.",
     "modIconInvalid": "El icono de este mod no es un PNG pequeño, así que no se muestra.",
     "details": "Detalles",
-    "modSourcesDamaged": "No se pudo leer tu lista de fuentes de mods, así que se apartó y se guardó. Vuelve a añadir tus fuentes; la lista antigua está en Detalles."
+    "modSourcesDamaged": "No se pudo leer tu lista de fuentes de mods, así que se apartó y se guardó. Vuelve a añadir tus fuentes; la lista antigua está en Detalles.",
+    "modSourceRateLimitedUntil": "GitHub está limitando las peticiones hasta las {0}. Vuelve a intentarlo entonces."
   },
   "mods": {
     "title": "Mods",
@@ -553,7 +554,8 @@
     "homeModsOnlyOwn_many": "Sin mods para {0}, pero se cargan {n} archivos de tu carpeta",
     "homeModsOnlyOwn_other": "Sin mods para {0}, pero se cargan {n} archivos de tu carpeta",
     "indexUnavailableStatusShort": "Sin índice de mods (servidor: {0}): sin mods revisados",
-    "browseNoIndex": "Los mods revisados aparecen aquí cuando se pueda descargar el índice de mods de Weft."
+    "browseNoIndex": "Los mods revisados aparecen aquí cuando se pueda descargar el índice de mods de Weft.",
+    "sourceErrRateUntil": "GitHub está limitando las peticiones hasta las {1}, así que no se pudo actualizar {0}."
   },
   "sizeUnits": {
     "B": "B",
