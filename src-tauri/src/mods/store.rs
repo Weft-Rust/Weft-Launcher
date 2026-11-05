@@ -122,6 +122,10 @@ fn copy_into(from: &Path, to: &Path) -> std::io::Result<()> {
 /// run, like any name the lock doesn't have) and some mods not yet copied. Every save runs it,
 /// and so does every launch (`service::prepare_launch`, under `ModsLock`), so the folder the
 /// game reads is put right before each start whatever happened before.
+///
+/// Every turned-on file is hashed on every run: one read of each per save and per launch (at
+/// most `MAX_FILE_BYTES` a mod). Size and modification time are not trusted in its place: the
+/// folder is the player's to touch, and only the hash says the bytes are the ones checked.
 pub fn reconcile(paths: &Paths, tag: &str, lock: &Lock) -> Result<(), ModsError> {
     let dir = paths.mods_dir(tag)?;
     std::fs::create_dir_all(&dir)?;
