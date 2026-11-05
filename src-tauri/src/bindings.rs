@@ -34,7 +34,7 @@ const HEADER: &str =
 
 /// Every command `lib.rs` registers, as written in its `generate_handler!` list
 /// (`mods::commands::install_mod`).
-fn command_paths() -> Vec<String> {
+pub(crate) fn command_paths() -> Vec<String> {
     let lib = include_str!("lib.rs");
     let start = lib
         .find("generate_handler![")
@@ -48,7 +48,7 @@ fn command_paths() -> Vec<String> {
         .collect()
 }
 
-fn command_names() -> Vec<String> {
+pub(crate) fn command_names() -> Vec<String> {
     command_paths()
         .iter()
         .map(|p| p.rsplit("::").next().unwrap().to_string())

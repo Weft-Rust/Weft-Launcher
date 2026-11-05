@@ -13,8 +13,10 @@ fn json_blocks() -> Vec<serde_json::Value> {
 }
 
 fn json_blocks_in(doc: &str) -> Vec<serde_json::Value> {
+    // A Windows checkout may have turned the line ends into CRLF.
+    let doc = doc.replace("\r\n", "\n");
     let mut out = Vec::new();
-    let mut rest = doc;
+    let mut rest = doc.as_str();
     while let Some(start) = rest.find("```json\n") {
         let body = &rest[start + "```json\n".len()..];
         let end = body.find("\n```").expect("closed code block");
@@ -103,4 +105,36 @@ fn assert_accepted(raw: serde_json::Value) {
     let accepted = accept(&repo, &release, &zip, json).expect("the example is accepted");
     assert!(accepted.icon.is_some(), "the icon is an absolute URL");
     assert!(accepted.versions[0].reviewed.is_none());
+}
+
+/// The proposal's list of commands is the one `lib.rs` registers from `mods::commands`.
+#[test]
+fn the_proposal_lists_every_mod_command() {
+    let line = PROPOSAL
+        .lines()
+        .find(|l| l.starts_with("Tauri commands:"))
+        .expect("a 'Tauri commands:' line in PROPOSAL.md");
+    // The list is the first sentence.
+    let list = line.split("`. ").next().unwrap();
+    let listed: Vec<&str> = list
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .filter(|name| name.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'))
+        .collect();
+    let registered: Vec<String> = crate::bindings::command_paths()
+        .into_iter()
+        .filter_map(|p| p.strip_prefix("mods::commands::").map(str::to_string))
+        .collect();
+    assert_eq!(listed, registered, "PROPOSAL.md's command list");
+}
+
+/// The documented defaults of a revocation are the ones the parser uses.
+#[test]
+fn the_revocation_defaults_are_documented() {
+    assert!(
+        DOC.contains(&format!("`\"{}\"`", index::NO_REASON)),
+        "INDEX_FORMAT.md gives the default reason"
+    );
+    assert!(DOC.contains("Revocations fail closed"));
 }

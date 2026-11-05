@@ -11,11 +11,12 @@ The JSON examples below are complete and valid: a test in the launcher (`src-tau
 | Index | `https://zorro909.github.io/weft-mods-index/v1/index.json` |
 | Signature | `https://zorro909.github.io/weft-mods-index/v1/index.json.minisig` |
 
-- The signature is a minisign signature of the exact bytes of `index.json`.
-- The launcher embeds the public key (`keys/index.pub` in the index repo).
+- The signature is a minisign signature of the exact bytes of `index.json`, **prehashed** (`minisign -S -H`, the default of current minisign). Legacy, non-prehashed signatures are refused.
+- The launcher embeds the public key (`keys/index.pub` in the index repo; `INDEX_PUBLIC_KEY` in `src-tauri/src/mods/index/signature.rs`).
 - An index whose signature doesn't verify is rejected. The launcher then keeps using its last verified copy.
 - The signature's trusted comment should carry `timestamp:<unix seconds>`, as `minisign -S` writes by default (for example `timestamp:1793819114 file:index.json`). The key signs the trusted comment too, so this is when the index was signed; the launcher reports it as `signedAt`. Without it, the launcher judges the index's age by `generated` alone.
 - The index repository re-signs the index weekly, even when nothing changed, so that its signing time stays recent (see [Stale](#launcher-behaviour)).
+- **Key rotation.** The launcher trusts exactly one key, built in. To rotate it: ship a launcher release that embeds the new key, keep signing with the old key until that release is the one players run, then switch the index to the new key. An index signed with a key the launcher doesn't have is refused like any bad signature, and the last verified copy stays in use; the rollback floor is kept across the switch.
 
 ## `index.json`
 
@@ -96,9 +97,10 @@ The JSON examples below are complete and valid: a test in the launcher (`src-tau
 | `asset` | required | `name`, `url`, `size` and `sha256` of the zip, all required. |
 | `provenance` | `null` | The attestation the index CI checked with `gh attestation verify`. `kind` is required; `repo`, `workflow`, `ref` and `verified_at` default to `null`. |
 | `reviewed` | required in the index | `by` and `at`: who reviewed exactly these bytes, and when. Not read from sources. |
-| `revoked[]` | `[]` | Builds that must never be used again. |
-| `revoked[].sha256` | required | The build's hash. |
-| `revoked[].reason`, `at` | `""` | Why, for the player, and when. |
+| `revoked[]` | `[]` | Builds that must never be used again. Must be a list: anything else refuses the whole index. |
+| `revoked[].sha256` | required | The build's hash, in any case. |
+| `revoked[].reason` | `"No reason given"` | Why, for the player. Also used when it is empty or not a string. |
+| `revoked[].at` | `null` | When. Also `null` when it is not a string. |
 
 ### Rules the launcher enforces
 
@@ -116,7 +118,7 @@ A version that breaks any of these is left out. The rest of the index is still u
 - `weft.abi` and `weft[].abi` are 16 lowercase hex characters: the FNV-1a-64 hash of `crates/abi/src/lib.rs` at that commit.
 - Every `deps[].id` is a valid mod id.
 - `reviewed` is present, with a non-empty `by`. In the index, Reviewed means someone reviewed it.
-- `revoked[].sha256` is 64 lowercase hex characters; other entries are dropped.
+- **Revocations fail closed.** A `revoked[]` entry is dropped only when its `sha256` can't be a SHA-256 at all (64 hex characters, in any case, after trimming), and that is logged. Everything else about it may be wrong or missing and it still revokes: the hash is lowercased and compared without case, and `reason` and `at` take their defaults.
 - Unknown fields are ignored. Missing fields take the defaults in the table.
 - A mod whose `sha256` appears in `revoked` is never installed. If it is already installed, it is turned off, and nothing that needs it can turn it back on. The launcher records the revocation, with its reason, in the version's `mods.lock.json`, so the mod stays revoked even if the index can't be loaded later, until the build is replaced or removed.
 
@@ -174,6 +176,10 @@ Then:
 - The downloaded bytes must hash to `asset.sha256`, as for the index.
 - Draft releases are ignored.
 
+A release may carry several mods: each `<id>.mod.json` with its own `<id>.zip` is read on its own.
+
+Some fields of a `.mod.json` are only the publisher's word, and the launcher can't check them: `weft.abi` (the build is matched on it; the game has the last word when it loads the library), `source.commit`, `deps`, and `provenance`. The UI shows them as claims.
+
 When several releases publish the same mod:
 
 - They are read newest release first, as GitHub lists them. The mod's name, summary, icon and other mod-level fields come from the newest release that passes.
@@ -193,7 +199,9 @@ What the launcher does with all of this, beyond the field rules:
 - **Dated in the future.** An index whose `generated` or signing time is more than a day ahead of the computer's clock is refused with `IndexInvalid`, since it would lock out every honest index until then.
 - **Stale.** An index that verified but was signed more than 30 days ago (by `generated`, without a signing time) has freshness `stale`. Its entries are still used; the launcher says revocations since then may be missing. A cached copy shown because a refresh failed keeps freshness `cached`, with the error.
 - **The cache.** Each verified index and its signature are stored together as one generation, and the launcher keeps the newest two. The signature is checked again on every read. If the newest pair doesn't verify, for example after a crash while writing it, the previous generation is used. Offline, the cached index is used, with freshness `cached` (or `stale`). The launcher only fetches the index when the catalogue is refreshed; Play never waits on it.
-- **Skipping bad entries.** A mod, version, `weft` or `revoked` entry that doesn't parse (for example an unknown `channel`), or that breaks a rule above, is skipped on its own. The rest of the index is used. An unknown platform string is ignored.
+- **Skipping bad entries.** A mod, version or `weft` entry that doesn't parse (for example an unknown `channel`), or that breaks a rule above, is skipped on its own. The rest of the index is used. An unknown platform string is ignored. `revoked` entries are the exception: see the rule above.
+- **Duplicates.** The first entry wins. Two `mods[]` with the same `id` both stay in the list, but lookups by id (dependencies, updates) use the first; two versions with the same `asset.sha256` resolve to the first one listed. The index CI should refuse both.
+- **Read again, every time.** The cached index is verified and parsed with these rules on every read, and so is each source's cached answer (`sources.rs`, `revalidate`), not only when they were fetched. A download checks [the URL rule](#the-asset-url-rule) once more right before it starts, whatever the catalogue says.
 - **The URL rule.** See below.
 - **Reviewed needs a review.** An index version without `reviewed` is dropped.
 - **Sources.** The newest 500 releases of a source are read, in 5 pages of 100. When GitHub can't be reached or refuses (rate limit, server error), the last good answer is shown with the error. The catalogue reports both.
