@@ -30,7 +30,7 @@ import { useAnnounce } from "../components/LiveRegion";
 import { useInstall } from "./useInstall";
 import { useGameState } from "./useGameState";
 import { failed, type ActionResult } from "./result";
-import { useCatalog } from "./useCatalog";
+import { useCatalog, type CatalogState } from "./useCatalog";
 import { useOperations, type FirstFile } from "./useOperations";
 import { useProfileCoordinator } from "./useProfileCoordinator";
 
@@ -55,6 +55,13 @@ interface ModsContextValue {
   sourceRefreshing: (repo: string) => boolean;
   /** The sources a whole refresh still waits on, while what else it brought already shows. */
   pendingSources: string[];
+  /** The player's list of sources and changes to it (hooks/useCatalog). */
+  sourceList: CatalogState["sourceList"];
+  sourceListError: CatalogState["sourceListError"];
+  loadSources: CatalogState["loadSources"];
+  addSource: CatalogState["addSource"];
+  removeSource: CatalogState["removeSource"];
+  sourceChange: CatalogState["sourceChange"];
 
   profile: (tag: string | null | undefined) => ProfileReport | undefined;
   profileError: (tag: string) => Shown | null;
@@ -150,6 +157,7 @@ export function ModsProvider({ children }: { children: ReactNode }) {
   // revocations and updates come with it.
   const catalogState = useCatalog(() => Promise.all(tagsRef.current.map((tag) => loadProfile(tag, true))));
   const { catalog, catalogLoading, catalogError, refreshCatalog, refreshSource, sourceRefreshing, pendingSources } = catalogState;
+  const { sourceList, sourceListError, loadSources, addSource, removeSource, sourceChange } = catalogState;
 
   // A crash notice stays until its problem is fixed: the blamed mod is off, gone or replaced, or
   // the dependency it lacked is on and usable.
@@ -349,6 +357,12 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       refreshSource,
       sourceRefreshing,
       pendingSources,
+      sourceList,
+      sourceListError,
+      loadSources,
+      addSource,
+      removeSource,
+      sourceChange,
       profile,
       profileError,
       loadProfile,
@@ -381,6 +395,12 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       refreshSource,
       sourceRefreshing,
       pendingSources,
+      sourceList,
+      sourceListError,
+      loadSources,
+      addSource,
+      removeSource,
+      sourceChange,
       profile,
       profileError,
       loadProfile,

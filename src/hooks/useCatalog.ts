@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { asAppError, listenTo, modsApi } from "../mods/api";
 import { EVENTS } from "../mods/ipc";
 import type { Catalog, UiError } from "../mods/types";
+import { failed, type ActionResult } from "./result";
 
 export interface CatalogState {
   catalog: Catalog | null;
@@ -16,6 +17,17 @@ export interface CatalogState {
   sourceRefreshing: (repo: string) => boolean;
   /** The sources a whole refresh still waits on, while what else it brought already shows. */
   pendingSources: string[];
+
+  /** The player's list of sources, once read; null before, or when it couldn't be. */
+  sourceList: string[] | null;
+  /** Why the list couldn't be read (`ModSourcesDamaged`: it was kept aside). */
+  sourceListError: UiError | null;
+  loadSources: () => Promise<void>;
+  /** Adds a source; one change to the list at a time ("skipped" while another runs). */
+  addSource: (repo: string) => Promise<ActionResult<string[]>>;
+  removeSource: (repo: string) => Promise<ActionResult<string[]>>;
+  /** The change to the list that is running. */
+  sourceChange: { kind: "add" | "remove"; repo: string } | null;
 }
 
 /**
@@ -125,5 +137,52 @@ export function useCatalog(afterRefresh: () => Promise<unknown>): CatalogState {
       .finally(() => refreshCatalog());
   }, [offer, refreshCatalog]);
 
-  return { catalog, catalogLoading, catalogError, refreshCatalog, refreshSource, sourceRefreshing, pendingSources: pending };
+  // The list of sources: read, added to and taken from here, one change at a time, so the
+  // dialog that shows it only renders.
+  const [sourceList, setSourceList] = useState<string[] | null>(null);
+  const [sourceListError, setSourceListError] = useState<UiError | null>(null);
+  const [sourceChange, setSourceChange] = useState<CatalogState["sourceChange"]>(null);
+  const changing = useRef(false);
+  const loadSources = useCallback(async () => {
+    setSourceListError(null);
+    try {
+      setSourceList(await modsApi.sources());
+    } catch (err) {
+      setSourceListError(asAppError(err));
+    }
+  }, []);
+  const changeSources = useCallback(async (kind: "add" | "remove", repo: string): Promise<ActionResult<string[]>> => {
+    if (changing.current) return { status: "skipped" };
+    changing.current = true;
+    setSourceChange({ kind, repo });
+    try {
+      const list = await (kind === "add" ? modsApi.addSource(repo) : modsApi.removeSource(repo));
+      setSourceList(list);
+      setSourceListError(null);
+      return { status: "done", result: list };
+    } catch (err) {
+      return failed(err);
+    } finally {
+      changing.current = false;
+      setSourceChange(null);
+    }
+  }, []);
+  const addSource = useCallback((repo: string) => changeSources("add", repo), [changeSources]);
+  const removeSource = useCallback((repo: string) => changeSources("remove", repo), [changeSources]);
+
+  return {
+    catalog,
+    catalogLoading,
+    catalogError,
+    refreshCatalog,
+    refreshSource,
+    sourceRefreshing,
+    pendingSources: pending,
+    sourceList,
+    sourceListError,
+    loadSources,
+    addSource,
+    removeSource,
+    sourceChange,
+  };
 }

@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useI18n } from "../../i18n/useI18n";
 import { showError, type Shown } from "../../i18n/errors";
 import { ErrorDetails, ErrorText } from "../ErrorText";
 import { useMods } from "../../hooks/useMods";
-import { asAppError, modsApi } from "../../mods/api";
 import { parseRepo, sameRepo } from "../../mods/select";
 import { Dialog } from "../Dialog";
 import { Truncate } from "../Truncate";
@@ -61,77 +60,50 @@ function sourceMeta(s: SourceStatus | undefined, checking: boolean, t: (k: Messa
 
 export function SourcesDialog({ onClose }: { onClose: () => void }) {
   const { t, tn, formatDay } = useI18n();
-  const { catalog, catalogError, catalogLoading, refreshCatalog, refreshSource, sourceRefreshing } = useMods();
-  const [repos, setRepos] = useState<string[] | null>(null);
-  const [loadError, setLoadError] = useState<Shown | null>(null);
+  const mods = useMods();
+  const { catalog, catalogError, catalogLoading, refreshCatalog, refreshSource, sourceRefreshing, sourceList: repos, sourceChange } = mods;
+  const loadError = mods.sourceListError ? showError(mods.sourceListError) : null;
   // The list couldn't be read and was kept aside: adding a source starts a new one.
-  const [damaged, setDamaged] = useState(false);
+  const damaged = mods.sourceListError?.code === "ModSourcesDamaged";
   const [input, setInput] = useState("");
   const [error, setError] = useState<Shown | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [removing, setRemoving] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ repo: string; error: Shown } | null>(null);
   const [changed, setChanged] = useState(false);
-  const busy = useRef(false);
   const inputId = useId();
   const errorId = useId();
+  const adding = sourceChange?.kind === "add";
+  const removing = sourceChange?.kind === "remove" ? sourceChange.repo : null;
 
-  const load = useCallback(() => {
-    setLoadError(null);
-    modsApi
-      .sources()
-      .then((r) => {
-        setRepos(r);
-        setDamaged(false);
-      })
-      .catch((err) => {
-        setLoadError(showError(err));
-        setDamaged(asAppError(err).code === "ModSourcesDamaged");
-      });
-  }, []);
-  useEffect(load, [load]);
+  const load = mods.loadSources;
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const add = async () => {
-    if (busy.current || !input.trim()) return;
+    if (sourceChange || !input.trim()) return;
     const repo = parseRepo(input);
     if (!repo) {
       setError(showError({ code: "ModSourceInvalid", detail: input.trim() }));
       return;
     }
-    busy.current = true;
-    setAdding(true);
     setError(null);
-    try {
-      setRepos(await modsApi.addSource(repo));
-      setLoadError(null);
-      setDamaged(false);
-      setInput("");
-      // Asked at once, alone, so the dialog says what the new source has before it closes.
-      retrySource(repo);
-    } catch (err) {
-      setError(showError(err));
-    } finally {
-      busy.current = false;
-      setAdding(false);
-    }
+    const r = await mods.addSource(repo);
+    if (r.status === "failed") return setError(r.shown);
+    if (r.status !== "done") return;
+    setInput("");
+    // Asked at once, alone, so the dialog says what the new source has before it closes.
+    retrySource(repo);
   };
 
   const remove = async (repo: string) => {
-    if (busy.current) return;
-    busy.current = true;
-    setRemoving(repo);
+    if (sourceChange) return;
     setRowError(null);
-    try {
-      setRepos(await modsApi.removeSource(repo));
-      setConfirming(null);
-      setChanged(true);
-    } catch (err) {
-      setRowError({ repo, error: showError(err) });
-    } finally {
-      busy.current = false;
-      setRemoving(null);
-    }
+    const r = await mods.removeSource(repo);
+    if (r.status === "failed") return setRowError({ repo, error: r.shown });
+    if (r.status !== "done") return;
+    setConfirming(null);
+    setChanged(true);
   };
 
   /** One source asked again; a failure to even ask is said on its row. */
