@@ -204,6 +204,8 @@ An incomplete record doesn't drop the version: the review still stands, and only
 
 ## Publishing from your own repo
 
+The path for mod authors, from a first release to the signed index, is [AUTHORING.md](AUTHORING.md).
+
 A player can add any GitHub repo as a source (Mods → Sources). Its mods show up as **Unreviewed**. To publish one:
 
 1. Build the mod and zip it as `<id>.zip`, where `<id>` is the mod id (`[a-z0-9_]{1,64}`, not `base`).

@@ -7,6 +7,26 @@ use super::sources::{GhAsset, GhRelease, ModJson, accept};
 
 const DOC: &str = include_str!("../../../docs/mod-manager/INDEX_FORMAT.md");
 const PROPOSAL: &str = include_str!("../../../docs/mod-manager/PROPOSAL.md");
+const AUTHORING: &str = include_str!("../../../docs/mod-manager/AUTHORING.md");
+
+/// The author's guide sends them to sections and files that exist, and INDEX_FORMAT to it.
+#[test]
+fn the_authoring_guide_points_at_what_is_there() {
+    for (link, heading) in [
+        (
+            "INDEX_FORMAT.md#idmodjson-for-unreviewed-sources",
+            "## `<id>.mod.json`, for Unreviewed sources",
+        ),
+        ("INDEX_FORMAT.md#provenance", "## Provenance"),
+    ] {
+        assert!(AUTHORING.contains(link), "{link}");
+        assert!(DOC.contains(heading), "{heading}");
+    }
+    assert!(AUTHORING.contains("schema/mod.schema.json"));
+    assert!(DOC.contains("[AUTHORING.md](AUTHORING.md)"));
+    // The tag it suggests is one the launcher takes.
+    assert!(super::abi::is_safe_ref("lanterns-v1.2.0"));
+}
 
 fn json_blocks() -> Vec<serde_json::Value> {
     json_blocks_in(DOC)
