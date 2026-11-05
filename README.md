@@ -76,6 +76,8 @@ Pick a state with `?scenario=` and adjust it with flags, which combine: `?scenar
 | `ratelimited` | GitHub rate-limits the source; its last mods are shown. | `source=ratelimited` |
 | `indexdown` | The index has never been reached, so there are no Reviewed mods. | `index=unavailable` |
 | `stale` | The index verifies, but its signature is over 30 days old. | `index=stale` |
+| `invalid` | The new index's signature doesn't verify; the last good one is shown. | `index=invalid` |
+| `rollback` | The new index is older than one already accepted, so it is refused; the last good one is shown. | `index=rollback` |
 | `missingdep` | Mods that need others: Hearth needs Cogwork, which is off; Lanterns needs Glowmoss, which isn't installed; Railways needs Signals, which has no build yet. | — |
 | `lateblock` | Nothing blocks Play until Play itself finds Cogwork revoked; Hearth, which needs it, then blocks the start. | `prelaunch=revoke` |
 | `long` | Very long mod names, ids and repos, for overflow checks. | `long=1` |

@@ -28,6 +28,8 @@ export const SCENARIOS: Scenario[] = [
   { name: "ratelimited", description: "GitHub rate-limits the source; its last mods are shown.", flags: { source: "ratelimited" } },
   { name: "indexdown", description: "The index has never been reached, so there are no Reviewed mods.", flags: { index: "unavailable" } },
   { name: "stale", description: "The index verifies, but its signature is over 30 days old.", flags: { index: "stale" } },
+  { name: "invalid", description: "The new index's signature doesn't verify; the last good one is shown.", flags: { index: "invalid" } },
+  { name: "rollback", description: "The new index is older than one already accepted, so it is refused; the last good one is shown.", flags: { index: "rollback" } },
   {
     name: "missingdep",
     description:

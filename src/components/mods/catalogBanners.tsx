@@ -44,6 +44,9 @@ export function sourceProblem(s: SourceStatus, t: T, formatDay: (iso: string | n
   return `${t(SOURCE_CAUSE[cause(s.error?.code)], s.repo)} ${shown}`;
 }
 
+/** A new index arrived and was refused (bad signature, malformed, older than one accepted). */
+const refused = (code: ErrorCode | undefined) => code === "IndexSignatureInvalid" || code === "IndexInvalid" || code === "IndexRollback";
+
 /** The index's state as a sentence, or null when it is fresh. */
 export function indexProblem(index: Catalog["index"], t: T, formatDay: (iso: string | null) => string): string | null {
   if (index.freshness === "fresh" && !index.error) return null;
@@ -68,6 +71,8 @@ export function indexSummary(index: Catalog["index"], t: T, formatDay: (iso: str
   if (index.freshness === "unavailable" || !index.generated) return t("mods.indexUnavailableShort");
   const day = formatDay(index.signedAt ?? index.generated);
   if (index.freshness === "stale" && !index.error) return t("mods.indexStaleShort", day);
+  // A refused index is never "offline": the network worked, and what came was not accepted.
+  if (refused(index.error?.code)) return t("mods.indexRefusedShort", day);
   return cause(index.error?.code) === "network" ? t("mods.indexOfflineShort", day) : t("mods.indexCachedShort", day);
 }
 
@@ -107,7 +112,7 @@ export function useCatalogBanners(onManageSources: () => void): Record<string, B
     const detail = e ? showError(e).detail : null;
     out.index = {
       id: "index",
-      tone: catalog.index.freshness === "cached" ? "info" : "warn",
+      tone: catalog.index.freshness === "cached" && !refused(catalog.index.error?.code) ? "info" : "warn",
       text: (
         <>
           {index}

@@ -232,7 +232,7 @@
     "failureLoad": "{0} impediu o Weft de iniciar: a biblioteca dele não carregou.",
     "failureNotAMod": "{0} impediu o Weft de iniciar: não é um mod do Weft.",
     "failureWrongName": "{0} impediu o Weft de iniciar: o arquivo tem o nome errado.",
-    "failureInit": "Um mod travou enquanto o Weft iniciava.",
+    "failureInit": "Um mod travou enquanto o Weft iniciava. Abra o log para ver qual, ou desligue os mods um de cada vez para encontrá-lo.",
     "failureOutside": "Ele está na sua própria pasta de mods do Weft, que o launcher não gerencia.",
     "turnOff": "Desligar {0}",
     "openModsFolder": "Abrir pasta de mods",
@@ -483,7 +483,8 @@
     "copyDoneSummary_other": "{n} mods copiados de {0} para {1}.",
     "copyStaysLine_one": "{n} mod fica para trás: {0}.",
     "copyStaysLine_many": "{n} mods ficam para trás: {0}.",
-    "copyStaysLine_other": "{n} mods ficam para trás: {0}."
+    "copyStaysLine_other": "{n} mods ficam para trás: {0}.",
+    "indexRefusedShort": "Novo índice de mods recusado: mostrando o de {0}"
   },
   "sizeUnits": {
     "B": "B",

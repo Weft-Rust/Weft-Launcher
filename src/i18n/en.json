@@ -232,7 +232,7 @@
     "failureLoad": "{0} stopped Weft from starting: its library didn't load.",
     "failureNotAMod": "{0} stopped Weft from starting: it isn't a Weft mod.",
     "failureWrongName": "{0} stopped Weft from starting: its file has the wrong name.",
-    "failureInit": "A mod crashed while Weft was starting.",
+    "failureInit": "A mod crashed while Weft was starting. Open the log to see which one, or turn mods off one at a time to find it.",
     "failureOutside": "It's in your own Weft mods folder, which the launcher doesn't manage.",
     "turnOff": "Turn off {0}",
     "openModsFolder": "Open mods folder",
@@ -462,7 +462,8 @@
     "copyDoneSummary_one": "Copied {n} mod from {0} to {1}.",
     "copyDoneSummary_other": "Copied {n} mods from {0} to {1}.",
     "copyStaysLine_one": "{n} mod stays behind: {0}.",
-    "copyStaysLine_other": "{n} mods stay behind: {0}."
+    "copyStaysLine_other": "{n} mods stay behind: {0}.",
+    "indexRefusedShort": "New mod index refused: showing the one from {0}"
   },
   "sizeUnits": {
     "B": "B",

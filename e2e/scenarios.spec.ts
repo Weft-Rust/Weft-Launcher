@@ -108,7 +108,7 @@ const CHECKS: Record<string, Checks> = {
       if (en) {
         await expect(cogwork.locator(".mod-meta")).toContainText("Pulled from the index and turned off. Reason: Corrupts worlds");
         await expect(cogwork.locator(".update-btn-row")).toHaveText("0.2.1");
-        await expect(cogwork.locator(".update-btn-row")).toHaveAttribute("aria-label", "Update Cogwork to 0.2.1…");
+        await expect(cogwork.locator(".update-btn-row")).toHaveAttribute("aria-label", "Update Cogwork to 0.2.1 for v26.11.1…");
       }
     },
   },
@@ -131,6 +131,21 @@ const CHECKS: Record<string, Checks> = {
   stale: {
     installed: async (page, en) => {
       if (en) await expect(page.locator(".banner.compact")).toContainText(/^Mod index signed Sep 21/);
+    },
+  },
+  // A refused index is a warning that says it was refused, never "Offline": the network worked.
+  invalid: {
+    installed: async (page, en) => {
+      const lead = page.locator(".banner.compact", { has: page.locator(".banner-actions button", { hasText: /./ }) }).filter({ hasNotText: /Stops Play/ }).first();
+      await expect(lead).toHaveClass(/warn/);
+      if (en) await expect(lead).toContainText("New mod index refused: showing the one from Nov 2");
+      await expect(page.locator(".banner", { hasText: /Offline/ })).toHaveCount(0);
+    },
+  },
+  rollback: {
+    installed: async (page, en) => {
+      if (en) await expect(page.locator(".banner.compact", { hasText: "New mod index refused" })).toHaveClass(/warn/);
+      await expect(page.locator(".banner", { hasText: /Offline/ })).toHaveCount(0);
     },
   },
   missingdep: {
