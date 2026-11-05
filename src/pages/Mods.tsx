@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type CSSProperties } from "react";
 import { useI18n } from "../i18n/useI18n";
 import { showError, type Shown } from "../i18n/errors";
 import { bannerPlan } from "../mods/banners";
@@ -24,9 +24,9 @@ import { useCatalogBanners } from "../components/mods/catalogBanners";
 import { BlockerPanel, useReviewDialog } from "../components/mods/ModFixes";
 import { ModFailureNotice } from "../components/mods/ModFailureNotice";
 import { REFRESH_ICON } from "../components/icons";
+import { MODS_START, MODS_VIEWS, modsRoute, type ModsView } from "../mods/modsRoute";
 
-const VIEWS = ["installed", "browse"] as const;
-type View = (typeof VIEWS)[number];
+const VIEWS = MODS_VIEWS;
 
 interface ModsPageProps {
   selectedTag: string | null;
@@ -41,12 +41,12 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
   const { isRunning, lastCrash } = useGameState();
   const mods = useMods();
   const { profile, profileError, loadProfile, notices, dismissNotice, catalogLoading, refreshCatalog, nameIn, restore } = mods;
-  const [view, setView] = useState<View>("installed");
-  const [filePath, setFilePath] = useState<string | null>(null);
-  const [showSources, setShowSources] = useState(false);
-  const [showCopy, setShowCopy] = useState(false);
+  // Installed or Browse, the one dialog over the tab, and the row focus goes to next (mods/modsRoute).
+  const [route, go] = useReducer(modsRoute, MODS_START);
+  const { view, dialog, focusMod } = route;
+  const setView = useCallback((v: ModsView) => go({ type: "view", view: v }), []);
+  const closeDialog = () => go({ type: "close" });
   const [rowError, setRowError] = useState<Shown | null>(null);
-  const [focusMod, setFocusMod] = useState<string | null>(null);
   const [toastRoom, setToastRoom] = useState(0);
   const panel = useRef<HTMLElement>(null);
   const versionLabelId = useId();
@@ -58,7 +58,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
   const report = profile(tag);
   const running = tag ? isRunning(tag) : false;
   const review = useReviewDialog(tag);
-  const catalogBanners = useCatalogBanners(() => setShowSources(true));
+  const catalogBanners = useCatalogBanners(() => go({ type: "open", dialog: { kind: "sources" } }));
   const donors = tag
     ? copyDonors(
         versions.map((v) => v.tag),
@@ -100,7 +100,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
   const pickFile = async () => {
     try {
       const path = await pickModFile(t("mods.fileFilter"));
-      if (path) setFilePath(path);
+      if (path) go({ type: "open", dialog: { kind: "file", path } });
     } catch (err) {
       setRowError(showError(err));
     }
@@ -120,8 +120,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
     const r = await restore(tag, n.undo.id);
     if (r.status === "failed") setRowError(r.shown);
     else if (r.status === "done") {
-      setView("installed");
-      setFocusMod(n.undo.id);
+      go({ type: "restored", id: n.undo.id });
     }
   };
 
@@ -274,7 +273,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
             labelledBy={versionLabelId}
             compact
           />
-          <button className="btn-flat" onClick={() => setShowSources(true)}>
+          <button className="btn-flat" onClick={() => go({ type: "open", dialog: { kind: "sources" } })}>
             {t("mods.sources")}
           </button>
           <button
@@ -315,7 +314,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
             {t("mods.fromFile")}
           </button>
           {donors.length > 0 && (
-            <button className="btn-flat" onClick={() => setShowCopy(true)} disabled={running || copying}>
+            <button className="btn-flat" onClick={() => go({ type: "open", dialog: { kind: "copy" } })} disabled={running || copying}>
               {copying ? t("mods.copying") : t("mods.copyHeader")}
             </button>
           )}
@@ -360,7 +359,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
                   {t("mods.browseMods")}
                 </button>
                 {donors.length > 0 && (
-                  <button className="btn-secondary" disabled={running} onClick={() => setShowCopy(true)}>
+                  <button className="btn-secondary" disabled={running} onClick={() => go({ type: "open", dialog: { kind: "copy" } })}>
                     {t("mods.copyButton", donors[0])}
                   </button>
                 )}
@@ -375,7 +374,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
               updatesUnavailable={!catalog && mods.catalogError ? t("mods.updatesNeedCatalog") : null}
               locked={running}
               focusMod={focusMod}
-              onFocused={() => setFocusMod(null)}
+              onFocused={() => go({ type: "focused" })}
               onEmptied={settleFocus}
             />
           )
@@ -386,9 +385,9 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
       <Toasts items={toasts} onHeight={setToastRoom} />
       </div>
 
-      {filePath && <FileInstallDialog tag={tag} path={filePath} onClose={() => setFilePath(null)} />}
-      {showSources && <SourcesDialog onClose={() => setShowSources(false)} />}
-      {showCopy && <CopyDialog tag={tag} donors={donors} onClose={() => setShowCopy(false)} />}
+      {dialog?.kind === "file" && <FileInstallDialog tag={tag} path={dialog.path} onClose={closeDialog} />}
+      {dialog?.kind === "sources" && <SourcesDialog onClose={closeDialog} />}
+      {dialog?.kind === "copy" && <CopyDialog tag={tag} donors={donors} onClose={closeDialog} />}
       {review.dialog}
     </main>
   );
