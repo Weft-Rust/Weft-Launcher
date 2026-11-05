@@ -325,6 +325,8 @@ button:disabled { cursor: not-allowed; }
 .mods-page .icon-btn { width: 40px; padding: 0; display: grid; place-items: center; }
 .mods-panel { flex: 1 1 auto; min-height: 0; scroll-padding-bottom: calc(16px + var(--toast-room, 0px)); overflow-y: auto; overscroll-behavior: contain; padding-bottom: 16px; scrollbar-gutter: stable; margin-right: -8px; padding-right: 8px; }
 .mods-panel:focus { outline: none; }
+/* Behind the rows and cards, a near-opaque backing: the field's bright seams don't show between them and compete with the text. */
+.mods-panel { background: #14161ef2; }
 /* Browse's filters stay on top as the cards scroll: a card brought into view by focus stops
    below them, not half under them. (Banners and toasts are outside the scroller.) */
 .mods-panel:has(.filters) { scroll-padding-top: 64px; }
