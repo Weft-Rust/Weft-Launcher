@@ -341,8 +341,10 @@ button:disabled { cursor: not-allowed; }
 .switch button { height: 32px; padding: 2px 12px; background: var(--g2); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g1); }
 .switch button:hover:not(.on) { background: var(--g3); }
 .switch button.on { background: var(--pale); color: var(--ink); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g5); }
-.switch .count { margin-left: 8px; color: var(--a2); }
-.switch button.on .count { color: var(--ink); background: var(--a2); padding: 0 6px; }
+/* The count is only coloured text, selected or not: the same box both ways, so neither tab moves
+   when the selection changes. On the pale selected tab it is a darker amber (4.7:1). */
+.switch .count { margin-left: 8px; color: var(--a2); font-variant-numeric: tabular-nums; }
+.switch button.on .count { color: #8f5418; }
 
 .banners { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-bottom: 8px; }
 .banners:empty { display: none; }

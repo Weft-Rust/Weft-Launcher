@@ -867,6 +867,25 @@ test.describe("contrast", () => {
     expect(await lowContrast(page)).toEqual([]);
   });
 
+  test("the Installed and Browse tabs keep their place and size when selected; the count is text, not a block", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    const boxes = () =>
+      page.locator(".switch [role=tab]").evaluateAll((tabs) =>
+        tabs.map((t) => {
+          const r = t.getBoundingClientRect();
+          return [r.x, r.y, r.width, r.height];
+        }),
+      );
+    const installed = await boxes();
+    const count = page.locator(".switch [role=tab]").first().locator(".count");
+    expect(await count.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+    expect(await lowContrast(page, 4.5, 4.5, ".switch")).toEqual([]);
+    await browse(page);
+    expect(await boxes()).toEqual(installed);
+    expect(await lowContrast(page, 4.5, 4.5, ".switch")).toEqual([]);
+  });
+
   test("the contrast check composites opacity and measures large text", async ({ page }) => {
     await open(page, "scenario=mods");
     await goToTab(page, MODS_TAB);
