@@ -16,7 +16,7 @@ import {
   planConsent,
   planDepChecks,
   weakerDeps,
-  type CheckRow,
+  withProblem,
   type ConsentView,
 } from "../../mods/checks";
 import { Dialog } from "../Dialog";
@@ -107,8 +107,7 @@ export function FileInstallDialog({ tag, path, onClose }: FileInstallDialogProps
   const weaker = plan ? weakerDeps(plan, ctx) : [];
   const step = activeStep(progressOf(op));
   const stepName = step ? (plan ? [plan.target, ...plan.install].find((i) => i.sha256 === step.sha256)?.name : undefined) ?? (step.modId === id ? name : nameIn(tag)(step.modId)) : name;
-  const problemRow: CheckRow[] = problem ? [{ id: "problem", state: "no", title: { key: "mods.ckWontInstall", args: [{ error: problem }] } }] : [];
-  const checks = [...problemRow, ...fileChecks(inspection, tag, ctx.indexFrom ?? null), ...(plan && known ? planDepChecks(plan, known.build.deps, ctx) : [])];
+  const checks = withProblem(problem, [...fileChecks(inspection, tag, ctx.indexFrom ?? null), ...(plan && known ? planDepChecks(plan, known.build.deps, ctx) : [])]);
   const notes = usable ? fileReplaceNotes(inspection, report?.mods.find((m) => m.id === id)?.trust) : [];
   const changes = changedFrom && ready ? consentChanges(changedFrom, fileConsent(inspection, plan), nameIn(tag)) : null;
   const offline = !!plan && plan.install.length > 0 && networkDown(catalog, catalogError);

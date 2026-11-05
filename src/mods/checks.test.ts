@@ -174,6 +174,14 @@ describe("fit (contract R4 §5)", () => {
   it("is unknown with Retry when the backend can't tell, never 'no'", () => {
     const rows = installChecks(plan({ fitsVersion: null, problem: { code: "AbiUnavailable", detail: "v26.11.1" } }), build("1.0.0"), { ...ctx, versionAbi: null });
     expect(row(rows, "abi")).toMatchObject({ state: "unknown", retry: true, title: { key: "mods.ckFitUnchecked" } });
+    // The fit row says why the button is off; no red "can't install" says it again as a "no".
+    expect(rows[0].id).toBe("abi");
+    expect(rows.filter((r) => r.state === "no")).toEqual([]);
+  });
+
+  it("puts any other problem first, as a no", () => {
+    const rows = installChecks(plan({ problem: { code: "GameRunning", detail: "v26.11.1" } }), build("1.0.0"), ctx);
+    expect(rows[0]).toMatchObject({ id: "problem", state: "no" });
   });
 
   it("says no only when it is no", () => {

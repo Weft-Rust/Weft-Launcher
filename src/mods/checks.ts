@@ -8,9 +8,10 @@ import { shortCommit, shortSha } from "./select";
 /** "same": nothing to check, because nothing changes (a mod a copy leaves as it is). */
 export type CheckState = "yes" | "no" | "unknown" | "same";
 
-/** One argument of a message: text, a shortened value whose full form stays reachable, an error or a tier name. */
+/** One argument of a message: text, a day, a shortened value whose full form stays reachable, an error or a tier name. */
 export type Arg =
   | string
+  | { day: string }
   | { code: string; short: string }
   | { error: AppErrorPayload }
   | { trust: Trust };
@@ -48,8 +49,8 @@ export function buildChecks(v: CatalogVersion, indexFrom: string | null = null):
       state: "yes",
       title: { key: "mods.ckIndex" },
       detail: indexFrom
-        ? { key: "mods.ckIndexDetailDated", args: [v.reviewed.by, v.reviewed.at, indexFrom] }
-        : { key: "mods.ckIndexDetail", args: [v.reviewed.by, v.reviewed.at] },
+        ? { key: "mods.ckIndexDetailDated", args: [v.reviewed.by, { day: v.reviewed.at }, indexFrom] }
+        : { key: "mods.ckIndexDetail", args: [v.reviewed.by, { day: v.reviewed.at }] },
     });
   } else {
     rows.push({
@@ -166,17 +167,28 @@ export function planDepChecks(plan: InstallPlan, deps: string[], ctx: InstallChe
   return rows;
 }
 
+/**
+ * The plan's problem as the first row, so the reason the button is off is the first thing read.
+ * Not knowing the version's interface is not a "no" (contract R4 §5): then the fit row, unknown
+ * with Retry, goes first instead and says it.
+ */
+export function withProblem(problem: AppErrorPayload | null, rows: CheckRow[]): CheckRow[] {
+  if (!problem) return rows;
+  if (problem.code === "AbiUnavailable") {
+    const fit = rows.find((r) => r.id === "abi" && r.state === "unknown");
+    if (fit) return [fit, ...rows.filter((r) => r !== fit)];
+  }
+  return [{ id: "problem", state: "no", title: { key: "mods.ckWontInstall", args: [{ error: problem }] } }, ...rows];
+}
+
 /** Everything the install and update dialogs show, from the backend's plan. */
 export function installChecks(plan: InstallPlan, v: CatalogVersion, ctx: InstallCheckContext): CheckRow[] {
   const rows: CheckRow[] = [];
-  if (plan.problem) {
-    rows.push({ id: "problem", state: "no", title: { key: "mods.ckWontInstall", args: [{ error: plan.problem }] } });
-  }
   const build = buildChecks(v, ctx.indexFrom ?? null);
   rows.push(...build.slice(0, 1), pinCheck(v), ...build.slice(1));
   rows.push(abiCheck(plan, v, ctx));
   rows.push(...planDepChecks(plan, v.deps, ctx));
-  return rows;
+  return withProblem(plan.problem, rows);
 }
 
 /**
