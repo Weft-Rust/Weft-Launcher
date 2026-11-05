@@ -506,18 +506,77 @@ test.describe("keyboard", () => {
     await expect(toggle).toBeFocused();
   });
 
-  test("dialogs start on Cancel, keep focus inside and close on Escape", async ({ page }) => {
+  test("dialogs start on Cancel, keep focus inside, and Escape on Cancel closes them", async ({ page }) => {
     await open(page, "scenario=mods");
     await goToTab(page, MODS_TAB);
-    await page.locator(".mod-row .update-btn-row").first().click();
+    const opener = page.locator(".mod-row[data-mod=structures] .update-btn-row");
+    await opener.click();
     await expect(page.locator(dialog)).toBeVisible();
+    // The plan is in before anything is counted: the tab order is the final one.
+    await expect(page.locator(`${dialog} .checks .check`).first()).toBeVisible();
     const first = await focused(page);
     expect(first.inDialog).toBe(true);
     expect(first.text).toBe("Cancel");
     await page.evaluate(() => (document.querySelector(".tab-btn") as HTMLElement | null)?.focus());
     await expect.poll(async () => (await focused(page)).inDialog).toBe(true);
-    for (let i = 0; i < 8; i++) await page.keyboard.press("Tab");
+    // Round and round: focus never leaves.
+    for (let i = 0; i < 12; i++) {
+      await page.keyboard.press("Tab");
+      expect((await focused(page)).inDialog).toBe(true);
+    }
+    for (let i = 0; i < 12; i++) await page.keyboard.press("Shift+Tab");
     expect((await focused(page)).inDialog).toBe(true);
+    // From Cancel, with no tooltip open, one Escape closes it and focus goes back to the opener.
+    await page.locator(`${dialog} [data-autofocus]`).focus();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(dialog)).toHaveCount(0);
+    await expect(opener).toBeFocused();
+  });
+
+  test("Escape on a hash first closes its tooltip, then the dialog", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    const opener = page.locator(".mod-row[data-mod=structures] .update-btn-row");
+    await opener.click();
+    const hash = page.locator(`${dialog} .code-short`).first();
+    await expect(hash).toBeVisible();
+    await hash.focus();
+    await expect(page.locator(".tip")).toHaveCount(1);
+    // First Escape: the tip goes, the dialog and focus stay.
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".tip")).toHaveCount(0);
+    await expect(page.locator(dialog)).toHaveCount(1);
+    await expect(hash).toBeFocused();
+    // Second Escape: the dialog closes, and focus goes back to the opener.
+    await page.keyboard.press("Escape");
+    await expect(page.locator(dialog)).toHaveCount(0);
+    await expect(opener).toBeFocused();
+  });
+
+  test("a tooltip the mouse left elsewhere doesn't hold a dialog open", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    await page.locator(".mod-row[data-mod=structures] .update-btn-row").click();
+    const hashes = page.locator(`${dialog} .code-short`);
+    await expect.poll(() => hashes.count()).toBeGreaterThanOrEqual(2);
+    // The mouse rests on one hash while the keyboard is on another: one tip, the focused one's.
+    await hashes.nth(0).hover();
+    await expect(page.locator(".tip")).toHaveCount(1);
+    await hashes.nth(1).focus();
+    await expect(page.locator(".tip")).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".tip")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(page.locator(dialog)).toHaveCount(0);
+  });
+
+  test("a tooltip under the mouse doesn't stop Escape on Cancel", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    await page.locator(".mod-row[data-mod=structures] .update-btn-row").click();
+    await page.locator(`${dialog} .code-short`).first().hover();
+    await expect(page.locator(".tip")).toHaveCount(1);
+    await page.locator(`${dialog} [data-autofocus]`).focus();
     await page.keyboard.press("Escape");
     await expect(page.locator(dialog)).toHaveCount(0);
   });

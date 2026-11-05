@@ -48,6 +48,9 @@ Before a PR:
 - `npm run build`, which runs `npm run check:i18n` first. UI strings go through `src/i18n`: add keys to all four languages (en, pt-BR, es, ru). The check lists missing keys, placeholder mismatches, missing plural forms (counted messages have `_one`, `_other` and, per language, `_few`/`_many` keys), message keys used in `src` that don't exist, and backend error codes without an `errors.*` message. A message with `{0}` takes a name the backend sends (a mod, a version, a repo); any other backend detail is shown apart, behind "Details", never inside a translated sentence.
 - `npm test`: the unit tests (vitest) for the pure logic in `src/mods` and `src/i18n`, and the mock's rules against the shared cases.
 - `npm run test:ui`: the UI tests (Playwright, `e2e/`). Every mock scenario in all four languages at the minimum 960×565 window (layout, rows in view, the state the scenario is for), plus the install, cancel, re-plan, launch-safety, recovery and keyboard flows. Run `npx playwright install chromium` once first, or point `PW_CHROMIUM` at an installed Chromium.
+  - Each run starts its own mock server on a free port, so parallel runs (or another checkout's server) never get mixed up.
+  - `PW_PORT=<port>` fixes the port; the run fails if something already listens there.
+  - `PW_REUSE=1` (with `PW_PORT`) tests a mock server you already started, e.g. `npx vite --mode mock --port 1441 --strictPort`.
 - `cd src-tauri && cargo test export_bindings -- --ignored` regenerates `src/mods/bindings` after a change to an IPC type.
 
 CI (`.github/workflows/ci.yml`) runs all of these on every pull request.

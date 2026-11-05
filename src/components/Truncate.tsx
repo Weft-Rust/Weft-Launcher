@@ -1,29 +1,54 @@
-import { ReactNode, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 /**
- * A tooltip drawn in <body>, so a framed card's clip-path or a scrolling dialog can't cut it off.
- * It shows on hover and on keyboard focus.
+ * The one tooltip on screen, and the element it belongs to. Showing one hides any other, so a tip
+ * the mouse left behind can't sit beside the focused element's tip, or be taken for it.
  */
-function useTip(text: string, enabled: boolean) {
+let openTip: { owner: HTMLElement; hide: () => void } | null = null;
+
+/** Whether `el` has its tooltip showing: then Escape on it closes that tip, and nothing else. */
+export function tipOpenOn(el: EventTarget | null): boolean {
+  return !!openTip && openTip.owner === el;
+}
+
+/**
+ * A tooltip drawn in <body>, so a framed card's clip-path or a scrolling dialog can't cut it off.
+ * It shows on hover and on keyboard focus. Escape on the focused element hides it; the next
+ * Escape goes on to whatever is around it (a dialog closes).
+ */
+export function useTip(text: string, enabled: boolean) {
   const [at, setAt] = useState<{ left: number; top: number; below: boolean } | null>(null);
+  const owner = useRef<HTMLElement | null>(null);
+  const hide = useCallback(() => {
+    if (openTip && openTip.owner === owner.current) openTip = null;
+    owner.current = null;
+    setAt(null);
+  }, []);
   const show = useCallback(
     (el: HTMLElement) => {
       if (!enabled) return;
+      if (openTip && openTip.owner !== el) openTip.hide();
+      owner.current = el;
+      openTip = { owner: el, hide };
       const r = el.getBoundingClientRect();
       const below = r.top < 64;
       setAt({ left: Math.max(8, Math.min(r.left, window.innerWidth - 328)), top: below ? r.bottom + 4 : r.top - 4, below });
     },
-    [enabled]
+    [enabled, hide]
   );
-  const hide = useCallback(() => setAt(null), []);
+  // Gone with its element.
+  useEffect(() => hide, [hide]);
   const handlers = {
     onMouseEnter: (e: React.MouseEvent<HTMLElement>) => show(e.currentTarget),
-    onMouseLeave: hide,
+    onMouseLeave: (e: React.MouseEvent<HTMLElement>) => {
+      // A focused element keeps its tip when the mouse moves off it.
+      if (document.activeElement !== e.currentTarget) hide();
+    },
     onFocus: (e: React.FocusEvent<HTMLElement>) => show(e.currentTarget),
     onBlur: hide,
     onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => {
-      if (e.key === "Escape" && at) {
+      if (e.key === "Escape" && tipOpenOn(e.currentTarget)) {
         e.stopPropagation();
         hide();
       }

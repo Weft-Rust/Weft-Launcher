@@ -1,4 +1,5 @@
 import { ReactNode, useCallback, useEffect, useId, useRef } from "react";
+import { tipOpenOn } from "./Truncate";
 
 interface DialogProps {
   title: ReactNode;
@@ -68,10 +69,10 @@ export function Dialog({ title, subtitle, onClose, locked = false, children, foo
 
     const onKey = (e: KeyboardEvent) => {
       const popupOpen = e.target instanceof Element && !!e.target.closest('[aria-expanded="true"]');
-      // A focused element's tooltip goes first: that element hides it on this same Escape. A tip
-      // left by the mouse elsewhere doesn't hold the dialog open.
-      const tipOwner = e.target instanceof Element && e.target.matches(".truncate[tabindex], .code-short");
-      const tipShown = tipOwner && !!document.querySelector(".tip");
+      // The focused element's own tooltip goes first: that element hides it on this Escape, and
+      // the next one closes the dialog. Only a tip that belongs to the focused element counts,
+      // never one the mouse left elsewhere.
+      const tipShown = tipOpenOn(e.target);
       if (e.key === "Escape" && !isLocked.current && !popupOpen && !tipShown) {
         e.stopPropagation();
         close.current();
