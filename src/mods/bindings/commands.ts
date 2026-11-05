@@ -1,6 +1,7 @@
 // Generated from the Rust types by src-tauri/src/bindings.rs. Do not edit.
 
 import type { Catalog } from "./Catalog";
+import type { CatalogUpdate } from "./CatalogUpdate";
 import type { ChangeResult } from "./ChangeResult";
 import type { CopyPreview } from "./CopyPreview";
 import type { CopyResult } from "./CopyResult";
@@ -50,6 +51,7 @@ export const EVENTS = {
   modProgress: "mod-progress",
   gameState: "game-state",
   installProgress: "install-progress",
+  modCatalog: "mod-catalog",
 } as const;
 
 export type EventName = (typeof EVENTS)[keyof typeof EVENTS];
@@ -89,4 +91,5 @@ export interface EventPayloads {
   "mod-progress": ModProgress;
   "game-state": GameStateEvent;
   "install-progress": InstallProgress;
+  "mod-catalog": CatalogUpdate;
 }

@@ -1773,3 +1773,69 @@ mod saves {
         assert_eq!(handed_to_game(&ctx), ["showcase.zip"]);
     }
 }
+
+mod catalogue {
+    use super::super::catalog::CatalogUpdate;
+    use super::super::index::Freshness;
+    use super::super::index::tests::{FIXTURE, FIXTURE_KEY, FIXTURE_SIG};
+    use super::super::sources;
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// The index (and its revocations) is held and said as soon as it verifies: a source that
+    /// takes long to answer doesn't hold it back. The whole answer still comes at the end.
+    #[test]
+    fn the_index_does_not_wait_for_a_slow_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let index = serve(|path| match path {
+            "/index.json" => ok(FIXTURE.to_vec()),
+            "/index.json.minisig" => ok(FIXTURE_SIG.as_bytes().to_vec()),
+            _ => (404, Vec::new(), Vec::new()),
+        });
+        // A source whose releases take a second and a half to arrive.
+        let api = serve(|_| (200, vec![("slow", "1500".into())], b"[]".to_vec()));
+        let said: Arc<Mutex<Vec<(Instant, CatalogUpdate, u64)>>> = Arc::default();
+        let ctx = Ctx::new(super::super::paths::Paths::new(tmp.path()))
+            .with_index(&format!("{index}/index.json"), FIXTURE_KEY)
+            .with_github_api(&api);
+        let ctx = {
+            let (said, held) = (said.clone(), ctx.catalog.clone());
+            ctx.with_catalog_listener(move |u| {
+                // What Play and every set read would use at this moment.
+                let revision = held
+                    .0
+                    .lock()
+                    .unwrap()
+                    .catalog
+                    .as_ref()
+                    .map_or(0, |c| c.revision);
+                said.lock().unwrap().push((Instant::now(), u, revision));
+            })
+        };
+        sources::save(&ctx.paths, &["someone/slow".into()]).unwrap();
+
+        let started = Instant::now();
+        let catalog = run(service::load_catalog(&ctx, true)).unwrap();
+        let done = Instant::now();
+        let said = said.lock().unwrap();
+        let (at, first, held_revision) = &said[0];
+        assert_eq!(
+            first.pending,
+            ["someone/slow"],
+            "said while the source is still asked"
+        );
+        assert_eq!(first.catalog.index.freshness, Freshness::Fresh);
+        assert_eq!(first.catalog.mods.len(), 1, "the index's mods are in");
+        assert_eq!(
+            *held_revision, first.catalog.revision,
+            "and held, for Play and set reads"
+        );
+        // Said while the source was still being asked (it is in `pending`), however long the
+        // index took to verify and save; the source itself took its second and a half.
+        assert!(*at < done && done.duration_since(started) >= Duration::from_millis(1500));
+        // Then the source, and the whole answer: nothing left waiting.
+        assert!(said.iter().any(|(_, u, _)| u.pending.is_empty()));
+        assert_eq!(catalog.sources.len(), 1);
+        assert!(catalog.revision >= first.catalog.revision);
+    }
+}

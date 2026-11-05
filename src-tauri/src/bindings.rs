@@ -15,7 +15,7 @@ use ts_rs::{Config, TS};
 use crate::error::{AppError, ErrorCode};
 use crate::install::{InstallProgress, InstalledVersion};
 use crate::launch::GameStateEvent;
-use crate::mods::catalog::Catalog;
+use crate::mods::catalog::{Catalog, CatalogUpdate};
 use crate::mods::diagnose::{FailureKind, ModFailure};
 use crate::mods::inspect::FileInspection;
 use crate::mods::install::{ModProgress, ProgressStage};
@@ -309,6 +309,7 @@ fn export_into(dir: &Path) {
         AppError,
         ErrorCode,
         Catalog,
+        CatalogUpdate,
         ProfileReport,
         ChangeResult,
         CopyResult,

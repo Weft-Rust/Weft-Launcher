@@ -1049,6 +1049,24 @@ test.describe("catalogue answers in any order", () => {
   }
 });
 
+test.describe("a slow source holds nothing back", () => {
+  test("a refresh shows the index and its revocations before a slow source answers", async ({ page }) => {
+    await open(page, "scenario=slowrefresh");
+    await goToTab(page, MODS_TAB);
+    const status = page.locator(".header-checking");
+    await expect(status).toHaveText("Still checking lantern-dev/lanterns…");
+    // The index the refresh brought pulled Cogwork: shown, and its set read again, at once.
+    await expect(page.locator(".mod-row[data-mod=cogwork] .badge.revoked")).toBeVisible();
+    await expect(status).toHaveCount(1);
+    // Sources says which one is still being asked.
+    await page.locator(".header-actions button", { hasText: "Sources" }).click();
+    await expect(page.locator(dialog)).toContainText("checking…");
+    await page.keyboard.press("Escape");
+    // Then the source answers, and nothing is left waiting.
+    await expect(status).toHaveCount(0, { timeout: 8_000 });
+  });
+});
+
 test.describe("one source at a time", () => {
   test("a source's own Retry runs alone, says so, and leaves everything else usable", async ({ page }) => {
     await open(page, "scenario=mods&source=ratelimited&slowsource=lantern-dev/lanterns");

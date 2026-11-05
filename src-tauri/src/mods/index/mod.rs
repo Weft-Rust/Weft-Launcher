@@ -21,4 +21,5 @@ pub use signature::{INDEX_PUBLIC_KEY, Signed, public_key, signed_at, verify};
 #[cfg(test)]
 pub(crate) mod tests {
     pub use super::format::tests::*;
+    pub use super::signature::tests::{FIXTURE, FIXTURE_KEY, FIXTURE_SIG};
 }

@@ -390,10 +390,11 @@ enum Listing {
 
 async fn list_releases(
     client: &reqwest::Client,
+    api: &str,
     repo: &str,
     etag: Option<&str>,
 ) -> Result<Listing, ModsError> {
-    let mut url = format!("https://api.github.com/repos/{repo}/releases?per_page=100");
+    let mut url = format!("{api}/repos/{repo}/releases?per_page=100");
     let mut releases = Vec::new();
     let mut first_etag = None;
     for page in 0..MAX_RELEASE_PAGES {
@@ -505,9 +506,11 @@ pub fn cached(paths: &Paths, repo: &str) -> SourceFetch {
 
 /// The mods of one source. When GitHub can't be asked or refuses, the last good answer is used
 /// and the error comes along with it.
+/// `api` is GitHub's API (`context::GITHUB_API`), or a stand-in in tests.
 pub async fn fetch(
     paths: &Paths,
     client: &reqwest::Client,
+    api: &str,
     repo: &str,
     refresh: bool,
 ) -> SourceFetch {
@@ -524,7 +527,7 @@ pub async fn fetch(
     }
 
     let etag = cached.as_ref().and_then(|c| c.etag.clone());
-    let (releases, etag) = match list_releases(client, repo, etag.as_deref()).await {
+    let (releases, etag) = match list_releases(client, api, repo, etag.as_deref()).await {
         Ok(Listing::Releases(r, e)) => (r, e),
         Ok(Listing::NotModified) => {
             let mut cache = cached.unwrap_or_default();

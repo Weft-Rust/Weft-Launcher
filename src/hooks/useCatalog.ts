@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { asAppError, modsApi } from "../mods/api";
+import { asAppError, listenTo, modsApi } from "../mods/api";
+import { EVENTS } from "../mods/ipc";
 import type { Catalog, UiError } from "../mods/types";
 
 export interface CatalogState {
@@ -11,8 +12,10 @@ export interface CatalogState {
   refreshCatalog: () => Promise<void>;
   /** Asks one source again; the others keep their answers and nothing waits on them. */
   refreshSource: (repo: string) => Promise<UiError | null>;
-  /** The sources being asked again on their own, by repo. */
+  /** The sources being asked again: on their own, or still by a whole refresh whose index is in. */
   sourceRefreshing: (repo: string) => boolean;
+  /** The sources a whole refresh still waits on, while what else it brought already shows. */
+  pendingSources: string[];
 }
 
 /**
@@ -34,6 +37,8 @@ export function useCatalog(afterRefresh: () => Promise<unknown>): CatalogState {
   const settled = useRef(0);
   const after = useRef(afterRefresh);
   after.current = afterRefresh;
+  /** The sources a whole refresh still waits on, by its early parts (`mod-catalog`). */
+  const [pending, setPending] = useState<string[]>([]);
 
   /** Shows `next` unless what shows is newer. */
   const offer = useCallback((next: Catalog) => {
@@ -58,9 +63,32 @@ export function useCatalog(afterRefresh: () => Promise<unknown>): CatalogState {
         setCatalogError(asAppError(err));
       }
     } finally {
-      if (id === issued.current) setCatalogLoading(false);
+      if (id === issued.current) {
+        setCatalogLoading(false);
+        setPending([]);
+      }
     }
     await after.current();
+  }, [offer]);
+
+  // A refresh's early parts: the index as soon as it verifies, then each source. Shown at once,
+  // and every set read again, since revocations come with the index: a slow source doesn't hold
+  // them back. The command's own answer comes last and is the whole refresh.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    listenTo(EVENTS.modCatalog, (e) => {
+      offer(e.payload.catalog);
+      setPending(e.payload.pending);
+      void after.current();
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [offer]);
 
   const refreshSource = useCallback(
@@ -83,7 +111,10 @@ export function useCatalog(afterRefresh: () => Promise<unknown>): CatalogState {
     [offer]
   );
 
-  const sourceRefreshing = useCallback((repo: string) => !!refreshing[repo], [refreshing]);
+  const sourceRefreshing = useCallback(
+    (repo: string) => !!refreshing[repo] || pending.some((r) => r.toLowerCase() === repo.toLowerCase()),
+    [refreshing, pending]
+  );
 
   // The cache shows something at once, then the network says what is new.
   useEffect(() => {
@@ -94,5 +125,5 @@ export function useCatalog(afterRefresh: () => Promise<unknown>): CatalogState {
       .finally(() => refreshCatalog());
   }, [offer, refreshCatalog]);
 
-  return { catalog, catalogLoading, catalogError, refreshCatalog, refreshSource, sourceRefreshing };
+  return { catalog, catalogLoading, catalogError, refreshCatalog, refreshSource, sourceRefreshing, pendingSources: pending };
 }

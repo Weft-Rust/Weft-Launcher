@@ -291,6 +291,9 @@ pub fn admit(
         std::fs::File::open(tmp)?.sync_all()?;
         std::fs::create_dir_all(paths.store_dir())?;
         std::fs::rename(tmp, paths.store_object(sha256))?;
+        // As every other write: the rename itself survives a power cut, so a lock that names
+        // this object never outlives it.
+        super::paths::sync_dir(Some(&paths.store_dir()));
         Ok(info)
     })();
     if result.is_err() {

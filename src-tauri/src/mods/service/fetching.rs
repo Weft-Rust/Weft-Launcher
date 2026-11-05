@@ -45,7 +45,12 @@ fn index_cache(paths: &Paths) -> IndexCache {
 /// How many sources are asked at once: one slow source doesn't hold up the others.
 const SOURCE_FETCHES_AT_ONCE: usize = 4;
 
-/// The index and every source; refreshed from the network when `refresh` is set. The page sees
+/// The index and every source; refreshed from the network when `refresh` is set.
+///
+/// Each part is held as soon as it is in, so nothing waits on the slowest source: the index (with
+/// its revocations, which Play and every set read apply from what is held) the moment it is
+/// verified, then each source as it answers. Each early part is also said to the page
+/// ([`Ctx::tell_catalog`], the `mod-catalog` event) with the sources still asked. The page sees
 /// this list, and installs only what is in it.
 ///
 /// Each call takes a ticket as it starts. What it found is merged into the held catalogue part
@@ -57,8 +62,8 @@ pub async fn load_catalog(ctx: &Ctx, refresh: bool) -> Result<Catalog, ModsError
     // Read from disk only, it never replaces a part a refresh brought: ticket 0 is the oldest.
     let ticket = if refresh { ctx.catalog_ticket() } else { 0 };
     let client = http()?;
-    let cache = index_cache(&ctx.paths);
-    let url = index::index_url();
+    let cache = IndexCache::new(&ctx.paths.cache_dir(), ctx.index_key());
+    let url = ctx.index_url().to_string();
     let index_load = index::load(&cache, refresh, OffsetDateTime::now_utc(), async {
         let bytes = index::fetch_bytes(&client, &url).await?;
         let sig = index::fetch_bytes(&client, &format!("{url}.minisig")).await?;
@@ -67,22 +72,53 @@ pub async fn load_catalog(ctx: &Ctx, refresh: bool) -> Result<Catalog, ModsError
         Ok((bytes, sig))
     });
     let (repos, _) = listed_sources(&ctx.paths);
+    // Which sources this refresh still waits on, for what is said early.
+    let pending = std::sync::Mutex::new(repos.clone());
+    let still_asked = || pending.lock().unwrap().clone();
+    let index_part = async {
+        let mut state = index_load.await;
+        let index_status = index_status(&mut state);
+        let (listed, sources_error) = listed_sources(&ctx.paths);
+        let early = CatalogParts {
+            index: state.index.clone(),
+            index_status: index_status.clone(),
+            index_ticket: ticket,
+            sources: Vec::new(),
+            sources_error,
+        };
+        ctx.tell_catalog(ctx.publish_catalog(early, &listed), still_asked());
+        (state.index, index_status)
+    };
     let sources_load = stream::iter(repos)
         .map(|repo| {
             let (paths, client) = (&ctx.paths, &client);
             async move {
-                let f = sources::fetch(paths, client, &repo, refresh).await;
+                let f = sources::fetch(paths, client, ctx.github_api(), &repo, refresh).await;
                 (source_result(repo, f), ticket)
             }
         })
-        .buffered(SOURCE_FETCHES_AT_ONCE)
+        .buffer_unordered(SOURCE_FETCHES_AT_ONCE)
+        .map(|(result, at)| {
+            pending
+                .lock()
+                .unwrap()
+                .retain(|r| !index::same_repo(r, &result.repo));
+            let (listed, sources_error) = listed_sources(&ctx.paths);
+            // Before the index is in, there is nothing to put it into yet: it waits for the end.
+            if let Some(catalog) = ctx.publish_source(at, result.clone(), &listed, sources_error) {
+                ctx.tell_catalog(catalog, still_asked());
+            }
+            (result, at)
+        })
         .collect::<Vec<_>>();
-    let (mut state, fetched) = futures_util::future::join(index_load, sources_load).await;
-    // The list as it is now: a source removed meanwhile isn't brought back.
+    let ((index, index_status), fetched) =
+        futures_util::future::join(index_part, sources_load).await;
+    // The whole refresh, once more, in the order of the list as it is now: a source removed
+    // meanwhile isn't brought back.
     let (listed, sources_error) = listed_sources(&ctx.paths);
     let parts = CatalogParts {
-        index_status: index_status(&mut state),
-        index: state.index,
+        index_status,
+        index,
         index_ticket: ticket,
         sources: fetched,
         sources_error,
@@ -98,7 +134,7 @@ pub async fn refresh_source(ctx: &Ctx, repo: &str) -> Result<Catalog, ModsError>
         return Err(ModsError::SourceNotFound(repo.to_string()));
     };
     let ticket = ctx.catalog_ticket();
-    let f = sources::fetch(&ctx.paths, &http()?, &repo, true).await;
+    let f = sources::fetch(&ctx.paths, &http()?, ctx.github_api(), &repo, true).await;
     let (listed, _) = listed_sources(&ctx.paths);
     match ctx.publish_source(ticket, source_result(repo, f), &listed, sources_error) {
         Some(catalog) => Ok(catalog),

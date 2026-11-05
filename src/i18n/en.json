@@ -505,7 +505,10 @@
     "typedNotPassed_other": "Not shown to be safe ({n}):",
     "removeDoubleClick": "A double-click doesn't remove {0}. Press Remove again to confirm.",
     "ckBuiltIncomplete": "The signed index has an incomplete build record",
-    "ckBuiltIncompleteDetail": "It doesn't give all of the repo, workflow, commit and when it was checked, so how this file was built is unknown"
+    "ckBuiltIncompleteDetail": "It doesn't give all of the repo, workflow, commit and when it was checked, so how this file was built is unknown",
+    "sourcePending": "Still checking {0}…",
+    "sourcesPending_one": "Still checking {n} source…",
+    "sourcesPending_other": "Still checking {n} sources…"
   },
   "sizeUnits": {
     "B": "B",

@@ -534,7 +534,11 @@
     "typedNotPassed_other": "Sin prueba de que sea seguro ({n}):",
     "removeDoubleClick": "Un doble clic no quita {0}. Pulsa Quitar otra vez para confirmar.",
     "ckBuiltIncomplete": "El índice firmado tiene un registro de compilación incompleto",
-    "ckBuiltIncompleteDetail": "Le falta el repositorio, el workflow, el commit o la fecha de comprobación, así que no se sabe cómo se compiló este archivo"
+    "ckBuiltIncompleteDetail": "Le falta el repositorio, el workflow, el commit o la fecha de comprobación, así que no se sabe cómo se compiló este archivo",
+    "sourcePending": "Aún comprobando {0}…",
+    "sourcesPending_one": "Aún comprobando {n} fuente…",
+    "sourcesPending_many": "Aún comprobando {n} fuentes…",
+    "sourcesPending_other": "Aún comprobando {n} fuentes…"
   },
   "sizeUnits": {
     "B": "B",

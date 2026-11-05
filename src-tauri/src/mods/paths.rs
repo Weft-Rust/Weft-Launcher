@@ -133,7 +133,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ModsError> {
 
 /// So the rename itself survives a power cut. Only where a folder can be opened and synced:
 /// Windows makes the rename durable on its own.
-fn sync_dir(dir: Option<&Path>) {
+pub(crate) fn sync_dir(dir: Option<&Path>) {
     #[cfg(unix)]
     if let Some(dir) = dir
         && let Ok(d) = std::fs::File::open(dir)

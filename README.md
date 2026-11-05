@@ -85,6 +85,7 @@ Pick a state with `?scenario=` and adjust it with flags, which combine: `?scenar
 | `lateblock` | Nothing blocks Play until Play itself finds Cogwork revoked; Hearth, which needs it, then blocks the start. | `prelaunch=revoke` |
 | `long` | Very long mod names, ids and repos, for overflow checks. | `long=1` |
 | `shadowed` | Cogwork is revoked, and the player's own mods folder has a copy of it, which would load in its place: Play is blocked until that file goes. | `revoked=cogwork` `shadow=cogwork` |
+| `slowrefresh` | A refresh whose index is in at once and pulls Cogwork, while the source lantern-dev/lanterns takes three seconds: Cogwork shows revoked before the source answers. | `slowsource=lantern-dev/lanterns` `refreshrevokes=cogwork` |
 | `chain` | Mods that need mods that need others: Chimneys needs Hearth, which needs Cogwork, both installed and off; Junctions needs Railways, which needs Signals, which has no build. | `chain=1` |
 
 | Flag | Values | Effect |
@@ -93,7 +94,8 @@ Pick a state with `?scenario=` and adjust it with flags, which combine: `?scenar
 | `source` | `ok`, `notfound`, `ratelimited`, `offline` | State of the added GitHub source. |
 | `nomods` | `noReleases`, `noModFiles`, `unreadable`, `noDigest`, `disagrees`, `invalid` | GitHub answers for the added source, but it has no usable mods, for this reason. |
 | `race` | `stale`, `error` | The first catalogue refresh is slow and answers last: with an older catalogue (`stale`) or an error (`error`). The page keeps the newer answer. |
-| `slowsource` | `<repo>` | That source takes three seconds to answer a refresh of its own. |
+| `slowsource` | `<repo>` | That source takes three seconds to answer, in a refresh of its own or a whole one; in a whole one the index is shown (`mod-catalog`) as soon as it is in, without waiting for it. |
+| `refreshrevokes` | `<mod id>` | The index a refresh brings revokes the installed builds of that mod, once. |
 | `revoked` | `<mod id>` | Revokes the installed builds of that mod. |
 | `abi` | `error` | The game version's mod interface can't be found out. |
 | `fail` | `install`, `network`, `toolarge`, `dep`, `meanwhile`, `catalog`, `sources` | Comma-separated. Installs fail at the hash check, mid-download, before it, or while downloading a dependency; `meanwhile` publishes a newer Glowmoss after the first plan, so a plan with Glowmoss in it is refused as changed and planned again; the catalogue fails to load; `sources` finds the list of sources damaged (kept aside, `ModSourcesDamaged`). |

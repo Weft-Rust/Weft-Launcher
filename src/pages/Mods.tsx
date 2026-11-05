@@ -274,6 +274,12 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
             labelledBy={versionLabelId}
             compact
           />
+          {/* The index is in; a slow source is still being asked. Said, not hidden behind Refresh. */}
+          {mods.pendingSources.length > 0 && (
+            <span className="header-checking" role="status" title={formatList(mods.pendingSources)}>
+              {mods.pendingSources.length === 1 ? t("mods.sourcePending", mods.pendingSources[0]) : tn("mods.sourcesPending", mods.pendingSources.length)}
+            </span>
+          )}
           <button className="btn-flat" onClick={() => setShowSources(true)}>
             {t("mods.sources")}
           </button>

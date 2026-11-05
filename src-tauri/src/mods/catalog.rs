@@ -164,6 +164,16 @@ pub struct Catalog {
     pub revision: u64,
 }
 
+/// A part of a refresh that is in before the rest: the catalogue held now, and the sources this
+/// refresh still waits on. Sent as the `mod-catalog` event, so the index (and its revocations)
+/// shows without waiting for a slow source.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogUpdate {
+    pub catalog: Catalog,
+    pub pending: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct RevokedView {

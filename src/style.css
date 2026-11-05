@@ -294,6 +294,7 @@ button:disabled { cursor: not-allowed; }
 .link-btn:hover { color: var(--a3); }
 
 .header-for { color: var(--g5); text-shadow: 2px 2px 0 var(--ink); }
+.header-checking { color: var(--g5); text-shadow: 2px 2px 0 var(--ink); max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .version-select.compact .version-select-btn { --top: 8px; min-width: 160px; }
 .version-select.compact .version-select-menu { top: 56px; }
 

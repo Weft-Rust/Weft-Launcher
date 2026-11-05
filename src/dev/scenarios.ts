@@ -49,6 +49,12 @@ export const SCENARIOS: Scenario[] = [
     flags: { revoked: "cogwork", shadow: "cogwork" },
   },
   {
+    name: "slowrefresh",
+    description:
+      "A refresh whose index is in at once and pulls Cogwork, while the source lantern-dev/lanterns takes three seconds: Cogwork shows revoked before the source answers.",
+    flags: { slowsource: "lantern-dev/lanterns", refreshrevokes: "cogwork" },
+  },
+  {
     name: "chain",
     description:
       "Mods that need mods that need others: Chimneys needs Hearth, which needs Cogwork, both installed and off; Junctions needs Railways, which needs Signals, which has no build.",
@@ -80,7 +86,13 @@ export const FLAGS: Flag[] = [
     values: ["stale", "error"],
     description: "The first catalogue refresh is slow and answers last: with an older catalogue (`stale`) or an error (`error`). The page keeps the newer answer.",
   },
-  { name: "slowsource", values: ["<repo>"], description: "That source takes three seconds to answer a refresh of its own." },
+  {
+    name: "slowsource",
+    values: ["<repo>"],
+    description:
+      "That source takes three seconds to answer, in a refresh of its own or a whole one; in a whole one the index is shown (`mod-catalog`) as soon as it is in, without waiting for it.",
+  },
+  { name: "refreshrevokes", values: ["<mod id>"], description: "The index a refresh brings revokes the installed builds of that mod, once." },
   { name: "revoked", values: ["<mod id>"], description: "Revokes the installed builds of that mod." },
   { name: "abi", values: ["error"], description: "The game version's mod interface can't be found out." },
   {

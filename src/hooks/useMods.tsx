@@ -53,6 +53,8 @@ interface ModsContextValue {
   /** Asks one source again, alone; resolves with why it failed, if it did. */
   refreshSource: (repo: string) => Promise<UiError | null>;
   sourceRefreshing: (repo: string) => boolean;
+  /** The sources a whole refresh still waits on, while what else it brought already shows. */
+  pendingSources: string[];
 
   profile: (tag: string | null | undefined) => ProfileReport | undefined;
   profileError: (tag: string) => Shown | null;
@@ -137,7 +139,7 @@ export function ModsProvider({ children }: { children: ReactNode }) {
   // The catalogue, in order; every version's set is read again after each refresh, since
   // revocations and updates come with it.
   const catalogState = useCatalog(() => Promise.all(tagsRef.current.map((tag) => loadProfile(tag))));
-  const { catalog, catalogLoading, catalogError, refreshCatalog, refreshSource, sourceRefreshing } = catalogState;
+  const { catalog, catalogLoading, catalogError, refreshCatalog, refreshSource, sourceRefreshing, pendingSources } = catalogState;
 
   // A crash notice stays until its problem is fixed: the blamed mod is off, gone or replaced, or
   // the dependency it lacked is on and usable.
@@ -314,6 +316,7 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       refreshCatalog,
       refreshSource,
       sourceRefreshing,
+      pendingSources,
       profile,
       profileError,
       loadProfile,
@@ -344,6 +347,7 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       refreshCatalog,
       refreshSource,
       sourceRefreshing,
+      pendingSources,
       profile,
       profileError,
       loadProfile,

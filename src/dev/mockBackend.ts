@@ -788,8 +788,10 @@ const raceFlag = flag("race");
 let raced = false;
 /** Counts up with every catalogue the mock answers with, like the backend's held revision. */
 let revision = 0;
-/** `slowsource=<repo>`: that source takes long to answer a refresh of its own. */
+/** `slowsource=<repo>`: that source takes long to answer, in a whole refresh or one of its own. */
 const slowSource = flag("slowsource");
+/** `refreshrevokes=<id>`: the index a forced refresh brings revokes that mod (once). */
+let refreshRevoked = false;
 /** What GitHub has in repos added here: `glow-team/fireflies` publishes releases without mods. */
 const EMPTY_REPOS: Record<string, NoModsReason> = { "glow-team/fireflies": "noModFiles" };
 
@@ -835,6 +837,21 @@ const handlers: Handlers = {
   // Opening the folder only opens it; the player deleting a file there is `mockPlayer.deleteFile`.
   open_player_mods_folder: () => undefined,
   list_mod_catalog: async ({ forceRefresh }) => {
+    // `slowsource` in a whole refresh: the index is in at once and said early (`mod-catalog`,
+    // as `service::load_catalog` does), with its revocations (`refreshrevokes`); the slow
+    // source answers three seconds later, and only then does the refresh answer.
+    const slow = forceRefresh && slowSource ? catalog.sources.find((s) => sameRepo(s.repo, slowSource)) : undefined;
+    if (slow) {
+      await sleep(400);
+      const pulled = flag("refreshrevokes");
+      if (pulled && !refreshRevoked) {
+        refreshRevoked = true;
+        revoke(pulled);
+      }
+      await emit(EVENTS.modCatalog, { catalog: { ...structuredClone(catalog), revision: ++revision }, pending: [slow.repo] });
+      await sleep(2600);
+      return { ...structuredClone(catalog), revision: ++revision };
+    }
     // `race`: the first refresh is slow, and what it found is older than what the next one
     // finds; it answers last, with the older revision (`stale`) or an error (`error`).
     const late = forceRefresh && raceFlag && !raced;

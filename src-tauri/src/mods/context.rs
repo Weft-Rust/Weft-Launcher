@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use tauri::{AppHandle, Manager};
 use tokio::sync::{Mutex, OwnedMutexGuard, watch};
 
-use super::catalog::{Catalog, CatalogParts, CatalogState, SourceResult};
+use super::catalog::{Catalog, CatalogParts, CatalogState, CatalogUpdate, SourceResult};
 use super::error::ModsError;
 use super::index::is_sha256;
 use super::install::{ModProgress, ProgressStage};
@@ -35,6 +35,7 @@ impl ModsLock {
 }
 
 type Progress = Arc<dyn Fn(ModProgress) + Send + Sync>;
+type CatalogListener = Arc<dyn Fn(CatalogUpdate) + Send + Sync>;
 
 const RUNNING: u8 = 0;
 const COMMITTING: u8 = 1;
@@ -165,11 +166,17 @@ pub struct Ctx {
     pub games: RunningGames,
     pub operations: Operations,
     progress: Progress,
+    /// Where each early part of a catalogue refresh goes: the `mod-catalog` event.
+    catalog_parts: CatalogListener,
     /// Whether a download's URL must be its build's GitHub release asset. Only tests, whose
     /// downloads come from a local server, turn this off.
     check_urls: bool,
     /// Where GitHub's API is: `https://api.github.com`, or a local server in tests.
     github_api: String,
+    /// Where the signed index is, and the key it is signed with: the real ones (or the debug
+    /// overrides, `index::index_url`), or a local server and the fixture key in tests.
+    index_url: String,
+    index_key: String,
 }
 
 pub const GITHUB_API: &str = "https://api.github.com";
@@ -185,8 +192,14 @@ impl Ctx {
             games: app.state::<RunningGames>().inner().clone(),
             operations: app.state::<Operations>().inner().clone(),
             progress: Arc::new(move |p| crate::ipc::emit_mod_progress(&emitter, &p)),
+            catalog_parts: {
+                let app = app.clone();
+                Arc::new(move |u| crate::ipc::emit_mod_catalog(&app, &u))
+            },
             check_urls: true,
             github_api: GITHUB_API.to_string(),
+            index_url: super::index::index_url(),
+            index_key: super::index::public_key(),
         })
     }
 
@@ -200,9 +213,25 @@ impl Ctx {
             games: RunningGames::default(),
             operations: Operations::default(),
             progress: Arc::new(|_| {}),
+            catalog_parts: Arc::new(|_| {}),
             check_urls: true,
             github_api: GITHUB_API.to_string(),
+            index_url: super::index::index_url(),
+            index_key: super::index::public_key(),
         }
+    }
+
+    pub fn with_catalog_listener(
+        mut self,
+        listener: impl Fn(CatalogUpdate) + Send + Sync + 'static,
+    ) -> Ctx {
+        self.catalog_parts = Arc::new(listener);
+        self
+    }
+
+    /// Says an early part of a refresh: the catalogue held now and the sources still asked.
+    pub fn tell_catalog(&self, catalog: Catalog, pending: Vec<String>) {
+        (self.catalog_parts)(CatalogUpdate { catalog, pending });
     }
 
     pub fn with_progress(mut self, progress: impl Fn(ModProgress) + Send + Sync + 'static) -> Ctx {
@@ -222,6 +251,22 @@ impl Ctx {
     pub fn with_github_api(mut self, base: &str) -> Ctx {
         self.github_api = base.to_string();
         self
+    }
+
+    /// For tests that serve a signed index of their own.
+    #[cfg(test)]
+    pub fn with_index(mut self, url: &str, key: &str) -> Ctx {
+        self.index_url = url.to_string();
+        self.index_key = key.to_string();
+        self
+    }
+
+    pub fn index_url(&self) -> &str {
+        &self.index_url
+    }
+
+    pub fn index_key(&self) -> String {
+        self.index_key.clone()
     }
 
     pub fn github_api(&self) -> &str {

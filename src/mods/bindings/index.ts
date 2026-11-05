@@ -8,6 +8,7 @@ export type * from "./BuildRecord";
 export type * from "./Catalog";
 export type * from "./CatalogMatch";
 export type * from "./CatalogMod";
+export type * from "./CatalogUpdate";
 export type * from "./CatalogVersion";
 export type * from "./ChangeResult";
 export type * from "./Channel";
