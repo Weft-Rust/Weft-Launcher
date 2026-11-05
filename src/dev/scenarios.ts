@@ -121,6 +121,7 @@ export const FLAGS: Flag[] = [
   { name: "prelaunch", values: ["revoke"], description: "Play finds Cogwork revoked, as a fresh index would, before it starts the game." },
   { name: "long", values: ["1"], description: "Adds very long names, ids and repos." },
   { name: "slow", values: ["1"], description: "Everything takes four times as long: time enough to press Cancel." },
+  { name: "fast", values: ["1"], description: "Everything takes a quarter as long, for screenshots of results." },
   {
     name: "profile",
     values: ["fail", "failafterplay"],

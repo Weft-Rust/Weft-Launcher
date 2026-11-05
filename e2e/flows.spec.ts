@@ -812,6 +812,26 @@ test.describe("remove and undo", () => {
   });
 });
 
+test.describe("mock", () => {
+  test("the window title names the scenario and its flags", async ({ page }) => {
+    await open(page, "scenario=crash&crash=exit");
+    await expect(page).toHaveTitle("Weft (mock: crash, crash=exit)");
+  });
+
+  test("an event never reaches a listener that was let go", async ({ page }) => {
+    const lost: string[] = [];
+    page.on("console", (m) => m.text().includes("Couldn't find callback") && lost.push(m.text()));
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    await browse(page);
+    await page.locator(".mod-card", { hasText: "Hearth" }).locator(".mod-card-foot .btn-primary").click();
+    await page.locator(`${dialog} .dialog-actions .btn-primary`).click();
+    await expect(page.locator(dialog)).toHaveCount(0, { timeout: 15_000 });
+    await settled(page);
+    expect(lost).toEqual([]);
+  });
+});
+
 test.describe("contrast", () => {
   test("an off mod's name reads as well as small text: a solid colour, not faded", async ({ page }) => {
     await open(page, "scenario=chain");

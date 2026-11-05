@@ -107,6 +107,7 @@ Pick a state with `?scenario=` and adjust it with flags, which combine: `?scenar
 | `prelaunch` | `revoke` | Play finds Cogwork revoked, as a fresh index would, before it starts the game. |
 | `long` | `1` | Adds very long names, ids and repos. |
 | `slow` | `1` | Everything takes four times as long: time enough to press Cancel. |
+| `fast` | `1` | Everything takes a quarter as long, for screenshots of results. |
 | `profile` | `fail`, `failafterplay` | Reading a version's set fails (`Io`): always, or only the first read after Play is refused, so Retry gets through. |
 
 ## Releasing

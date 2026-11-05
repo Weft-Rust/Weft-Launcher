@@ -40,7 +40,8 @@ const scenarioName = params.get("scenario") ?? "mods";
 const scenario = SCENARIOS.find((s) => s.name === scenarioName) ?? SCENARIOS[0];
 const flag = (name: string): string | null => params.get(name) ?? scenario.flags[name] ?? null;
 const failures = new Set((flag("fail") ?? "").split(",").filter(Boolean));
-const SLOW = flag("slow") === "1" ? 4 : 1;
+/** `slow=1`: four times as long, time enough to press Cancel; `fast=1`: a quarter, for screenshots. */
+const SLOW = flag("slow") === "1" ? 4 : flag("fast") === "1" ? 0.25 : 1;
 const LONG = flag("long") === "1";
 const NOW = "2026-11-04T18:00:00Z";
 
@@ -491,11 +492,11 @@ async function fetchBuild(op: Op, file: { sha256: string; id: string; index: num
     await progress(op, file, "downloading", p);
     if (p === 40 && failures.has("network")) fail("Network", "connection reset by peer");
     if (p === 60 && isDep && failures.has("dep")) fail("ModDownloadNotFound", `${file.id}.zip`);
-    await sleep(140);
+    await sleep(50);
   }
   op.check();
   await progress(op, file, "verifying", 100);
-  await sleep(450);
+  await sleep(200);
   if (failures.has("install")) fail("Sha256Mismatch", `expected ${file.sha256.slice(0, 12)}…, got 0b5e1c9d2a77…`);
 }
 
@@ -734,7 +735,7 @@ async function launch(tag: string) {
   // `prepare_launch` applies what the catalogue says before anything starts.
   if (flag("prelaunch") === "revoke" && !catalog.revoked.length) revoke("cogwork");
   // Then it reads the set and hashes what it hands the game: not instant.
-  await sleep(250 * SLOW);
+  await sleep(250);
   const r = report(tag);
   if (r.blocking.length) {
     if (profileFlag === "failafterplay") failNextRead = true;
@@ -983,6 +984,9 @@ function mockSettled(): Promise<void> {
 
 export function installMockBackend() {
   mockWindows("main");
+  // Which scenario a window or screenshot shows, and the flags given beside it.
+  const extra = [...params].filter(([k]) => k !== "scenario").map(([k, v]) => `${k}=${v}`);
+  document.title = `Weft (mock: ${scenario.name}${extra.length ? `, ${extra.join(", ")}` : ""})`;
   (window as unknown as { mockPlayer: typeof mockPlayer }).mockPlayer = mockPlayer;
   (window as unknown as { mockSettled: typeof mockSettled }).mockSettled = mockSettled;
   mockIPC(
@@ -1002,4 +1006,10 @@ export function installMockBackend() {
     },
     { shouldMockEvents: true }
   );
+  // The shim's unlisten looks for `id`, but @tauri-apps/api sends `eventId`: a listener that was
+  // let go stayed registered, and every later event warned "Couldn't find callback id". Pass it
+  // on under the name the shim reads.
+  const internals = (window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string, args?: Record<string, unknown>, o?: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__;
+  const invoke = internals.invoke;
+  internals.invoke = (cmd, args, o) => invoke(cmd, cmd === "plugin:event|unlisten" && args ? { ...args, id: args.eventId } : args, o);
 }
