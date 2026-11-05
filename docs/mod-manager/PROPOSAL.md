@@ -74,10 +74,11 @@ As built (`src-tauri/src/mods/paths.rs`):
 
 ```
 mods/
-  store/<sha256>.zip              content-addressed, each one verified once
+  store/<sha256>.zip              content-addressed; hashed when added, and again whenever reused
   sources.json                    the GitHub repos the player added, as GitHub spells them
+  sources.damaged-<secs>.json     a sources.json that couldn't be read, set aside rather than lost
 profiles/<weft-tag>/
-  mods/<id>.zip                   only the turned-on mods (hardlink, or a copy if that fails)
+  mods/<id>.zip                   only the turned-on mods, each its own copy (never a hard link)
   mods.lock.json                  every installed mod: id, version, sha256, origin, trust, enabled,
                                   ABI, deps, and the revocation once one applied
   removed.json                    the last removed mod, until the version's next change (Undo)
@@ -93,7 +94,7 @@ downloads/mod-<sha256>-<unique>.part   a download in progress; never shared by t
 
 The index URL is built in (`index/fetch.rs`); `sources.json` holds only repos.
 
-Launch becomes `weft --mods <profiles/<tag>/mods>`. Turning a mod on or off just adds or removes the link. When a version is deleted, its profile goes with it, and unused store entries are garbage-collected. Garbage collection skips any store object an install is still working on or a removal can still undo, and deletes nothing if any lock file can't be read. Lock files are checked when read: an id that isn't a mod id or a hash that isn't one is an error, never a path.
+Launch becomes `weft --mods <profiles/<tag>/mods>`. Turning a mod on or off copies its build into that folder or removes it. When a version is deleted, its profile goes with it, and unused store entries are garbage-collected. Garbage collection skips any store object an install is still working on or a removal can still undo, and deletes nothing if any lock file can't be read. Lock files are checked when read: an id that isn't a mod id or a hash that isn't one is an error, never a path.
 
 ### Backend modules (`src-tauri/src/mods/`)
 
@@ -270,10 +271,18 @@ Implemented on `feat/mod-manager`; names below are the ones in the code.
 - **Copying a mod set** ("Copy mods from…") has a preview (`preview_copy_mod_profile`) and merges into a set that already has mods, skipping the ones it has.
 - **Updates keep the on/off state.** A mod that is off stays off after an update.
 - **Matching is by ABI, not tag.** Builds made from untagged Weft commits fit every release with the same ABI.
-- **A new install never breaks Play.** A mod that needs something no build provides, at any depth, is installed turned off (`turnsOn`, `installedOff`). A mod that is already on still blocks Play when what it needs goes away; the report tells a dependency that isn't installed (`depsNotInstalled`) from one that is off, and `blockingReasons` says why each blocker blocks.
+- **A new install turns on nothing the launcher knows would stop Play.** A mod that needs something no build provides, at any depth, is installed turned off (`turnsOn`, `installedOff`). A mod that is already on still blocks Play when what it needs goes away; the report tells a dependency that isn't installed (`depsNotInstalled`) from one that is off, and `blockingReasons` says why each blocker blocks. What it knows has limits: the mod interface a build declares is the publisher's word (the game has the last word when it loads the library), and a copy in the player's own mods folder loads in the launcher's place. That copy is shown, and blocks Play when it is revoked, but the launcher never deletes it.
 - **Revocations are remembered** in `mods.lock.json`, so they outlive the index.
 - **The index has an age**: `signedAt`, freshness `stale` after 30 days, and rollback refusal kept in its own state file.
 - **Installs are checked again before they are written** (`ModChangedMeanwhile`), and **Remove has Undo** (`restore_mod`).
 - **Round 4:** dependencies resolve transitively through installed mods; the reviewed plan is binding (`planToken`); operations have ids, per-file progress and `cancel_mod_operation` (`ModCancelled`); the player's folder is checked for shadowing; `fitsVersion` is `null` when the ABI is unknown; revocations fail closed and cached data is checked again on every read; versions' folders hold copies; nothing is rewritten while the game runs. New error codes: `ModCancelled`, `ModLockInvalid`, `ModUrlRefused`, `ModIconInvalid`.
+- **Round 5:**
+  - Consent at commit uses what the catalogue says *now*: the builds are looked up again, revocations and installability are checked again, and the token is recomputed from the current mod interface, so a build whose metadata changed under the same hash is refused (`ModChangedMeanwhile`).
+  - A save writes in a fixed order: the old Undo is cleared, then the lock, then the removal's Undo (a failure there only loses Undo), then the folder is reconciled.
+  - A damaged `sources.json` is never taken for an empty list or overwritten: it is renamed to `sources.damaged-<secs>.json` beside it and reported (`ModSourcesDamaged`, new) with that path. Adding a source then starts a new list, and the damaged copy stays where it was put; a file that couldn't be moved aside is left alone and Add is refused.
+  - A source that shows no mods says why (`SourceStatus.noMods`: `noReleases`, `noModFiles`, `unreadable`, `noDigest`, `disagrees`, `invalid`).
+  - A revocation without a reason carries `reason: null`, in the index, the lock and the IPC types; the UI says "No reason given" in the player's language.
+  - `GameFolderNotFound` carries the folder, not an English sentence.
+  - In the UI: one blocker at a time with all its fixes (a pager), results as toasts over the list, Play's reason next to Play, plans kept by content so a reload that brings the same plan doesn't flicker the button, and progress events held to a shared trace (`src/dev/fixtures/trace.json`) on both the backend and the mock.
 - **Deferred:** everything in Phase 3, and the open question above.
 - **Working on the UI without Tauri:** `npm run dev:mock` (see the README).

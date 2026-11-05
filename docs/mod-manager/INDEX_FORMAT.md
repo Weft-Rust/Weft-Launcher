@@ -187,6 +187,26 @@ When several releases publish the same mod:
 
 A source mod is its own catalogue entry (`source:<owner/repo>:<id>`), even when the index has a mod with the same `id` (`index:<id>`). Dependencies are looked up in the index first, then in the same source. A source build whose `sha256` is also in the index shows once, as Reviewed.
 
+## Publishing from your own repo
+
+A player can add any GitHub repo as a source (Mods → Sources). Its mods show up as **Unreviewed**. To publish one:
+
+1. Build the mod and zip it as `<id>.zip`, where `<id>` is the mod id (`[a-z0-9_]{1,64}`, not `base`).
+2. Write `<id>.mod.json` as [above](#idmodjson-for-unreviewed-sources). `tag` is the release's tag, `source.repo` is your repo, and `asset` describes the zip exactly: its name, its `browser_download_url`, its size and its SHA-256.
+3. Make a GitHub release (not a draft) with both files as assets. GitHub records a SHA-256 digest for each asset; the launcher compares `asset.sha256` with it, and skips a zip GitHub has no digest for.
+4. Bump the version, and make a new release, for every new build: a version or hash an older release already published is skipped.
+
+When a source shows no mods, the Sources dialog says why. It names the reason that got furthest across all releases (`SourceStatus.noMods`):
+
+| Reason | Means |
+| --- | --- |
+| `noReleases` | The repo has no published releases. |
+| `noModFiles` | No release has an `<id>.zip` together with its `<id>.mod.json`. |
+| `unreadable` | An `<id>.mod.json` couldn't be read as JSON, or isn't a description. |
+| `noDigest` | GitHub has no SHA-256 digest for the zip, so nothing could be checked. |
+| `disagrees` | The description doesn't match GitHub's record of the release: tag, repo, asset name, URL, size or hash, or the id isn't the zip's. |
+| `invalid` | It matches, but breaks a [rule every entry follows](#rules-the-launcher-enforces). |
+
 ## Launcher behaviour
 
 What the launcher does with all of this, beyond the field rules:
