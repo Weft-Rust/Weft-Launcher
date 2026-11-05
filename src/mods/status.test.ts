@@ -58,7 +58,7 @@ describe("blockers", () => {
     const [b] = blockers(r, name);
     expect(b.fixes.map((f) => f.kind)).toEqual(["update", "turnOff"]);
     expect(b.fixes[0]).toMatchObject({ version: "1.1.0" });
-    expect(b.reasons).toEqual([{ key: "mods.statusWrongVersionTag", args: ["v26.10.4"] }]);
+    expect(b.reasons).toEqual([{ key: "mods.blockWrongVersionTag", args: ["v26.10.4"] }]);
   });
 
   it("offers turning on an installed dependency that is off, and installing one that has a build", () => {
@@ -246,7 +246,7 @@ describe("contract R4: shadowing, reasons and recovery", () => {
 
   it("uses the backend's reason for the wording", () => {
     const r = report([installed("old", { status: "wrongVersion", weftTag: "v26.10.4" })], { blockingReasons: { old: "wrongVersion" } });
-    expect(blockers(r, name)[0].reasons[0]).toEqual({ key: "mods.statusWrongVersionTag", args: ["v26.10.4"] });
+    expect(blockers(r, name)[0].reasons[0]).toEqual({ key: "mods.blockWrongVersionTag", args: ["v26.10.4"] });
   });
 
   it("a missing-dependency crash clears once that dependency is on and usable", () => {

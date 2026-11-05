@@ -12,11 +12,19 @@ interface DialogProps {
   footer: ReactNode;
 }
 
+// Native `<summary>` is a tab stop too (the error Details disclosure), as are selects and text areas.
 const FOCUSABLE =
-  'button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"]):not(:disabled)';
+  'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [href], summary, [tabindex]:not([tabindex="-1"]):not(:disabled)';
 
 function usable(el: Element | null): el is HTMLElement {
-  return el instanceof HTMLElement && !(el as HTMLButtonElement).disabled && el.getClientRects().length > 0;
+  if (!(el instanceof HTMLElement) || (el as HTMLButtonElement).disabled || el.tabIndex < 0) return false;
+  if (el.getClientRects().length === 0 || el.closest("[hidden], [inert]")) return false;
+  // Only a details element's own first summary can be focused.
+  if (el.tagName === "SUMMARY") {
+    const details = el.parentElement;
+    if (!(details instanceof HTMLDetailsElement) || details.querySelector(":scope > summary") !== el) return false;
+  }
+  return true;
 }
 
 /**

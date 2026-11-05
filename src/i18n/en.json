@@ -377,7 +377,7 @@
     "indexUnavailableShort": "Reviewed mods are unavailable: the mod index couldn't be read.",
     "noticeTurnedOn": "Turned on {0}.",
     "noticeTurnedOff": "Turned off {0}.",
-    "blockShadowedRevoked": "Pulled from the index, but a copy in your own mods folder ({0}) would load in its place. Remove that file. Reason: {2}",
+    "blockShadowedRevoked": "Pulled from the index, but your own mods folder's copy ({0}) would load instead. Reason: {2}",
     "shadowOffRow": "A copy in your own mods folder ({0}) loads instead.",
     "shadowRevokedRow": "A copy in your own mods folder ({0}) would still load, so Weft won't start until that file is gone.",
     "ckIndexDetailDated": "Reviewed by {0} on {1} · from the index signed {2}",
@@ -425,7 +425,18 @@
     "updateLabel": "Update {0}",
     "sourcesLoadFailedLead": "Couldn't read your sources.",
     "noticeShadowLoads": "Your own mods folder has a copy of {0} ({1}), so the game loads that one instead.",
-    "failureShadowed": "Your own mods folder has a copy of it ({0}); the game may have loaded that one."
+    "failureShadowed": "Your own mods folder has a copy of it ({0}); the game may have loaded that one.",
+    "blockerPager": "Mods that stop the game",
+    "blockerPrev": "Previous mod that stops the game",
+    "blockerNext": "Next mod that stops the game",
+    "blockerPage": "{0} of {1}",
+    "playOffOne": "Play is off: {0} needs a fix.",
+    "playOffMany_one": "Play is off: {n} mod needs a fix.",
+    "playOffMany_other": "Play is off: {n} mods need a fix.",
+    "toastsLabel": "What just happened",
+    "blockerLead": "Stops Play:",
+    "blockWrongVersionTag": "Built for {0}.",
+    "blockWrongVersion": "Built for another game version."
   },
   "sizeUnits": {
     "B": "B",

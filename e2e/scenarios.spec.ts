@@ -5,7 +5,7 @@
 // by structure, since their words differ.
 import { expect, test, type Page } from "@playwright/test";
 import { SCENARIOS } from "../src/dev/scenarios";
-import { LOCALES, MODS_TAB, browse, expectFits, expectTwoCardRows, fullRows, goToTab, lowContrast, open, tops } from "./helpers";
+import { LOCALES, MODS_TAB, browse, cutButtons, expectBlockerFixesInView, expectFits, expectTwoCardRows, fullRows, goToTab, lowContrast, open, tops } from "./helpers";
 
 type Check = (page: Page, en: boolean) => Promise<void>;
 interface Checks {
@@ -15,6 +15,19 @@ interface Checks {
 }
 
 const row = (page: Page, name: string) => page.locator(".mod-row", { hasText: name });
+
+/** Rows whose red reason shows less than its first line: "Built f…". */
+const cutReasons = (page: Page) =>
+  page.locator(".mod-meta.bad").evaluateAll((els) =>
+    els
+      .filter((e) => {
+        const style = getComputedStyle(e);
+        const line = parseFloat(style.lineHeight);
+        // Cut on its first line (one-line ellipsis, or a clamp that couldn't wrap at all).
+        return e.scrollWidth > e.clientWidth + 1 || (e.scrollHeight > e.clientHeight + 1 && e.clientHeight < line * 2 - 1);
+      })
+      .map((e) => e.closest("[data-mod]")?.getAttribute("data-mod") ?? "?")
+  );
 const openNotes = async (page: Page) => {
   const toggle = page.locator(".banner-toggle");
   if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
@@ -31,7 +44,8 @@ const CHECKS: Record<string, Checks> = {
     installed: async (page, en) => {
       await expect(page.locator(".mod-row")).toHaveCount(5);
       // The same fixes as Home, right above the rows.
-      await expect(page.locator(".blockers.in-banner .blocker button")).toHaveCount(2);
+      await expect(page.locator(".blockers.in-banner .blocker-actions button")).toHaveCount(2);
+      await expect(page.locator(".blockers.in-banner .blocker-pager")).toHaveCount(0);
       if (en) await expect(page.locator(".blockers.in-banner")).toContainText("Update to 1.1.0…");
     },
   },
@@ -58,7 +72,7 @@ const CHECKS: Record<string, Checks> = {
       if (en) {
         // The player's own folder is last.
         expect(at(/Showing the mod index from Nov 2/)).toBe(0);
-        expect(at(/won't start/)).toBe(1);
+        expect(at(/Stops Play/)).toBe(1);
         expect(at(/Showing its mods from/)).toBe(2);
         expect(at(/own Weft mods folder/)).toBe(3);
       }
@@ -141,13 +155,17 @@ const CHECKS: Record<string, Checks> = {
       await expect(page.locator(".btn-play")).toBeDisabled();
     },
     installed: async (page, en) => {
-      // The copy in the player's folder blocks, with a fix that shows that file.
-      const blocker = page.locator(".blockers.in-banner .blocker", { has: page.locator("strong", { hasText: "Cogwork" }) });
-      await expect(blocker.locator("button")).toHaveCount(2);
+      // The copy in the player's folder blocks, with a fix that shows that file: one page on.
+      const banner = page.locator(".blockers.in-banner");
+      await expect(banner.locator(".pager-at")).toHaveText(/^1\D+2$/);
+      // Cogwork first, the one that blocks itself; then Hearth, which needs it.
+      await expect(banner.locator(".blocker")).toHaveAttribute("data-blocker", "cogwork");
+      const blocker = banner.locator(".blocker[data-blocker=cogwork]");
+      await expect(blocker.locator(".blocker-actions button")).toHaveCount(2);
       await expect(page.locator(".mod-row[data-mod=cogwork]")).toHaveAttribute("data-shadowed", "true");
       if (en) {
-        await expect(blocker).toContainText("a copy in your own mods folder (cogwork-old.zip) would load in its place");
-        await expect(blocker.locator("button").nth(1)).toHaveText("Show cogwork-old.zip");
+        await expect(blocker).toContainText("your own mods folder's copy (cogwork-old.zip) would load instead");
+        await expect(blocker.locator(".blocker-actions button").nth(1)).toHaveText("Show cogwork-old.zip");
       }
     },
   },
@@ -188,6 +206,11 @@ for (const locale of LOCALES) {
         // However many banners, three whole rows stay in view (or all of them, if fewer).
         const rows = await page.locator(".mod-row").count();
         expect(await fullRows(page), "whole rows in view").toBeGreaterThanOrEqual(Math.min(3, rows));
+        // Every fix of every blocking mod, and every banner's button, wholly in view.
+        await expectBlockerFixesInView(page);
+        expect(await cutButtons(page, ".banners"), "banner buttons in view").toEqual([]);
+        // A row's reason is never cut after a few letters: it has a line of its own, two when needed.
+        if (scenario.name !== "long") expect(await cutReasons(page), "reasons cut short").toEqual([]);
         await checks.installed?.(page, en);
         expect(await lowContrast(page), "small text under 4.5:1").toEqual([]);
         await browse(page);
@@ -212,11 +235,19 @@ for (const locale of LOCALES) {
     // The switch and the toolbar share one line, in every language.
     const [sw, actions] = await tops(page, [".switch", ".toolbar-actions"]);
     expect(Math.abs(sw - actions), "toolbar wrapped").toBeLessThanOrEqual(8);
-    // Three blockers: their list scrolls in a box of its own, and three rows still show below it.
-    const list = await page.locator(".blockers.in-banner .blocker-list").evaluate((e) => ({ shown: e.clientHeight, all: e.scrollHeight }));
-    expect(list.shown).toBeLessThan(list.all);
-    expect(list.shown).toBeLessThanOrEqual(100);
-    expect(await fullRows(page)).toBeGreaterThanOrEqual(3);
+    // Three blockers: one at a time, with a pager, so the banner keeps its height whichever is
+    // shown, and three rows still show below it.
+    const banner = page.locator(".blockers.in-banner");
+    await expect(banner.locator(".pager-at")).toHaveText(/^1\D+3$/);
+    const heights = new Set<number>();
+    for (let i = 0; i < 3; i++) {
+      heights.add(Math.round((await page.locator(".banners").boundingBox())!.height));
+      expect(await fullRows(page)).toBeGreaterThanOrEqual(3);
+      await banner.locator(".pager-btn").last().click();
+    }
+    expect(Math.max(...heights), "banner height").toBeLessThanOrEqual(112);
+    // Round the pager and back: the first one again.
+    await expect(banner.locator(".blocker")).toHaveAttribute("data-blocker", "hearth");
     // Only the list scrolls: the header, version picker, switch, toolbar and banners stay put.
     const fixed = [".page-header", ".mods-page .version-select", ".switch", ".toolbar-actions", ".banners"];
     const before = await tops(page, fixed);

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { useI18n } from "../i18n/useI18n";
 import { showError, type Shown } from "../i18n/errors";
@@ -19,7 +19,7 @@ import { BrowseList } from "../components/mods/BrowseList";
 import { FileInstallDialog } from "../components/mods/FileInstallDialog";
 import { SourcesDialog } from "../components/mods/SourcesDialog";
 import { CopyDialog } from "../components/mods/CopyDialog";
-import { BannerStack, type BannerItem } from "../components/mods/BannerStack";
+import { BannerStack, Toasts, type BannerItem } from "../components/mods/BannerStack";
 import { useCatalogBanners } from "../components/mods/catalogBanners";
 import { BlockerPanel, ModFailureNotice, useReviewDialog } from "../components/mods/ModFixes";
 import { REFRESH_ICON } from "../components/icons";
@@ -45,6 +45,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
   const [showCopy, setShowCopy] = useState(false);
   const [rowError, setRowError] = useState<Shown | null>(null);
   const [focusMod, setFocusMod] = useState<string | null>(null);
+  const [toastRoom, setToastRoom] = useState(0);
   const panel = useRef<HTMLElement>(null);
   const versionLabelId = useId();
   const tabs = useRovingTabs("mods", VIEWS, view, setView);
@@ -64,6 +65,12 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
     : [];
 
   useEffect(() => setRowError(null), [tag, view]);
+  // A toast that appears over the row with focus (the row after a removed one) moves that row
+  // into the room the list keeps above it.
+  useEffect(() => {
+    const active = document.activeElement;
+    if (toastRoom && active instanceof HTMLElement && panel.current?.contains(active)) active.scrollIntoView({ block: "nearest" });
+  }, [toastRoom]);
   // A failed row action is said once, politely, like every result.
   useEffect(() => {
     if (rowError) announce(`row-error:${Date.now()}`, rowError.message);
@@ -142,7 +149,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
   });
 
   const showFolder = (
-    <button className="btn-secondary btn-small" onClick={openFolder}>
+    <button className="btn-flat" onClick={openFolder}>
       {t("mods.unmanagedShow")}
     </button>
   );
@@ -170,7 +177,6 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
       return {
         id,
         tone: n.tone,
-        reveal: true,
         text: n.lines.map((l, i) => (
           <span key={i} className="banner-line">
             {tm(l)}
@@ -179,12 +185,12 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
         actions: (
           <>
             {n.undo && (
-              <button className="btn-secondary btn-small" onClick={() => undo(n)} aria-label={t("mods.undoLabel", n.undo.name)} disabled={running}>
+              <button className="btn-flat" onClick={() => undo(n)} aria-label={t("mods.undoLabel", n.undo.name)} disabled={running}>
                 {t("mods.undo")}
               </button>
             )}
             <button
-              className="btn-secondary btn-small"
+              className="btn-flat"
               onClick={() => {
                 dismissNotice(n.id);
                 settleFocus();
@@ -205,6 +211,17 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
             {rowError.message}
             {rowError.detail && <ErrorDetails detail={rowError.detail} label={t("errors.details")} />}
           </>
+        ),
+        actions: (
+          <button
+            className="btn-flat"
+            onClick={() => {
+              setRowError(null);
+              settleFocus();
+            }}
+          >
+            {t("mods.dismiss")}
+          </button>
         ),
       };
     }
@@ -227,6 +244,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
   };
   const full = plan.full.map((p) => item(p.id)).filter((x): x is BannerItem => !!x);
   const quiet = plan.quiet.map((p) => item(p.id)).filter((x): x is BannerItem => !!x).map((x, i) => ({ ...x, rank: i }));
+  const toasts = plan.toasts.map((p) => item(p.id)).filter((x): x is BannerItem => !!x);
 
   const count = report?.mods.length ?? 0;
   const copying = mods.isCopying(tag);
@@ -286,7 +304,14 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
       {lastCrash && lastCrash.tag === tag && <ModFailureNotice crash={lastCrash} review={review} />}
       <BannerStack full={full} quiet={quiet} />
 
-      <section {...tabs.panel} className="mods-panel" ref={panel} tabIndex={-1}>
+      <div className="mods-list-area">
+      <section
+        {...tabs.panel}
+        className="mods-panel"
+        ref={panel}
+        tabIndex={-1}
+        style={{ "--toast-room": `${toastRoom}px` } as CSSProperties}
+      >
         {!report ? (
           loadFailed ? (
             <div className="empty-state framed-empty">
@@ -336,6 +361,8 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
           <BrowseList report={report} locked={running} />
         )}
       </section>
+      <Toasts items={toasts} onHeight={setToastRoom} />
+      </div>
 
       {filePath && <FileInstallDialog tag={tag} path={filePath} onClose={() => setFilePath(null)} />}
       {showSources && <SourcesDialog onClose={() => setShowSources(false)} />}
@@ -352,7 +379,7 @@ function RetryProfile({ tag }: { tag: string }) {
   const [busy, setBusy] = useState(false);
   return (
     <button
-      className="btn-secondary btn-small"
+      className="btn-flat"
       disabled={busy}
       onClick={async () => {
         setBusy(true);

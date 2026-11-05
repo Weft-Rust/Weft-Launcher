@@ -1,6 +1,6 @@
 // The flows the mod manager's safety depends on, and keyboard use, against the mock backend.
 import { expect, test, type Page } from "@playwright/test";
-import { MODS_TAB, browse, focused, goToTab, open, spoken } from "./helpers";
+import { LOCALES, MODS_TAB, browse, cutButtons, focused, fullRows, goToTab, open, spoken, tops } from "./helpers";
 
 const dialog = "[role=dialog]";
 
@@ -430,5 +430,43 @@ test.describe("degraded states", () => {
     await input.fill("nobody/nothing-here");
     await page.keyboard.press("Enter");
     await expect(page.locator(`${dialog} .inline-error`)).toContainText("No such GitHub repo: nobody/nothing-here");
+  });
+});
+
+test.describe("results never move the list", () => {
+  const FIXED = [".mods-page .version-select", ".switch", ".banners", ".mods-panel"];
+  for (const locale of LOCALES) {
+    test(`a result is a toast over the list, which keeps its place and room for its last row, in ${locale}`, async ({ page }) => {
+      // The busiest Installed: a blocker with a pager, the folded notes, and then a result.
+      await open(page, "scenario=shadowed", locale);
+      await goToTab(page, MODS_TAB);
+      await expect(page.locator(".mod-row").first()).toBeVisible();
+      const before = await tops(page, FIXED);
+      const remove = page.locator(".mod-row[data-mod=structures] .delete-btn");
+      await remove.click();
+      await remove.click();
+      const toast = page.locator(".toasts .toast");
+      await expect(toast).toHaveCount(1);
+      // Nothing above the list moved, nor its first row.
+      expect(await tops(page, FIXED)).toEqual(before);
+      expect(await cutButtons(page, ".toasts"), "toast buttons in view").toEqual([]);
+      // Scrolled to its end, the last row's buttons are clear of the toast.
+      await page.locator(".mods-panel").evaluate((e) => (e.scrollTop = e.scrollHeight));
+      expect(await cutButtons(page, ".mod-row:last-child"), "the last row's buttons").toEqual([]);
+    });
+  }
+
+  test("an install keeps the version picker and the switch where they are", async ({ page }) => {
+    await open(page, "scenario=mods");
+    await goToTab(page, MODS_TAB);
+    await expect(page.locator(".mod-row").first()).toBeVisible();
+    const before = await tops(page, FIXED);
+    await page.locator(".mod-row[data-mod=structures] .update-btn-row").click();
+    await page.locator(`${dialog} .dialog-actions .btn-primary`).click();
+    await expect(page.locator(dialog)).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.locator(".toasts .toast")).toHaveCount(1);
+    expect(await tops(page, FIXED)).toEqual(before);
+    await page.locator(".mods-panel").evaluate((e) => (e.scrollTop = 0));
+    expect(await fullRows(page)).toBeGreaterThanOrEqual(3);
   });
 });

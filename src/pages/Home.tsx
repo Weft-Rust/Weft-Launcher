@@ -137,7 +137,7 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
             className="btn-play"
             onClick={() => effectiveTag && handleLaunch(effectiveTag)}
             disabled={playDisabled}
-            aria-describedby={blocked ? blockersId : undefined}
+            aria-describedby={blocked ? `${blockersId}-why` : undefined}
           >
             <StableLabel
               text={isSelectedRunning ? t("playing") : t("playButton")}
@@ -145,6 +145,8 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
             />
           </button>
         </div>
+        {/* Why Play is off, and the fixes, right under it. */}
+        {effectiveTag && <BlockerPanel id={blockersId} tag={effectiveTag} locked={anyRunning} review={review} />}
         {shownError && <ErrorText error={shownError} className="launch-error" />}
         {report && effectiveTag && (
           <p className="mods-line">
@@ -154,7 +156,6 @@ export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSel
             </button>
           </p>
         )}
-        {effectiveTag && <BlockerPanel id={blockersId} tag={effectiveTag} locked={anyRunning} review={review} />}
         {crash && <ModFailureNotice crash={crash} review={review} onGoToMods={onGoToMods} />}
       </section>
 

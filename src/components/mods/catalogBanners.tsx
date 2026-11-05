@@ -81,7 +81,7 @@ export function useCatalogBanners(onManageSources: () => void): Record<string, B
   const { catalog, catalogLoading, catalogError, refreshCatalog } = useMods();
   if (!catalog) return {};
   const retry = (
-    <button className="btn-secondary btn-small" onClick={refreshCatalog} disabled={catalogLoading}>
+    <button className="btn-flat" onClick={refreshCatalog} disabled={catalogLoading}>
       {catalogLoading ? t("mods.retrying") : t("mods.retry")}
     </button>
   );
@@ -128,7 +128,7 @@ export function useCatalogBanners(onManageSources: () => void): Record<string, B
       actions: (
         <>
           {retry}
-          <button className="btn-secondary btn-small" onClick={onManageSources}>
+          <button className="btn-flat" onClick={onManageSources}>
             {t("mods.manageSources")}
           </button>
         </>

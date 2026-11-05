@@ -10,6 +10,7 @@ import type { CatalogMod, InstalledMod } from "../../mods/types";
 import { Announce } from "../Announce";
 import { announce } from "../LiveRegion";
 import { ErrorText } from "../ErrorText";
+import { Truncate } from "../Truncate";
 import { InstallDialog } from "./InstallDialog";
 
 /** A build to review in the install dialog, opened from a fix button. */
@@ -67,7 +68,7 @@ function useFix(tag: string, review: Review) {
 }
 
 /** The buttons for a list of fixes: turn off, turn on, install a dependency, update. */
-function FixButtons({ tag, fixes, locked, review, apply }: { tag: string; fixes: Fix[]; locked: boolean; review: Review; apply: (f: Fix) => void }) {
+function FixButtons({ tag, fixes, locked, review, apply, flat = false }: { tag: string; fixes: Fix[]; locked: boolean; review: Review; apply: (f: Fix) => void; flat?: boolean }) {
   const { t } = useI18n();
   const { isBusy, profile } = useMods();
   const label = (fix: Fix) => {
@@ -90,14 +91,16 @@ function FixButtons({ tag, fixes, locked, review, apply }: { tag: string; fixes:
     const mod = profile(tag)?.mods.find((m) => m.id === fix.id);
     return !mod || !review.canUpdate(mod);
   };
+  const primary = (fix: Fix) => fix.kind === "update" || fix.kind === "install" || fix.kind === "showFolder";
   return (
     <>
       {fixes.map((fix) => (
         <button
           key={`${fix.kind}:${fix.id}`}
-          className={`btn-small ${fix.kind === "update" || fix.kind === "install" || fix.kind === "showFolder" ? "btn-primary" : "btn-secondary"}`}
+          className={flat ? `btn-flat${primary(fix) ? " primary" : ""}` : `btn-small ${primary(fix) ? "btn-primary" : "btn-secondary"}`}
           disabled={disabled(fix)}
           onClick={() => apply(fix)}
+          data-fix={fix.kind}
         >
           {label(fix)}
         </button>
@@ -111,7 +114,10 @@ interface BlockerPanelProps {
   locked: boolean;
   review: Review;
   id?: string;
-  /** In a banner on the Mods tab, without the frame of its own. */
+  /**
+   * In a banner on the Mods tab: one blocking mod at a time, whole, with all its fixes, and a
+   * pager to the others. The list below keeps its rows in view however many mods block.
+   */
   inBanner?: boolean;
 }
 
@@ -124,24 +130,81 @@ export function BlockerPanel({ tag, locked, review, id, inBanner = false }: Bloc
   const { profile, nameIn, catalog } = useMods();
   const { apply, error } = useFix(tag, review);
   const list = blockers(profile(tag), nameIn(tag), catalog);
+  const [page, setPage] = useState<{ id: string | null; index: number }>({ id: null, index: 0 });
   const title = tn("mods.homeBlocked", list.length, tag);
-  // Assertive, and only for blockers that weren't there a moment ago.
-  const said = <Announce channel={`blockers:${tag}`} items={list.map((b) => ({ id: b.mod.id, text: b.mod.name }))} prefix={title} />;
+  // Assertive, and only for what wasn't there a moment ago: a new mod, or a new reason for one.
+  const said = (
+    <Announce
+      channel={`blockers:${tag}`}
+      items={list.map((b) => ({ id: `${b.mod.id}|${b.reasons.map((r) => r.key).join(",")}`, text: `${b.mod.name}: ${b.reasons.map(tm).join(" ")}` }))}
+      prefix={title}
+    />
+  );
   if (!list.length) return said;
 
-  return (
-    <section className={`blockers${inBanner ? " in-banner" : " launch-error"}`} id={id} aria-label={title}>
-      {said}
-      {/* In a banner on the Mods tab, one blocker's own line says it all; the title stays for a screen reader. */}
-      <span className={`blockers-title${inBanner && list.length === 1 ? " sr-only" : ""}`}>{title}</span>
-      <ul className="blocker-list">
-        {list.map(({ mod, reasons, fixes }) => (
-          <li key={mod.id} className="blocker">
-            <span className="blocker-text">
-              <strong>{mod.name}</strong> <span className="blocker-why">{reasons.map(tm).join(" ")}</span>
+  const reasonsOf = (b: (typeof list)[number]) => b.reasons.map(tm).join(" ");
+
+  if (inBanner) {
+    // The mod on screen stays on screen while the list changes around it; a fixed one gives its
+    // place to the next.
+    const at = list.findIndex((b) => b.mod.id === page.id);
+    const index = at >= 0 ? at : Math.min(page.index, list.length - 1);
+    const shown = list[index];
+    const go = (step: number) => {
+      const next = (index + step + list.length) % list.length;
+      setPage({ id: list[next].mod.id, index: next });
+    };
+    const many = list.length > 1;
+    return (
+      <section className="blockers in-banner" id={id} aria-label={title}>
+        {said}
+        <div className="blocker" data-blocker={shown.mod.id}>
+          {/* Two lines at most, so the banner keeps its height; the whole text is a hover or a
+              Tab away, said in full to a screen reader, and stated again on the mod's row. */}
+          <Truncate className="blocker-text" lines={2} text={`${t("mods.blockerLead")} ${shown.mod.name} ${reasonsOf(shown)}`}>
+            <span className="blocker-lead">{t("mods.blockerLead")}</span> <strong>{shown.mod.name}</strong>{" "}
+            <span className="blocker-why">{reasonsOf(shown)}</span>
+          </Truncate>
+          <span className="blocker-foot">
+            <span className="blocker-actions" role="group" aria-label={t("mods.fixesFor", shown.mod.name)}>
+              <FixButtons tag={tag} fixes={shown.fixes} locked={locked} review={review} apply={apply} flat />
             </span>
-            <span className="blocker-actions" role="group" aria-label={t("mods.fixesFor", mod.name)}>
-              <FixButtons tag={tag} fixes={fixes} locked={locked} review={review} apply={apply} />
+            {many && (
+              <span className="blocker-pager" role="group" aria-label={t("mods.blockerPager")}>
+                <button className="pager-btn" onClick={() => go(-1)} aria-label={t("mods.blockerPrev")}>
+                  ‹
+                </button>
+                <span className="pager-at" aria-live="polite">
+                  {t("mods.blockerPage", String(index + 1), String(list.length))}
+                </span>
+                <button className="pager-btn" onClick={() => go(1)} aria-label={t("mods.blockerNext")}>
+                  ›
+                </button>
+              </span>
+            )}
+          </span>
+        </div>
+        {error && <ErrorText error={error} className="blockers-error" />}
+      </section>
+    );
+  }
+
+  return (
+    <section className="blockers play-blocked" id={id} aria-label={title}>
+      {said}
+      {/* What Play's own description says: why it is off, in a few words. */}
+      <span className="play-off" id={id ? `${id}-why` : undefined}>
+        {list.length === 1 ? t("mods.playOffOne", list[0].mod.name) : tn("mods.playOffMany", list.length)}
+      </span>
+      <span className="blockers-title">{title}</span>
+      <ul className="blocker-list">
+        {list.map((b) => (
+          <li key={b.mod.id} className="blocker" data-blocker={b.mod.id}>
+            <span className="blocker-text">
+              <strong>{b.mod.name}</strong> <span className="blocker-why">{reasonsOf(b)}</span>
+            </span>
+            <span className="blocker-actions" role="group" aria-label={t("mods.fixesFor", b.mod.name)}>
+              <FixButtons tag={tag} fixes={b.fixes} locked={locked} review={review} apply={apply} />
             </span>
           </li>
         ))}

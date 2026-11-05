@@ -37,20 +37,22 @@ export interface Placed {
 }
 
 /**
- * - What answers the player's last action, or must not be missed, shows in full: a running game,
- *   notices, a failed action, and on Installed what stops the game (its fixes sit right above
- *   the rows; the panel is bounded in height).
+ * - What answers the player's last action (a notice, a failed action) is a toast at the bottom of
+ *   the list: it never pushes the list down, and the list makes room under it for its last row.
+ * - What must not be missed shows in full above the list: a running game, and on Installed what
+ *   stops the game (one mod at a time with all its fixes, and a pager to the others).
  * - Everything else folds into one row. The catalogue's state leads it on Browse, also while
  *   something blocks: a player browsing offline or from an old index sees that first. On
  *   Installed what blocks is in full, so the row leads with the catalogue too.
  * - Then sources, the version's interface, copies in the player's folder, the folder itself.
  */
-export function bannerPlan(f: BannerFacts): { full: Placed[]; quiet: Placed[] } {
+export function bannerPlan(f: BannerFacts): { full: Placed[]; quiet: Placed[]; toasts: Placed[] } {
   const full: Placed[] = [];
   const quiet: Placed[] = [];
+  const toasts: Placed[] = [];
   if (f.running) full.push({ id: "running", rank: 0 });
-  for (const n of f.notices) full.push({ id: `notice:${n}`, rank: 0 });
-  if (f.rowError) full.push({ id: "error", rank: 0 });
+  for (const n of f.notices) toasts.push({ id: `notice:${n}`, rank: 0 });
+  if (f.rowError) toasts.push({ id: "error", rank: 0 });
   if (f.blocked) {
     if (f.view === "installed") full.push({ id: "blocking", rank: 0 });
     else quiet.push({ id: "blocking", rank: 1 });
@@ -62,5 +64,5 @@ export function bannerPlan(f: BannerFacts): { full: Placed[]; quiet: Placed[] } 
   if (f.shadowed) quiet.push({ id: "shadowed", rank: 3.5 });
   if (f.unmanaged) quiet.push({ id: "unmanaged", rank: 4 });
   quiet.sort((a, b) => a.rank - b.rank);
-  return { full, quiet };
+  return { full, quiet, toasts };
 }

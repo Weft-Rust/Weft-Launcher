@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useId, useRef, useState } from "react";
+import { ReactNode, useId, useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n/useI18n";
 import { Truncate } from "../Truncate";
 
@@ -18,26 +18,13 @@ export interface BannerItem {
   rank?: number;
   /** Said to a screen reader as it appears: an error from the player's own action. */
   alert?: boolean;
-  /**
-   * Scrolled into view as it appears: the result of something the player did further down the
-   * list, which they would otherwise not see (and couldn't Undo).
-   */
-  reveal?: boolean;
 }
 
 const ORDER: Record<Tone, number> = { bad: 0, warn: 1, info: 2, ok: 3 };
 
-function Banner({ item }: { item: BannerItem }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const reveal = !!item.reveal;
-  useEffect(() => {
-    if (!reveal) return;
-    // After this frame's focus moves, so the notice is what ends up in view.
-    const frame = requestAnimationFrame(() => ref.current?.scrollIntoView({ block: "nearest" }));
-    return () => cancelAnimationFrame(frame);
-  }, [reveal, item.id]);
+function Banner({ item, className = "banner" }: { item: BannerItem; className?: string }) {
   return (
-    <div ref={ref} className={`banner ${item.tone}`} role={item.alert ? "alert" : undefined}>
+    <div className={`${className} ${item.tone}`} role={item.alert ? "alert" : undefined} data-banner={item.id}>
       <span className="banner-text">{item.text}</span>
       {item.actions && <span className="banner-actions">{item.actions}</span>}
     </div>
@@ -45,9 +32,9 @@ function Banner({ item }: { item: BannerItem }) {
 }
 
 /**
- * Banners above a list. What answers the player's last action, or must not be missed, shows in
- * full; the rest folds into one row that opens on demand. Open, the notes scroll inside a box
- * of bounded height, so the list below keeps its place on screen.
+ * Banners above a list. What must not be missed shows in full; the rest folds into one row that
+ * opens on demand. Open, the notes scroll inside a box of bounded height, so the list below
+ * keeps its place on screen.
  *
  * The toggle is one button in both states, so it keeps focus when it flips.
  */
@@ -75,16 +62,39 @@ export function BannerStack({ full, quiet }: { full: BannerItem[]; quiet: Banner
           <div className="banner-group" id={listId} hidden={!open}>
             {open && sorted.map((item) => <Banner key={item.id} item={item} />)}
           </div>
-          <button
-            className={open ? "link-btn banner-toggle" : "btn-secondary btn-small banner-toggle"}
-            aria-expanded={open}
-            aria-controls={listId}
-            onClick={() => setOpen(!open)}
-          >
+          <button className="btn-flat banner-toggle" aria-expanded={open} aria-controls={listId} onClick={() => setOpen(!open)}>
             {open ? t("mods.bannersFold") : sorted.length > 1 ? tn("mods.bannersMore", sorted.length) : t("mods.bannersOpen")}
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Answers to what the player just did (Removed, with Undo; Installed; Copied; a failed action),
+ * over the bottom of the list. They never push the list down, and the list makes room under its
+ * last row for them (`onHeight`), so no row's buttons stay hidden behind one.
+ */
+export function Toasts({ items, onHeight }: { items: BannerItem[]; onHeight: (px: number) => void }) {
+  const { t } = useI18n();
+  const ref = useRef<HTMLDivElement>(null);
+  const report = useRef(onHeight);
+  report.current = onHeight;
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => report.current(items.length ? Math.ceil(el.getBoundingClientRect().height) : 0);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [items.length]);
+  return (
+    <div className="toasts" ref={ref} role="region" aria-label={t("mods.toastsLabel")} hidden={!items.length}>
+      {items.map((item) => (
+        <Banner key={item.id} item={item} className="banner toast" />
+      ))}
     </div>
   );
 }

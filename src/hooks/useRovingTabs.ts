@@ -9,7 +9,10 @@ export function useRovingTabs<T extends string>(prefix: string, ids: readonly T[
 
   const onKeyDown = useCallback(
     (e: KeyboardEvent<HTMLButtonElement>) => {
-      const i = ids.indexOf(active);
+      // From the tab that has focus, which need not be the selected one (a click elsewhere, a
+      // tab focused by script): the arrows move from where the player is.
+      const focusedId = ids.find((id) => refs.current[id] === e.currentTarget);
+      const i = ids.indexOf(focusedId ?? active);
       const last = ids.length - 1;
       const next =
         e.key === "ArrowRight" ? (i + 1) % ids.length

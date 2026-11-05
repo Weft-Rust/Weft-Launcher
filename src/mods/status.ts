@@ -219,7 +219,8 @@ export function blockers(report: ProfileReport | undefined, name: NameOf, catalo
         reasons = [{ key: "mods.statusRevoked", args: [(mod.revokedReason ?? "").trim()] }];
         break;
       case "wrongVersion":
-        reasons = [mod.weftTag ? { key: "mods.statusWrongVersionTag", args: [mod.weftTag] } : { key: "mods.statusWrongVersion" }];
+        // Under "won't start", the build is the whole reason.
+        reasons = [mod.weftTag ? { key: "mods.blockWrongVersionTag", args: [mod.weftTag] } : { key: "mods.blockWrongVersion" }];
         break;
       default:
         return unreachable(why);

@@ -65,13 +65,70 @@ export async function expectInView(page: Page, selector: string) {
   expect(box!.y + box!.height, `${selector} is below the window`).toBeLessThanOrEqual(page.viewportSize()!.height);
 }
 
-/** How many installed rows are wholly inside the list's scroll box. */
+/** How many installed rows are wholly inside the list's scroll box, above any toast over it. */
 export const fullRows = (page: Page) =>
   page.evaluate(() => {
     const box = document.querySelector(".mods-panel")!.getBoundingClientRect();
-    const bottom = Math.min(box.bottom, window.innerHeight);
-    return [...document.querySelectorAll(".mod-row")].filter((r) => r.getBoundingClientRect().bottom <= bottom + 0.5).length;
+    const toasts = document.querySelector<HTMLElement>(".toasts:not([hidden])");
+    const bottom = Math.min(box.bottom, window.innerHeight, toasts ? toasts.getBoundingClientRect().top : Infinity);
+    return [...document.querySelectorAll(".mod-row")].filter((r) => {
+      const b = r.getBoundingClientRect();
+      return b.top >= box.top - 0.5 && b.bottom <= bottom + 0.5;
+    }).length;
   });
+
+/**
+ * Buttons in `scope` that aren't wholly visible: cut by an ancestor that clips (a scroller, a
+ * clamp), by the window, or covered by something drawn over them. Empty when every one can be
+ * seen and pressed in full.
+ */
+export const cutButtons = (page: Page, scope: string) =>
+  page.evaluate((scope) => {
+    const bad: string[] = [];
+    for (const root of document.querySelectorAll(scope)) {
+      for (const b of root.querySelectorAll<HTMLElement>("button")) {
+        const r = b.getBoundingClientRect();
+        if (!r.width || !r.height || b.closest("[hidden], .sr-only")) continue;
+        const name = (b.getAttribute("aria-label") || b.textContent || "").trim().slice(0, 40);
+        const outside = (c: DOMRect) => r.top < c.top - 0.5 || r.bottom > c.bottom + 0.5 || r.left < c.left - 0.5 || r.right > c.right + 0.5;
+        if (outside(new DOMRect(0, 0, window.innerWidth, window.innerHeight))) {
+          bad.push(`${name}: outside the window`);
+          continue;
+        }
+        for (let a = b.parentElement; a && a !== document.body; a = a.parentElement) {
+          const s = getComputedStyle(a);
+          if (/(auto|scroll|hidden|clip)/.test(s.overflowX + s.overflowY) && outside(a.getBoundingClientRect())) {
+            bad.push(`${name}: cut by .${a.className.split(" ").join(".")}`);
+            break;
+          }
+        }
+        // Nothing drawn over its corners and middle.
+        const points = [[r.left + 2, r.top + 2], [r.right - 2, r.top + 2], [r.left + 2, r.bottom - 2], [r.right - 2, r.bottom - 2], [(r.left + r.right) / 2, (r.top + r.bottom) / 2]];
+        if (points.some(([x, y]) => { const hit = document.elementFromPoint(x, y); return !hit || !b.contains(hit); })) bad.push(`${name}: covered`);
+      }
+    }
+    return [...new Set(bad)];
+  }, scope);
+
+/**
+ * Every page of the Mods tab's blocker banner, each with all its fix buttons wholly in view. Goes
+ * through the pager and back to the first page.
+ */
+export async function expectBlockerFixesInView(page: Page) {
+  const banner = page.locator(".blockers.in-banner");
+  if (!(await banner.count())) return;
+  const pager = banner.locator(".blocker-pager");
+  const pages = (await pager.count()) ? Number((await pager.locator(".pager-at").innerText()).match(/\d+/g)!.at(-1)) : 1;
+  const seen = new Set<string>();
+  for (let i = 0; i < pages; i++) {
+    const id = (await banner.locator(".blocker").getAttribute("data-blocker"))!;
+    seen.add(id);
+    expect(await banner.locator(".blocker-actions button").count(), `${id} has fixes`).toBeGreaterThan(0);
+    expect(await cutButtons(page, ".blockers.in-banner"), `fixes of ${id} in view`).toEqual([]);
+    if (pages > 1) await pager.locator("button").last().click();
+  }
+  expect(seen.size, "the pager reaches every blocking mod").toBe(pages);
+}
 
 /** Where some elements are, to check they don't move. */
 export const tops = (page: Page, selectors: string[]) =>

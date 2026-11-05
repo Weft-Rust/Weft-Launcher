@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n/useI18n";
 import { useMods } from "../../hooks/useMods";
 import type { InstalledMod, ProfileReport } from "../../mods/types";
@@ -41,16 +41,12 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
   const updating = mod.update && events.length ? activeStep(events) : undefined;
   const disabled = working || locked;
 
-  // The confirmation lapses: after 4 seconds, on Escape, or when focus leaves the button.
+  // The confirmation lapses on Escape or when focus leaves the button, never on a timer: a
+  // player reading it (or a screen reader saying it) keeps it. Undo limits a mistake anyway.
   const cancelRemove = (say: boolean) => {
     setConfirmRemove(false);
     if (say) announce(`remove-cancelled:${mod.id}:${Date.now()}`, t("mods.removeCancelled", mod.name));
   };
-  useEffect(() => {
-    if (!confirmRemove) return;
-    const timer = setTimeout(() => setConfirmRemove(false), 4000);
-    return () => clearTimeout(timer);
-  }, [confirmRemove]);
 
   const onRemove = async () => {
     if (!confirmRemove) return setConfirmRemove(true);
@@ -73,19 +69,22 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
     <li className={rowClass} data-mod={mod.id} data-shadowed={meta.shadowed || undefined}>
       <ModIcon id={mod.id} url={mod.icon} />
       <div className="mod-main">
-        {/* The name has the line to itself; tier and version lead the line under it. */}
+        {/* The name and its tier on one line (the name gives way first); the line under it is
+            the version and the row's state, two lines when it needs them, so a reason is read
+            whole rather than cut after a badge. */}
         <div className="mod-title">
           <Truncate className="mod-name" text={mod.name} />
           <ChannelBadge channel={mod.channel} />
+          {revoked ? <RevokedBadge reason={mod.revokedReason} /> : <TrustBadge trust={mod.trust} />}
         </div>
         <Truncate
           className={`mod-meta${meta.bad ? " bad" : ""}`}
           text={[mod.version, metaText].filter(Boolean).join(" · ")}
-          // Two lines for a problem only this row states; a blocker's is said in full in the banner above.
-          lines={(meta.bad || meta.shadowed) && !report.blocking.includes(mod.id) ? 2 : 1}
+          lines={meta.bad || meta.shadowed ? 2 : 1}
         >
-          {revoked ? <RevokedBadge reason={mod.revokedReason} /> : <TrustBadge trust={mod.trust} />}{" "}
-          {mod.version && <span className="mod-version">{mod.version}</span>} <span className="mod-meta-text">{metaText}</span>
+          {mod.version && <span className="mod-version">{mod.version}</span>}
+          {mod.version && " · "}
+          <span className="mod-meta-text">{metaText}</span>
         </Truncate>
         {!updating && mod.update && !canUpdate && updateWhy && <span className="mod-update-why">{updateWhy}</span>}
       </div>

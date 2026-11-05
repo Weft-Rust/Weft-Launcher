@@ -27,16 +27,27 @@ export function LiveRegion() {
   const [text, setText] = useState("");
   useEffect(() => {
     let clear: ReturnType<typeof setTimeout> | undefined;
+    let frame = 0;
+    // Messages that arrive in the same frame (a result and an error it caused) are said
+    // together, in order, rather than the last one replacing the others.
+    let pending: string[] = [];
     const l: Listener = (t) => {
+      pending.push(t);
+      if (frame) return;
       // A message the same as the last one would not change the region; clear it first.
       setText("");
-      requestAnimationFrame(() => setText(t));
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        setText(pending.join(" "));
+        pending = [];
+      });
       clearTimeout(clear);
       clear = setTimeout(() => setText(""), 8000);
     };
     listeners.add(l);
     return () => {
       listeners.delete(l);
+      cancelAnimationFrame(frame);
       clearTimeout(clear);
     };
   }, []);

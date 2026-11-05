@@ -35,9 +35,10 @@ describe("bannerPlan", () => {
     expect(ids(p.quiet)[0]).toBe("refresh");
   });
 
-  it("answers the player's action in full", () => {
-    const p = bannerPlan({ ...base, notices: [3], rowError: true, running: true });
-    expect(ids(p.full)).toEqual(["running", "notice:3", "error"]);
+  it("answers the player's action in a toast, never above the list", () => {
+    const p = bannerPlan({ ...base, notices: [3], rowError: true, running: true, blocked: true });
+    expect(ids(p.full)).toEqual(["running", "blocking"]);
+    expect(ids(p.toasts)).toEqual(["notice:3", "error"]);
   });
 
   it("ranks copies in the player's folder before the folder itself", () => {
@@ -46,6 +47,6 @@ describe("bannerPlan", () => {
   });
 
   it("says nothing when all is well", () => {
-    expect(bannerPlan(base)).toEqual({ full: [], quiet: [] });
+    expect(bannerPlan(base)).toEqual({ full: [], quiet: [], toasts: [] });
   });
 });
