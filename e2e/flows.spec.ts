@@ -604,6 +604,18 @@ test.describe("keyboard", () => {
     await expect(box).toHaveAttribute("aria-expanded", "false");
   });
 
+  test("typing in the version picker goes to the version that starts with it", async ({ page }) => {
+    await open(page, "scenario=mods");
+    const box = page.locator(".hero-play-area [role=combobox]");
+    await box.focus();
+    await page.keyboard.type("26.10");
+    await expect(box).toHaveAttribute("aria-expanded", "true");
+    const active = await box.getAttribute("aria-activedescendant");
+    await expect(page.locator(`#${active}`)).toHaveText("v26.10.4");
+    await page.keyboard.press("Enter");
+    await expect(box).toHaveText("v26.10.4");
+  });
+
   test("the notes toggle keeps focus and says whether it is open", async ({ page }) => {
     await open(page, "scenario=offline");
     await goToTab(page, MODS_TAB);

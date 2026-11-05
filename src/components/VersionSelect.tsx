@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { TYPE_AHEAD_MS, typeAhead } from "./typeAhead";
 
 interface Option {
   value: string;
@@ -29,6 +30,8 @@ export function VersionSelect({ value, options, onChange, disabled, label, label
   const [open, setOpen] = useState(false);
   const [cursor, setCursor] = useState(0);
   const root = useRef<HTMLDivElement>(null);
+  /** What has been typed since the last pause, for type-ahead. */
+  const typed = useRef({ text: "", at: 0 });
   const listId = useId();
   const optionId = (i: number) => `${listId}-opt-${i}`;
 
@@ -62,7 +65,29 @@ export function VersionSelect({ value, options, onChange, disabled, label, label
     if (next !== value) onChange(next);
   };
 
+  /** A printable key: moves to the next version that starts with what was typed, opening the list. */
+  const typeKey = (key: string, from: number) => {
+    const now = Date.now();
+    const text = (now - typed.current.at > TYPE_AHEAD_MS ? "" : typed.current.text) + key;
+    typed.current = { text, at: now };
+    const i = typeAhead(
+      options.map((o) => o.label),
+      text,
+      from
+    );
+    if (i >= 0) setCursor(i);
+    if (!open) setOpen(true);
+  };
+  const printable = (e: React.KeyboardEvent) => e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;
+  const typing = () => Date.now() - typed.current.at <= TYPE_AHEAD_MS && typed.current.text !== "";
+
   const onKeyDown = (e: React.KeyboardEvent) => {
+    // A space while typing is part of the word; otherwise it chooses, as Enter does.
+    if (printable(e) && (e.key !== " " || typing())) {
+      e.preventDefault();
+      typeKey(e.key, open ? cursor : Math.max(0, options.findIndex((o) => o.value === value)));
+      return;
+    }
     if (!open) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
