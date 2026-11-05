@@ -95,6 +95,11 @@ export function CopyDialog({ tag, donors, onClose }: CopyDialogProps) {
   );
 
   const installedIds = new Set(result?.installed ?? []);
+  // What won't come along first, so it is seen without scrolling; then what installs; then what
+  // is there already. Each group keeps the backend's order.
+  const items = preview?.items ?? [];
+  const staying = items.filter((i) => STAYS.has(i.outcome));
+  const ordered = [...staying, ...items.filter((i) => i.outcome === "install"), ...items.filter((i) => i.outcome === "alreadyThere")];
 
   return (
     <Dialog onClose={onClose} locked={copying} title={title} footer={footer}>
@@ -123,7 +128,7 @@ export function CopyDialog({ tag, donors, onClose }: CopyDialogProps) {
       )}
       {result ? (
         <>
-          <p className="dialog-summary">{tn("mods.noticeCopied", result.installed.length, from)}</p>
+          <p className="dialog-summary">{tn("mods.copyDoneSummary", result.installed.length, from, tag)}</p>
           {result.installedOff.length > 0 && (
             <p className="dialog-note trust-change">
               {tn("mods.copyInstallsOff", result.installedOff.length, formatList(result.installedOff.map(name)), tag)}
@@ -161,7 +166,12 @@ export function CopyDialog({ tag, donors, onClose }: CopyDialogProps) {
             </p>
           )}
           <p className="dialog-summary">{t("mods.copyIntro", tag)}</p>
-          <CopyList items={preview.items} tag={tag} progressFor={copying ? byId : undefined} />
+          {staying.length > 0 && (
+            <p className="dialog-note" data-testid="copy-stays">
+              {tn("mods.copyStaysLine", staying.length, formatList(staying.map((i) => i.name)))}
+            </p>
+          )}
+          <CopyList items={ordered} tag={tag} progressFor={copying ? byId : undefined} />
           {consent.deps.length > 0 && (
             <>
               <p className="dialog-note">{t("mods.copyAlsoInstalls")}</p>
@@ -187,6 +197,8 @@ export function CopyDialog({ tag, donors, onClose }: CopyDialogProps) {
     </Dialog>
   );
 }
+
+const STAYS: ReadonlySet<CopyItem["outcome"]> = new Set(["noBuild", "localFile", "revoked"]);
 
 /** Dependencies a copy brings along, each with its tier. */
 function ExtraList({

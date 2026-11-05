@@ -171,10 +171,18 @@ test.describe("every install shows what it does", () => {
     const d = page.locator(dialog);
     // Only turned-on mods; each with its outcome, then what they need.
     await expect(d.locator(".copy-list").first().locator("li")).toHaveCount(6);
+    // What stays behind is said first, above the list, and leads it.
+    const stays = await d.locator(".copy-list").first().locator("li.check-no .copy-name").allTextContents();
+    expect(stays.length).toBeGreaterThan(0);
+    await expect(d.getByTestId("copy-stays")).toContainText(`stay${stays.length === 1 ? "s" : ""} behind`);
+    const first = await d.locator(".copy-list").first().locator("li").evaluateAll((li) => li.map((l) => l.className));
+    expect(first.slice(0, stays.length).every((c) => /check-no/.test(c))).toBe(true);
     await expect(d.locator("li", { hasText: "Glowmoss 0.3.0: a copied mod needs it" }).locator(".badge")).toHaveText("Unreviewed");
     await expect(d.locator(".dialog-warning")).toContainText("nobody reviewed these: Lanterns and Glowmoss");
     await d.locator(".dialog-actions .btn-primary", { hasText: "Copy 4 mods to v26.11.1" }).click();
     await expect(d.locator(".dialog-title")).toHaveText("Mods copied to v26.11.1", { timeout: 30_000 });
+    // The four it was asked for, and Glowmoss, which one of them needs.
+    await expect(d.locator(".dialog-summary")).toHaveText("Copied 5 mods from v26.10.4 to v26.11.1.");
     await d.locator(".dialog-actions .btn-primary").click();
     await expect(page.locator(".mod-row")).toHaveCount(5);
     await expect(page.locator(".mod-row .mod-name", { hasText: /^Glowmoss$/ })).toHaveCount(1);

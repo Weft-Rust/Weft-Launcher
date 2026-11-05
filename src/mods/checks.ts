@@ -127,14 +127,8 @@ export function fitCheck(fits: boolean | null, buildAbi: string, tag: string): C
 }
 
 function abiCheck(plan: InstallPlan, v: CatalogVersion, ctx: InstallCheckContext): CheckRow {
-  // A plan from before R4 has no fitsVersion: fall back to what the interfaces say.
-  const fits =
-    plan.fitsVersion !== undefined
-      ? plan.fitsVersion
-      : ctx.versionAbi === null || plan.problem?.code === "AbiUnavailable"
-        ? null
-        : ctx.versionAbi === v.abi;
-  return fitCheck(fits, v.abi, ctx.tag);
+  // The backend's word on fit (null when the version's interface is unknown); never guessed here.
+  return fitCheck(plan.fitsVersion, v.abi, ctx.tag);
 }
 
 /** What else an install brings: dependencies it downloads, turns on, or can't find. */

@@ -150,7 +150,7 @@ export function BrowseList({ report, locked }: BrowseListProps) {
                         className="btn-primary btn-small"
                         disabled={!best || locked}
                         onClick={() => setOpen(mod)}
-                        aria-label={t(installed ? "mods.updateLabel" : "mods.installLabel", mod.name)}
+                        aria-label={t(installed ? "mods.updateLabel" : "mods.installLabel", mod.name, tag)}
                         aria-describedby={needsNet ? `${cardId}-net` : undefined}
                       >
                         {t(installed ? "mods.updateButton" : "mods.install")}

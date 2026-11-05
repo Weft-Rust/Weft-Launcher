@@ -252,7 +252,7 @@
     "blockingBanner_other": "Weft {0} won't start with these mods on: {1}.",
     "catalogFailed": "Couldn't load the mod list.",
     "catalogMissing": "This mod isn't in the loaded catalogue. Refresh and try again.",
-    "installLabel": "Install {0}",
+    "installLabel": "Install {0} for {1}…",
     "indexShowingFrom": "Showing the mod index from {0}.",
     "indexUnreachable": "The launcher couldn't reach the Weft mod index.",
     "indexNone": "Reviewed mods show up once it can be read.",
@@ -421,9 +421,9 @@
     "shadowBanner": "Your own mods folder has its own copy of {0}. The launcher's copy is off, so the game loads that one instead.",
     "shadowShort": "Your own folder's copy loads instead of {0}",
     "updatesNeedCatalog": "Couldn't load the mod list, so updates can't be reviewed. Retry above.",
-    "updateLabelTo": "Update {0} to {1}…",
+    "updateLabelTo": "Update {0} to {1} for {2}…",
     "sourcesRetry": "Retry",
-    "updateLabel": "Update {0}",
+    "updateLabel": "Update {0} for {1}…",
     "sourcesLoadFailedLead": "Couldn't read your sources.",
     "noticeShadowLoads": "Your own mods folder has a copy of {0} ({1}), so the game loads that one instead.",
     "failureShadowed": "Your own mods folder has a copy of it ({0}); the game may have loaded that one.",
@@ -458,7 +458,11 @@
     "sourceFormatLink": "What a source needs",
     "sourcesDamaged": "Your list of sources couldn't be read; it was kept aside. Add your sources again in Sources.",
     "sourcesDamagedShort": "Your list of sources couldn't be read",
-    "failureShadowedStill": "Your own mods folder still has {0}, which loads in its place, so it may still cause this. Remove that file to be sure."
+    "failureShadowedStill": "Your own mods folder still has {0}, which loads in its place, so it may still cause this. Remove that file to be sure.",
+    "copyDoneSummary_one": "Copied {n} mod from {0} to {1}.",
+    "copyDoneSummary_other": "Copied {n} mods from {0} to {1}.",
+    "copyStaysLine_one": "{n} mod stays behind: {0}.",
+    "copyStaysLine_other": "{n} mods stay behind: {0}."
   },
   "sizeUnits": {
     "B": "B",

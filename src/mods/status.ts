@@ -181,14 +181,12 @@ export interface Blocker {
 }
 
 /**
- * Why a blocking mod blocks: the backend says (contract R4 §4); a report without a reason for it
- * falls back to the mod's status.
+ * Why a blocking mod blocks: the backend says (contract R4 §4), for every id in `blocking`. A
+ * blocking id without one is a malformed report, and is said as the most general reason rather
+ * than guessed from the mod's status.
  */
 export function blockingReason(report: ProfileReport, mod: InstalledMod): BlockingReason {
-  const given = report.blockingReasons?.[mod.id];
-  if (given) return given;
-  if (mod.status === "missingDeps" || mod.status === "wrongVersion" || mod.status === "revoked") return mod.status;
-  return "wrongVersion";
+  return report.blockingReasons[mod.id] ?? "wrongVersion";
 }
 
 /** The copy of a mod in the player's own folder that the engine would load, if there is one. */

@@ -98,8 +98,8 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
               className="btn-primary btn-small update-btn-row"
               disabled={disabled || !canUpdate}
               onClick={() => onUpdate(mod, mod.update!.sha256)}
-              aria-label={t("mods.updateLabelTo", mod.name, mod.update.version)}
-              title={updateWhy ?? t("mods.updateLabelTo", mod.name, mod.update.version)}
+              aria-label={t("mods.updateLabelTo", mod.name, mod.update.version, tag)}
+              title={updateWhy ?? t("mods.updateLabelTo", mod.name, mod.update.version, tag)}
             >
               <PixelIcon rows={ARROW_UP} />
               {mod.update.version}
