@@ -81,7 +81,13 @@ fn split_top(s: &str) -> Vec<&str> {
 }
 
 /// The TypeScript for a Rust type in a command signature. Named types must be exported
-/// bindings; they are collected into `named`.
+/// bindings; they are collected into `named`, and `export_into` fails if one isn't (a type
+/// alias is such a name: write the type it stands for).
+///
+/// Numbers are TypeScript `number`, a double: integers past `Number.MAX_SAFE_INTEGER`
+/// (2^53 − 1) would lose precision. Every 64-bit integer that crosses IPC today stays far below
+/// that (sizes in bytes, capped at 512 MB for a mod and a few GB for a game version, timestamps,
+/// revision counters); one that could pass it must cross as a string instead.
 fn ts_type(rust: &str, named: &mut std::collections::BTreeSet<String>) -> String {
     let t = rust.trim();
     let inner = |prefix: &str| {
@@ -104,7 +110,8 @@ fn ts_type(rust: &str, named: &mut std::collections::BTreeSet<String>) -> String
             let name = path.rsplit("::").next().unwrap();
             assert!(
                 name.chars().all(|c| c.is_ascii_alphanumeric()) && !name.is_empty(),
-                "can't write {path:?} in TypeScript"
+                "can't write {path:?} in TypeScript: a command's types are String, &str, PathBuf, \
+                 bool, numbers, Option<…>, Vec<…>, (), and types exported to the bindings"
             );
             let name = if name == "AppError" {
                 "AppErrorPayload"
@@ -475,6 +482,41 @@ fn signatures_are_read_from_the_declarations() {
             .map(|m| *m)
             .unwrap_or_else(|| panic!("{bad:?} was read"));
         assert!(message.contains(why), "{bad:?}: {message}");
+    }
+
+    // Containers nest; paths and the AppError payload are written by their exported name.
+    let mut named = std::collections::BTreeSet::new();
+    assert_eq!(
+        ts_type("Option<Vec<Option<u64>>>", &mut named),
+        "Array<number | null> | null"
+    );
+    assert_eq!(
+        ts_type("Vec<crate::mods::catalog::Catalog>", &mut named),
+        "Array<Catalog>"
+    );
+    assert_eq!(
+        ts_type("crate::error::AppError", &mut named),
+        "AppErrorPayload"
+    );
+    assert_eq!(
+        named.into_iter().collect::<Vec<_>>(),
+        ["AppErrorPayload", "Catalog"]
+    );
+    // What TypeScript can't be written for is refused with what can.
+    for bad in [
+        "HashMap<String, u8>",
+        "(u8, u8)",
+        "&String",
+        "[u8; 4]",
+        "Box<str>",
+    ] {
+        let got = std::panic::catch_unwind(|| ts_type(bad, &mut std::collections::BTreeSet::new()));
+        let message = got
+            .err()
+            .and_then(|e| e.downcast::<String>().ok())
+            .map(|m| *m)
+            .unwrap_or_else(|| panic!("{bad:?} was written"));
+        assert!(message.contains("Option<…>, Vec<…>"), "{bad:?}: {message}");
     }
 
     // Every registered command has one.
