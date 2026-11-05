@@ -595,6 +595,18 @@ test.describe("announcements", () => {
   });
 });
 
+test.describe("announcement wording", () => {
+  test("several blockers are said as whole sentences, never joined with a comma", async ({ page }) => {
+    await open(page, "scenario=missingdep");
+    const alert = page.locator(".blockers [role=alert]").first();
+    await expect(alert).toContainText("Hearth");
+    await expect(alert).toContainText("Lanterns");
+    for (const text of await page.locator("[role=alert], [data-testid=live-region]").allTextContents()) {
+      expect(text, text).not.toMatch(/[.!?:],/);
+    }
+  });
+});
+
 test.describe("focus after a result", () => {
   const notOnBody = async (page: Page) => {
     await expect.poll(async () => (await focused(page)).tag).not.toBe("BODY");
