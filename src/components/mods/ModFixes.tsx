@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { pagerIndex, pagerStep, type PagerAt } from "../../mods/blockerPager";
 import { useI18n } from "../../i18n/useI18n";
 import { showError, type Shown } from "../../i18n/errors";
 import { useMods } from "../../hooks/useMods";
@@ -170,33 +171,52 @@ interface BlockerPanelProps {
   inBanner?: boolean;
 }
 
+type Blockers = ReturnType<typeof blockers>;
+
 /**
  * Each mod that stops this version, why, and the one-click fixes. The same on Home and on the
  * Mods tab. Rendered also while nothing blocks, so a problem that comes back is said again.
  */
 export function BlockerPanel({ tag, locked, review, id, inBanner = false }: BlockerPanelProps) {
-  const announce = useAnnounce();
-  const { t, tn, tm } = useI18n();
-  const { profile, nameIn, catalog, isBusy } = useMods();
-  const { apply, applyAll, error } = useFix(tag, review);
+  const { tn, tm } = useI18n();
+  const { profile, nameIn, catalog } = useMods();
+  const fix = useFix(tag, review);
   const list = blockers(profile(tag), nameIn(tag), catalog);
-  const [page, setPage] = useState<{ id: string | null; index: number }>({ id: null, index: 0 });
   const title = tn("mods.homeBlocked", list.length, tag);
-  const sentences = (b: (typeof list)[number]) => b.reasons.map(tm);
   // Assertive, and only for what wasn't there a moment ago: a new mod, or a new reason for one.
   const said = (
     <Announce
       channel={`blockers:${tag}`}
-      items={list.map((b) => ({ id: `${b.mod.id}|${b.reasons.map((r) => r.key).join(",")}`, text: [...sentences(b), ...(b.quote ? [tm(b.quote)] : [])].join(" ") }))}
+      items={list.map((b) => ({ id: `${b.mod.id}|${b.reasons.map((r) => r.key).join(",")}`, text: [...b.reasons.map(tm), ...(b.quote ? [tm(b.quote)] : [])].join(" ") }))}
       prefix={title}
     />
   );
   if (!list.length) return said;
+  const view = { tag, list, title, id, locked, review, fix };
+  return (
+    <>
+      {inBanner ? <BannerBlockers {...view} said={said} /> : <ListedBlockers {...view} said={said} />}
+    </>
+  );
+}
 
-  // One translated sentence per reason, each naming the mod (shown in its colour), never cut.
-  const reasonLines = (b: (typeof list)[number], withQuote: boolean) => (
+interface BlockersView {
+  tag: string;
+  list: Blockers;
+  title: string;
+  id?: string;
+  locked: boolean;
+  review: Review;
+  fix: ReturnType<typeof useFix>;
+  said: ReactNode;
+}
+
+/** One translated sentence per reason, each naming the mod (shown in its colour), never cut. */
+function ReasonLines({ blocker: b, withQuote }: { blocker: Blockers[number]; withQuote: boolean }) {
+  const { tm } = useI18n();
+  return (
     <span className="blocker-text" data-must-fit>
-      {sentences(b).map((text, i) => (
+      {b.reasons.map(tm).map((text, i) => (
         <span key={i} className="blocker-line">
           <Named text={text} name={b.mod.name} />
         </span>
@@ -204,63 +224,77 @@ export function BlockerPanel({ tag, locked, review, id, inBanner = false }: Bloc
       {withQuote && b.quote && <span className="blocker-line blocker-quote">{tm(b.quote)}</span>}
     </span>
   );
+}
 
-  if (inBanner) {
-    // The mod on screen stays on screen while the list changes around it; a fixed one gives its
-    // place to the next.
-    const at = list.findIndex((b) => b.mod.id === page.id);
-    const index = at >= 0 ? at : Math.min(page.index, list.length - 1);
-    const shown = list[index];
-    const go = (step: number) => {
-      const next = (index + step + list.length) % list.length;
-      setPage({ id: list[next].mod.id, index: next });
-      announce(`blocker-page:${tag}:${next}:${Date.now()}`, t("mods.blockerPage", String(next + 1), String(list.length)));
-    };
-    const many = list.length > 1;
-    // When every mod that blocks can simply be turned off, one press does them all.
-    const offs = list.flatMap((b) => b.fixes.filter((f) => f.kind === "turnOff").slice(0, 1));
-    const allOff = many && offs.length === list.length;
-    return (
-      <section className="blockers in-banner" id={id} aria-label={title}>
-        {said}
-        <div className="blocker" data-blocker={shown.mod.id}>
-          <span className="blocker-head">
-            {reasonLines(shown, false)}
-            {allOff && (
-              <button
-                className="btn-flat blocker-all"
-                data-fix="turnOffAll"
-                disabled={locked || list.some((b) => isBusy(tag, b.mod.id))}
-                onClick={() => applyAll(offs)}
-              >
-                {tn("mods.turnOffAll", list.length)}
+/** The banner's page among the blocking mods: which one shows, and paging, said politely. */
+export function useBlockerPager(tag: string, list: Blockers) {
+  const announce = useAnnounce();
+  const { t } = useI18n();
+  const [at, setAt] = useState<PagerAt>({ id: null, index: 0 });
+  const index = pagerIndex(
+    list.map((b) => b.mod.id),
+    at
+  );
+  const go = (step: number) => {
+    const next = pagerStep(list.length, index, step);
+    setAt({ id: list[next].mod.id, index: next });
+    announce(`blocker-page:${tag}:${next}:${Date.now()}`, t("mods.blockerPage", String(next + 1), String(list.length)));
+  };
+  return { index, shown: list[index], go, many: list.length > 1 };
+}
+
+/** On the Mods tab: one blocking mod at a time, with its fixes and a pager. */
+function BannerBlockers({ tag, list, title, id, locked, review, fix, said }: BlockersView) {
+  const { t, tn } = useI18n();
+  const { isBusy } = useMods();
+  const { index, shown, go, many } = useBlockerPager(tag, list);
+  // When every mod that blocks can simply be turned off, one press does them all.
+  const offs = list.flatMap((b) => b.fixes.filter((f) => f.kind === "turnOff").slice(0, 1));
+  const allOff = many && offs.length === list.length;
+  return (
+    <section className="blockers in-banner" id={id} aria-label={title}>
+      {said}
+      <div className="blocker" data-blocker={shown.mod.id}>
+        <span className="blocker-head">
+          <ReasonLines blocker={shown} withQuote={false} />
+          {allOff && (
+            <button
+              className="btn-flat blocker-all"
+              data-fix="turnOffAll"
+              disabled={locked || list.some((b) => isBusy(tag, b.mod.id))}
+              onClick={() => fix.applyAll(offs)}
+            >
+              {tn("mods.turnOffAll", list.length)}
+            </button>
+          )}
+        </span>
+        <span className="blocker-foot">
+          <span className="blocker-actions" role="group" aria-label={t("mods.fixesFor", shown.mod.name)}>
+            <FixButtons tag={tag} fixes={shown.fixes} locked={locked} review={review} apply={fix.apply} flat />
+          </span>
+          {many && (
+            <span className="blocker-pager" role="group" aria-label={t("mods.blockerPager")}>
+              <button className="pager-btn" onClick={() => go(-1)} aria-label={t("mods.blockerPrev")}>
+                ‹
               </button>
-            )}
-          </span>
-          <span className="blocker-foot">
-            <span className="blocker-actions" role="group" aria-label={t("mods.fixesFor", shown.mod.name)}>
-              <FixButtons tag={tag} fixes={shown.fixes} locked={locked} review={review} apply={apply} flat />
-            </span>
-            {many && (
-              <span className="blocker-pager" role="group" aria-label={t("mods.blockerPager")}>
-                <button className="pager-btn" onClick={() => go(-1)} aria-label={t("mods.blockerPrev")}>
-                  ‹
-                </button>
-                <span className="pager-at" data-must-fit>
-                  {t("mods.blockerPage", String(index + 1), String(list.length))}
-                </span>
-                <button className="pager-btn" onClick={() => go(1)} aria-label={t("mods.blockerNext")}>
-                  ›
-                </button>
+              <span className="pager-at" data-must-fit>
+                {t("mods.blockerPage", String(index + 1), String(list.length))}
               </span>
-            )}
-          </span>
-        </div>
-        {error && <ErrorText error={error} className="blockers-error" />}
-      </section>
-    );
-  }
+              <button className="pager-btn" onClick={() => go(1)} aria-label={t("mods.blockerNext")}>
+                ›
+              </button>
+            </span>
+          )}
+        </span>
+      </div>
+      {fix.error && <ErrorText error={fix.error} className="blockers-error" />}
+    </section>
+  );
+}
 
+/** On Home and Versions: every blocking mod, each with its reasons and fixes. */
+function ListedBlockers({ tag, list, title, id, locked, review, fix, said }: BlockersView) {
+  const { t, tn } = useI18n();
   return (
     <section className="blockers play-blocked" id={id} aria-label={title}>
       {said}
@@ -271,14 +305,14 @@ export function BlockerPanel({ tag, locked, review, id, inBanner = false }: Bloc
       <ul className="blocker-list">
         {list.map((b) => (
           <li key={b.mod.id} className="blocker" data-blocker={b.mod.id}>
-            {reasonLines(b, true)}
+            <ReasonLines blocker={b} withQuote />
             <span className="blocker-actions" role="group" aria-label={t("mods.fixesFor", b.mod.name)}>
-              <FixButtons tag={tag} fixes={b.fixes} locked={locked} review={review} apply={apply} />
+              <FixButtons tag={tag} fixes={b.fixes} locked={locked} review={review} apply={fix.apply} />
             </span>
           </li>
         ))}
       </ul>
-      {error && <ErrorText error={error} className="blockers-error" />}
+      {fix.error && <ErrorText error={fix.error} className="blockers-error" />}
     </section>
   );
 }
