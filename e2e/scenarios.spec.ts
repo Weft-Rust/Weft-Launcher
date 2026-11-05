@@ -39,6 +39,17 @@ const openNotes = async (page: Page) => {
 };
 
 const CHECKS: Record<string, Checks> = {
+  long: {
+    installed: async (page) => {
+      // A very long name has the row's width, so it wraps once, not into a narrow column.
+      const rows = page.locator(".mod-row.long-name");
+      expect(await rows.count()).toBeGreaterThan(0);
+      for (const name of await rows.locator(".mod-name").all()) {
+        const lines = await name.evaluate((e) => Math.round(e.getBoundingClientRect().height / parseFloat(getComputedStyle(e).lineHeight)));
+        expect(lines, "lines of a long name").toBeLessThanOrEqual(2);
+      }
+    },
+  },
   mods: {
     home: async (page, en) => {
       await expect(page.locator(".btn-play")).toBeDisabled();

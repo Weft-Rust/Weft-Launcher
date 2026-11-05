@@ -32,6 +32,9 @@ interface RowProps {
   onRemoved: () => void;
 }
 
+/** Characters of a name that fit beside a row's switch and Remove in the smallest window. */
+const LONG_NAME = 28;
+
 function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, locked, onRemoving, onRemoved }: RowProps) {
   const announce = useAnnounce();
   const { t, tm } = useI18n();
@@ -48,6 +51,9 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
   const disabled = working || locked;
   // A reason is read whole: it gets the row's width under the buttons, as many lines as it needs.
   const wide = meta.bad || meta.shadowed;
+  // A name longer than fits beside the switch and Remove takes the row's width, and they move to
+  // the line under it, so it wraps once rather than into a narrow column.
+  const longName = mod.name.length > LONG_NAME;
 
   const removal = useConfirmPress({
     onAsk: () => announce(`remove-ask:${mod.id}:${Date.now()}`, t("mods.removeConfirmHint", mod.name)),
@@ -90,7 +96,7 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
   }, [askOn]);
 
   const revoked = mod.status === "revoked";
-  const rowClass = ["mod-row framed", mod.enabled ? "" : "is-off", meta.bad ? "has-problem" : "", wide ? "wide" : "", askOn ? "asking" : ""].join(" ");
+  const rowClass = ["mod-row framed", mod.enabled ? "" : "is-off", meta.bad ? "has-problem" : "", wide ? "wide" : "", longName ? "long-name" : "", askOn ? "asking" : ""].join(" ");
 
   return (
     <li className={rowClass} data-mod={mod.id} data-shadowed={meta.shadowed || undefined} data-focus-scope>

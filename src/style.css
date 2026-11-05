@@ -426,6 +426,9 @@ button:disabled { cursor: not-allowed; }
   align-items: center; gap: 0 8px; padding: 4px 4px 4px 8px;
 }
 .mod-row.wide { grid-template-areas: "icon title actions" "icon meta meta"; }
+/* A very long name has the row's width; the switch and Remove go to the line under it. */
+.mod-row.long-name { grid-template-areas: "icon title title" "icon meta actions"; }
+.mod-row.long-name.wide { grid-template-areas: "icon title title" "icon meta meta" "icon . actions"; }
 /* Asked before a switch is turned on that would stop Play: the reason and the choice, under the row. */
 .mod-ask { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; margin-top: 4px; padding: 4px 8px; background: var(--ink); box-shadow: inset var(--px) 0 0 var(--r2); line-height: 24px; }
 .mod-ask-text { flex: 1 1 320px; min-width: 0; overflow-wrap: anywhere; color: var(--g5); }
