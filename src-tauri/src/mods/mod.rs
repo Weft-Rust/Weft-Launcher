@@ -6,9 +6,9 @@
 //!   updates, revocations), `catalog.rs`, `index/` (the contract), `diagnose.rs`.
 //! - Disk and network: `store.rs`, `install.rs`, `inspect.rs`, `sources.rs`, `abi.rs`, all on a
 //!   [`Paths`].
-//! - `service.rs`: the operations, on a [`Ctx`] (`context.rs`) that holds what they need from the
+//! - `service/`: the operations, on a [`Ctx`] (`context.rs`) that holds what they need from the
 //!   app, so they run without it in tests.
-//! - `commands.rs`: the Tauri commands, one call into `service.rs` each.
+//! - `commands.rs`: the Tauri commands, one call into `service` each.
 
 pub mod abi;
 pub mod archive;

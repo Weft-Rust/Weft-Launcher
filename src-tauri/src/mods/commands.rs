@@ -1,5 +1,5 @@
 //! The mod manager's Tauri commands. Each one takes the app's [`Ctx`] and calls one operation in
-//! `service.rs`, where the checks, the locking and the rules are.
+//! `service/`, where the checks, the locking and the rules are.
 
 use tauri::AppHandle;
 

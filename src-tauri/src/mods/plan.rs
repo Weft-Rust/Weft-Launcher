@@ -1,6 +1,6 @@
 //! The rules for changing a mod set, on plain data: what an install brings along, what a copy
 //! brings over, and what turning a mod on or off or removing it does to the others. Nothing here
-//! touches the disk or the network; `service.rs` does that around these.
+//! touches the disk or the network; `service/` does that around these.
 //!
 //! Dependencies resolve through the whole graph: through the builds an install picks and
 //! through installed mods alike. A wanted mod that needs something no build provides, at any

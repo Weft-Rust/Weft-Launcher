@@ -115,8 +115,8 @@ Launch becomes `weft --mods <profiles/<tag>/mods>`. Turning a mod on or off copi
 | `paths.rs` | Where everything lives under the launcher's data folder, and `write_atomic`. |
 | `version.rs` | Comparing mod versions (semver order). |
 | `error.rs` | `ModsError`, and the `ErrorCode` each one reports to the page. |
-| `service.rs` | The operations, one per command: catalogue loading, the ABI, reports, the install flow, removal and undo, copying, the pre-Play check. |
-| `commands.rs` | The Tauri commands: each one is a single call into `service.rs`. |
+| `service/` | The operations, one per command. `mod.rs`: the ABI, reports, saving a set and reconciling its folder. `fetching.rs`: the catalogue (index and sources, held in parts), icons and the list of sources. `changes.rs`: plan, install from the catalogue or a file, on/off, removal and undo. `copying.rs`: "Copy mods from…". `launching.rs`: the pre-Play check. |
+| `commands.rs` | The Tauri commands: each one is a single call into `service`. |
 
 Pure rules (`plan.rs`, `profile.rs`, `catalog.rs`, `index/format.rs`, `diagnose.rs`) take plain data, and everything else takes a `Paths` root or a `Ctx`, so all of it is tested without the app (`service_tests.rs` runs installs against a local HTTP server). The TypeScript types for IPC are generated from the Rust types into `src/mods/bindings/`, with every command's arguments and result (`CommandSignatures`) and every event's payload (`EventPayloads`); `src/mods/api.ts` calls commands only through them. After changing a type or a command, regenerate them with `cargo test export_bindings -- --ignored` in `src-tauri`; `bindings_are_current` fails CI until that is committed. The mock's rule cases in `src/dev/fixtures/rules.json` run against both the mock (`mockRules.test.ts`) and these rules (`rules_fixture.rs`).
 

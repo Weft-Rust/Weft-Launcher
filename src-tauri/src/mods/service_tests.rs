@@ -1,4 +1,4 @@
-//! The operations in `service.rs`, run as the app runs them but without Tauri: a [`Ctx`] on a
+//! The operations in `service/`, run as the app runs them but without Tauri: a [`Ctx`] on a
 //! temporary folder, a catalogue held as if the page had loaded it, and a local HTTP server
 //! standing in for GitHub.
 
