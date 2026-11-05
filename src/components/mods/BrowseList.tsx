@@ -137,7 +137,8 @@ export function BrowseList({ report, locked }: BrowseListProps) {
                     <Truncate className="mod-source" text={`${what} · ${who}`} />
                   </div>
                 </div>
-                <Truncate className="mod-summary" text={mod.summary || t("mods.noSummary")} lines={2} />
+                {/* Offline, the network note takes a line, so the summary gives one up: two rows of cards still fit. */}
+                <Truncate className="mod-summary" text={mod.summary || t("mods.noSummary")} lines={needsNet ? 1 : 2} />
                 <div className="mod-card-foot">
                   {p ? (
                     <ModProgressBar progress={p} name={p.modId === mod.id ? mod.name : p.modId} compact />

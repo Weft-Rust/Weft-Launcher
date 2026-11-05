@@ -81,7 +81,8 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
         <Truncate
           className={`mod-meta${meta.bad ? " bad" : ""}`}
           text={[mod.version, metaText].filter(Boolean).join(" · ")}
-          lines={meta.bad || meta.shadowed ? 2 : 1}
+          // Two lines for a problem only this row states; a blocker's is said in full in the banner above.
+          lines={(meta.bad || meta.shadowed) && !report.blocking.includes(mod.id) ? 2 : 1}
         >
           {revoked ? <RevokedBadge reason={mod.revokedReason} /> : <TrustBadge trust={mod.trust} />}{" "}
           {mod.version && <span className="mod-version">{mod.version}</span>} <span className="mod-meta-text">{metaText}</span>

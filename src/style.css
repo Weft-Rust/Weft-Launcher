@@ -311,7 +311,7 @@ button:disabled { cursor: not-allowed; }
 .mods-panel:focus { outline: none; }
 /* Browse's search and filters stay above its cards. */
 .mods-panel .filters { position: sticky; top: 0; z-index: 2; padding-bottom: 8px; margin-bottom: 0; background: linear-gradient(var(--seam) 0 calc(100% - 8px), transparent 0); }
-.switch button { height: 32px; padding: 2px 16px; background: var(--g2); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g1); }
+.switch button { height: 32px; padding: 2px 12px; background: var(--g2); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g1); }
 .switch button:hover:not(.on) { background: var(--g3); }
 .switch button.on { background: var(--pale); color: var(--ink); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g5); }
 .switch .count { margin-left: 8px; color: var(--a2); }
@@ -337,7 +337,8 @@ button:disabled { cursor: not-allowed; }
 .banner .blocker-text { flex-basis: 100%; }
 .blockers.in-banner { width: 100%; gap: 4px; }
 /* However many mods block, the panel stays a few lines tall: its title stays, the list scrolls. */
-.blockers.in-banner .blocker-list { gap: 4px; max-height: 136px; overflow-y: auto; overscroll-behavior: contain; }
+/* At the smallest window that is one blocker and its fixes, so three rows of mods stay in view below. */
+.blockers.in-banner .blocker-list { gap: 4px; max-height: clamp(64px, calc(100vh - 472px), 240px); overflow-y: auto; overscroll-behavior: contain; }
 .banner-line { display: block; }
 .banner .btn-secondary { flex: none; }
 .banner.info { color: var(--pale); box-shadow: inset var(--px) 0 0 var(--g4); }
@@ -361,7 +362,7 @@ button:disabled { cursor: not-allowed; }
 
 .mod-list, .mod-grid, .checks, .source-list { margin: 0; padding: 0; list-style: none; }
 .mod-list { display: grid; gap: 8px; }
-.mod-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 6px 12px 6px 16px; }
+.mod-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 4px 12px 4px 16px; }
 .mod-row.is-off { background: #20252f; }
 .mod-row.is-off :is(.mod-name, .mod-icon) { opacity: .55; }
 .mod-row.has-problem { box-shadow: inset var(--px) 0 0 var(--r2); }
@@ -410,6 +411,7 @@ button:disabled { cursor: not-allowed; }
 .mod-card.needs-net-card { grid-template-areas: "icon title title" "icon badges badges" "summary summary summary" "foot foot foot"; }
 .needs-net-card .mod-card-foot { flex-direction: row; align-items: center; justify-content: flex-end; gap: 12px; }
 .needs-net-card .needs-net { order: -1; }
+.needs-net-card .mod-summary { height: 24px; }
 .mod-source { color: var(--g5); line-height: 24px; min-width: 0; flex: 0 1 auto; }
 .installed-mark { color: var(--v3); line-height: 24px; white-space: nowrap; }
 

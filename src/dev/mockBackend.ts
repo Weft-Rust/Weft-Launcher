@@ -737,9 +737,14 @@ export function installMockBackend() {
         case COMMANDS.launchVersion:
           await launch(args.tag);
           return null;
+        case COMMANDS.openPlayerModsFolder: {
+          // The player, shown their folder, deletes the stray copy: the next profile is without it.
+          const at = playerFolder.findIndex((f) => f.id === shadowId);
+          if (at >= 0) playerFolder.splice(at, 1);
+          return null;
+        }
         case COMMANDS.openLog:
         case COMMANDS.openGameFolder:
-        case COMMANDS.openPlayerModsFolder:
           return null;
         case COMMANDS.listModCatalog:
           await sleep(args.forceRefresh ? 400 : 0);

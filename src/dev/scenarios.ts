@@ -76,7 +76,7 @@ export const FLAGS: Flag[] = [
     values: ["unverified", "known", "notamod", "revoked", "revokedlate", "wrongplatform"],
     description: "What From file picks; `revokedlate` is revoked by the index while it is being installed.",
   },
-  { name: "shadow", values: ["<mod id>"], description: "The player's own mods folder has a copy of that mod, which loads when the launcher's is off or revoked." },
+  { name: "shadow", values: ["<mod id>"], description: "The player's own mods folder has a copy of that mod, which loads when the launcher's is off or revoked. Showing the folder stands for the player deleting it." },
   {
     name: "revocations",
     values: ["messy"],
