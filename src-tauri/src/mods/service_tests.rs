@@ -10,7 +10,7 @@ use super::archive::tests::make_zip;
 use super::catalog::{Catalog, CatalogVersion, Origin, RevokedView};
 use super::context::{Ctx, tests::with_version};
 use super::error::ModsError;
-use super::index::{Channel, WeftAbi};
+use super::index::{Channel, Platform, WeftAbi};
 use super::install::ProgressStage;
 use super::plan::ChangeResult;
 use super::profile::tests::{ABI, build, catalog, catalog_mod};
@@ -82,15 +82,27 @@ fn ok(body: Vec<u8>) -> Answer {
     (200, Vec::new(), body)
 }
 
-/// A mod zip with a Linux library; `salt` makes builds of one mod differ.
+/// The library file name of mod `id` for `p`, as the engine looks for it.
+fn library(id: &str, p: Platform) -> String {
+    match p {
+        Platform::WindowsX64 => format!("{id}.dll"),
+        Platform::LinuxX64 => format!("lib{id}.so"),
+        Platform::MacosArm64 => format!("lib{id}.dylib"),
+    }
+}
+
+/// A mod zip with a library for every system, so the tests run on each; `salt` makes builds of
+/// one mod differ.
 fn zip_of(id: &str, salt: &str) -> Vec<u8> {
-    let lib = format!("lib{id}.so");
-    make_zip(&[(lib.as_str(), salt.as_bytes())])
+    let libs: Vec<String> = Platform::ALL.iter().map(|p| library(id, *p)).collect();
+    let files: Vec<(&str, &[u8])> = libs.iter().map(|l| (l.as_str(), salt.as_bytes())).collect();
+    make_zip(&files)
 }
 
 /// A catalogue build of `id` whose bytes are `zip`, downloaded from `base`.
 fn build_of(id: &str, version: &str, zip: &[u8], deps: &[&str], base: &str) -> CatalogVersion {
     let mut v = build(id, version, ABI, Channel::Release, deps);
+    v.platforms = Platform::ALL.to_vec();
     v.sha256 = sha256_hex(zip);
     v.size = zip.len() as u64;
     v.url = format!("{base}/{id}.zip");
@@ -1014,11 +1026,17 @@ mod files {
     fn refused_files_leave_nothing() {
         let tmp = tempfile::tempdir().unwrap();
         let (ctx, world) = setup(&tmp);
+        // A library only for some other system.
+        let other = Platform::ALL
+            .into_iter()
+            .find(|p| Some(*p) != Platform::current())
+            .unwrap();
+        let elsewhere = make_zip(&[(library("elsewhere", other).as_str(), b"x".as_slice())]);
         let cases: Vec<(&str, Vec<u8>, Expect)> = vec![
             ("base.zip", zip_of("base", "x"), |e| {
                 matches!(e, ModsError::IdReserved(_))
             }),
-            ("win.zip", make_zip(&[("winonly.dll", b"pe")]), |e| {
+            ("elsewhere.zip", elsewhere, |e| {
                 matches!(e, ModsError::NotForPlatform(_))
             }),
         ];

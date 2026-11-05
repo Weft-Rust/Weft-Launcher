@@ -14,11 +14,17 @@ concurrency:
 
 jobs:
   rust:
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      # Windows and macOS need nothing beyond the toolchain.
       - name: Install Tauri system packages
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
@@ -34,6 +40,7 @@ jobs:
 
       # tauri::generate_context! wants the built frontend to exist.
       - name: Placeholder frontend
+        shell: bash
         run: mkdir -p dist && touch dist/index.html
 
       - name: Format
@@ -44,7 +51,8 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy --all-targets -- -D warnings
 
-      # Includes bindings_are_current: fails if src/mods/bindings is out of date.
+      # Includes bindings_are_current (fails if src/mods/bindings is out of date) and the shared
+      # rule cases in src/dev/fixtures/rules.json (rules_fixture.rs).
       - name: Test
         working-directory: src-tauri
         run: cargo test
