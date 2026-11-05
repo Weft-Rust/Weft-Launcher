@@ -11,6 +11,7 @@ import {
   heroState,
   modMeta,
   snapshotFor,
+  turnOnWarnings,
 } from "./status";
 import { build, catalog, catalogMod, installed, report } from "./fixtures";
 import type { ChangeResult } from "./types";
@@ -89,6 +90,40 @@ describe("blockers", () => {
   it("is empty without a report or blockers", () => {
     expect(blockers(undefined, name)).toEqual([]);
     expect(blockers(report([installed("a")]), name)).toEqual([]);
+  });
+});
+
+describe("turning a mod on", () => {
+  const off = (id: string, extra = {}) => installed(id, { enabled: false, status: "off", ...extra });
+
+  it("warns when a dependency it needs has no build, through the chain it turns on", () => {
+    // Junctions needs Railways (installed, off), which needs Signals (not installed).
+    const r = report([off("junctions", { deps: ["base", "railways"] }), off("railways", { deps: ["base", "signals"] })]);
+    const lines = turnOnWarnings(r, "junctions", name, catalog([]));
+    expect(lines).toEqual([{ key: "mods.blockLineDepsNoBuild", count: 1, args: ["Railways", "SIGNALS", "v26.11.1"] }]);
+  });
+
+  it("says a dependency that has a fitting build isn't installed, so it can be", () => {
+    const r = report([off("railways", { deps: ["base", "signals"] })]);
+    const signals = catalogMod("signals", [build("0.1.0")]);
+    const [line] = turnOnWarnings(r, "railways", name, catalog([signals]));
+    expect(line.key).toBe("mods.blockLineDepsNotInstalled");
+  });
+
+  it("warns when it, or a mod it turns on, is built for another version", () => {
+    const r = report([off("old", { abi: "0000000000000000", weftTag: "v26.10.4" })]);
+    expect(turnOnWarnings(r, "old", name, null)).toEqual([{ key: "mods.blockLineWrongVersionTag", args: ["Old", "v26.10.4"] }]);
+  });
+
+  it("warns about a revoked dependency, which stays off", () => {
+    const r = report([off("hearth", { deps: ["base", "cogwork"] }), installed("cogwork", { enabled: false, status: "revoked", revokedReason: "bad" })]);
+    expect(turnOnWarnings(r, "hearth", name, null).map((m) => m.key)).toEqual(["mods.blockLineDepsRevoked"]);
+  });
+
+  it("says nothing when everything it needs is installed and turns on with it", () => {
+    const r = report([off("hearth", { deps: ["base", "cogwork"] }), off("cogwork")]);
+    expect(turnOnWarnings(r, "hearth", name, null)).toEqual([]);
+    expect(turnOnWarnings(r, "cogwork", name, null)).toEqual([]);
   });
 });
 

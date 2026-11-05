@@ -465,3 +465,58 @@ export function describeCopy(result: CopyResult, from: string, tag: string, name
 export function enabledNames(report: ProfileReport | undefined): string[] {
   return report?.mods.filter((m) => m.enabled).map((m) => m.name) ?? [];
 }
+
+/** `profile::BUILTIN`: what every game has, never a dependency. */
+const BUILTIN = new Set(["base"]);
+
+/**
+ * The set as it would be once `id` is turned on: the backend turns on, with it, every installed
+ * mod it needs that is off, transitively (contract R3 §2); a revoked one stays off. Each mod that
+ * this turns on has its status and blocking reason worked out as `profile::report` does.
+ * Returns that set and the mods that would newly stop Play.
+ */
+export function afterTurningOn(report: ProfileReport, id: string): { report: ProfileReport; newlyBlocking: string[] } {
+  const byId = new Map(report.mods.map((m) => [m.id, m]));
+  const on = new Set(report.mods.filter((m) => m.enabled).map((m) => m.id));
+  const turned: string[] = [];
+  const walk = (mid: string) => {
+    const m = byId.get(mid);
+    if (!m || m.status === "revoked" || on.has(mid)) return;
+    on.add(mid);
+    turned.push(mid);
+    for (const d of m.deps) if (!BUILTIN.has(d)) walk(d);
+  };
+  walk(id);
+  const reasons: Record<string, BlockingReason> = { ...report.blockingReasons };
+  const newlyBlocking: string[] = [];
+  const mods = report.mods.map((m) => {
+    if (!turned.includes(m.id)) return m;
+    const missingDeps = m.deps.filter((d) => !BUILTIN.has(d) && !on.has(d));
+    const depsNotInstalled = missingDeps.filter((d) => !byId.has(d));
+    const wrong = !!m.abi && !!report.versionAbi && m.abi !== report.versionAbi;
+    const status: InstalledMod["status"] = wrong ? "wrongVersion" : missingDeps.length ? "missingDeps" : !m.abi || !report.versionAbi ? "unchecked" : "ready";
+    if (status === "wrongVersion" || status === "missingDeps") {
+      reasons[m.id] = status;
+      newlyBlocking.push(m.id);
+    }
+    return { ...m, enabled: true, status, missingDeps, depsNotInstalled };
+  });
+  return {
+    report: { ...report, mods, blocking: [...report.blocking, ...newlyBlocking], blockingReasons: reasons },
+    newlyBlocking,
+  };
+}
+
+/**
+ * Why turning `id` on would stop Play, one sentence per mod it would put in the way, the same
+ * sentences the blocker panel would then say; empty when Play keeps working. Asked before the
+ * switch is turned, so the player can choose with the reason in front of them.
+ */
+export function turnOnWarnings(report: ProfileReport | undefined, id: string, name: NameOf, catalog: Catalog | null): Msg[] {
+  if (!report) return [];
+  const { report: after, newlyBlocking } = afterTurningOn(report, id);
+  if (!newlyBlocking.length) return [];
+  return blockers(after, name, catalog)
+    .filter((b) => newlyBlocking.includes(b.mod.id))
+    .flatMap((b) => b.reasons);
+}

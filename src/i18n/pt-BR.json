@@ -538,7 +538,10 @@
     "sourcePending": "Ainda verificando {0}…",
     "sourcesPending_one": "Ainda verificando {n} fonte…",
     "sourcesPending_many": "Ainda verificando {n} fontes…",
-    "sourcesPending_other": "Ainda verificando {n} fontes…"
+    "sourcesPending_other": "Ainda verificando {n} fontes…",
+    "turnOnAsk": "Ativar {0}? O Jogar fica bloqueado até isto ser resolvido:",
+    "keepOff": "Manter desativado",
+    "turnOnAnyway": "Ativar mesmo assim"
   },
   "sizeUnits": {
     "B": "B",

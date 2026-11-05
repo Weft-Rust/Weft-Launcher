@@ -508,7 +508,10 @@
     "ckBuiltIncompleteDetail": "It doesn't give all of the repo, workflow, commit and when it was checked, so how this file was built is unknown",
     "sourcePending": "Still checking {0}…",
     "sourcesPending_one": "Still checking {n} source…",
-    "sourcesPending_other": "Still checking {n} sources…"
+    "sourcesPending_other": "Still checking {n} sources…",
+    "turnOnAsk": "Turn on {0}? Play stops until this is fixed:",
+    "keepOff": "Keep it off",
+    "turnOnAnyway": "Turn on anyway"
   },
   "sizeUnits": {
     "B": "B",

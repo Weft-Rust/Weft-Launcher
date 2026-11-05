@@ -4,7 +4,8 @@ import { useI18n } from "../../i18n/useI18n";
 import { useMods } from "../../hooks/useMods";
 import type { InstalledMod, ProfileReport } from "../../mods/types";
 import { keepOrder, sortInstalled } from "../../mods/select";
-import { depStates, modMeta, shadowOf } from "../../mods/status";
+import { depStates, modMeta, shadowOf, turnOnWarnings } from "../../mods/status";
+import type { Msg } from "../../i18n";
 import { activeStep } from "../../mods/checks";
 import type { Shown } from "../../i18n/errors";
 import { announce } from "../LiveRegion";
@@ -57,13 +58,35 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
   });
   const confirmRemove = removal.confirming;
 
-  const onToggle = async () => {
-    const r = await setEnabled(tag, mod.id, !mod.enabled);
+  // Turning on a mod that would stop Play asks first, with the reason in front of the player.
+  const [askOn, setAskOn] = useState<Msg[] | null>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const askRef = useRef<HTMLButtonElement>(null);
+  const toggle = async (enabled: boolean) => {
+    const r = await setEnabled(tag, mod.id, enabled);
     onError(r.status === "failed" ? r.shown : null);
   };
+  const onToggle = () => {
+    if (!mod.enabled) {
+      const warnings = turnOnWarnings(report, mod.id, nameIn(tag), catalog);
+      if (warnings.length) {
+        setAskOn(warnings);
+        announce(`turn-on-ask:${mod.id}:${Date.now()}`, [t("mods.turnOnAsk", mod.name), ...warnings.map(tm)].join(" "));
+        return;
+      }
+    }
+    void toggle(!mod.enabled);
+  };
+  const closeAsk = (focusToggle: boolean) => {
+    setAskOn(null);
+    if (focusToggle) requestAnimationFrame(() => toggleRef.current?.focus());
+  };
+  useLayoutEffect(() => {
+    if (askOn) askRef.current?.focus();
+  }, [askOn]);
 
   const revoked = mod.status === "revoked";
-  const rowClass = ["mod-row framed", mod.enabled ? "" : "is-off", meta.bad ? "has-problem" : "", wide ? "wide" : ""].join(" ");
+  const rowClass = ["mod-row framed", mod.enabled ? "" : "is-off", meta.bad ? "has-problem" : "", wide ? "wide" : "", askOn ? "asking" : ""].join(" ");
 
   return (
     <li className={rowClass} data-mod={mod.id} data-shadowed={meta.shadowed || undefined} data-focus-scope>
@@ -121,6 +144,8 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
           aria-label={mod.name}
           disabled={disabled || revoked}
           onClick={onToggle}
+          aria-expanded={askOn ? true : undefined}
+          ref={toggleRef}
         >
           <span className="toggle-knob" aria-hidden="true" />
           <StableLabel text={mod.enabled ? t("mods.on") : t("mods.off")} widest={[t("mods.on"), t("mods.off")]} />
@@ -141,6 +166,42 @@ function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, loc
           {confirmRemove ? t("mods.removeConfirmHint", mod.name) : ""}
         </span>
       </div>
+      {askOn && (
+        <div
+          className="mod-ask"
+          role="group"
+          aria-label={t("mods.turnOnAsk", mod.name)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              closeAsk(true);
+            }
+          }}
+        >
+          <span className="mod-ask-text" data-must-fit>
+            <span className="mod-ask-lead">{t("mods.turnOnAsk", mod.name)}</span>
+            {askOn.map((m, i) => (
+              <span key={i} className="mod-ask-line">
+                {tm(m)}
+              </span>
+            ))}
+          </span>
+          <span className="mod-ask-actions">
+            <button className="btn-secondary btn-small" ref={askRef} onClick={() => closeAsk(true)}>
+              {t("mods.keepOff")}
+            </button>
+            <button
+              className="btn-secondary btn-small"
+              onClick={() => {
+                closeAsk(true);
+                void toggle(true);
+              }}
+            >
+              {t("mods.turnOnAnyway")}
+            </button>
+          </span>
+        </div>
+      )}
     </li>
   );
 }

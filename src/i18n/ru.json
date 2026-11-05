@@ -568,7 +568,10 @@
     "sourcesPending_one": "Ещё проверяется {n} источник…",
     "sourcesPending_few": "Ещё проверяются {n} источника…",
     "sourcesPending_many": "Ещё проверяются {n} источников…",
-    "sourcesPending_other": "Ещё проверяются {n} источника…"
+    "sourcesPending_other": "Ещё проверяются {n} источника…",
+    "turnOnAsk": "Включить {0}? Играть будет нельзя, пока это не исправить:",
+    "keepOff": "Оставить выключенным",
+    "turnOnAnyway": "Всё равно включить"
   },
   "sizeUnits": {
     "B": "Б",

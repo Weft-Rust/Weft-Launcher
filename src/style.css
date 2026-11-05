@@ -426,6 +426,12 @@ button:disabled { cursor: not-allowed; }
   align-items: center; gap: 0 8px; padding: 4px 4px 4px 8px;
 }
 .mod-row.wide { grid-template-areas: "icon title actions" "icon meta meta"; }
+/* Asked before a switch is turned on that would stop Play: the reason and the choice, under the row. */
+.mod-ask { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; margin-top: 4px; padding: 4px 8px; background: var(--ink); box-shadow: inset var(--px) 0 0 var(--r2); line-height: 24px; }
+.mod-ask-text { flex: 1 1 320px; min-width: 0; overflow-wrap: anywhere; color: var(--g5); }
+.mod-ask-lead { display: block; color: var(--r3); }
+.mod-ask-line { display: block; }
+.mod-ask-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .mod-row > .mod-icon { grid-area: icon; align-self: start; }
 .mod-row.is-off { background: #20252f; }
 .mod-row.is-off :is(.mod-name, .mod-icon) { opacity: .55; }

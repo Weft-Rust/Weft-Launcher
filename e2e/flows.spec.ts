@@ -211,6 +211,42 @@ test.describe("launch safety", () => {
     await expect(page.locator(".btn-play")).toBeDisabled();
   });
 
+  test("turning on a mod that would stop Play asks first, with the reason", async ({ page }) => {
+    await open(page, "scenario=chain");
+    await goToTab(page, MODS_TAB);
+    const row = page.locator(".mod-row[data-mod=railways]");
+    const toggle = row.locator(".toggle");
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await toggle.click();
+    const ask = row.locator(".mod-ask");
+    await expect(ask).toContainText("Turn on Railways? Play stops until this is fixed:");
+    await expect(ask).toContainText("Railways stops Play: it needs Signals, which has no build for v26.11.1 yet.");
+    await expect(spoken(page)).toContainText("Turn on Railways?");
+    // The safe choice has focus; Escape keeps it off and gives focus back to the switch.
+    await expect.poll(async () => (await focused(page)).text).toBe("Keep it off");
+    await page.keyboard.press("Escape");
+    await expect(ask).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await expectWhole(page, "a row asking");
+    // Asked again, and turned on anyway: then Play is off, and the banner says why.
+    await toggle.click();
+    await ask.locator("button", { hasText: "Turn on anyway" }).click();
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await expect(page.locator(".blockers.in-banner")).toContainText("Railways");
+  });
+
+  test("turning on a mod whose needs are all installed doesn't ask", async ({ page }) => {
+    await open(page, "scenario=chain");
+    await goToTab(page, MODS_TAB);
+    // Hearth needs Cogwork, installed and off: the two turn on together, and Play keeps working.
+    const toggle = page.locator(".mod-row[data-mod=hearth] .toggle");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await expect(page.locator(".mod-row[data-mod=cogwork] .toggle")).toHaveAttribute("aria-checked", "true");
+    await expect(page.locator(".mod-ask")).toHaveCount(0);
+  });
+
   test("Home says it is checking mods, or that it couldn't, never ready before it knows", async ({ page }) => {
     await open(page, "scenario=mods&profile=fail");
     await expect(page.locator(".hero-version-badge")).toContainText("MODS NOT CHECKED");
