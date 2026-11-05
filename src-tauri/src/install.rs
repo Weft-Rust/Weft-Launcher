@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::fs::File as StdFile;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 use thiserror::Error;
 use tokio::fs;
 use zip::result::ZipError;
@@ -185,6 +185,13 @@ pub fn sweep_leftovers(app_handle: &tauri::AppHandle) {
     }
 }
 
+/// Why `url` is not the release asset `asset_name` of game version `tag`, if it isn't: the mods'
+/// rule ([`crate::mods::index::release_asset_problem`]) for the game's own repo. A URL that only
+/// starts right, like `…/releases/download/../../../other/repo/…`, is refused.
+pub fn version_url_problem(tag: &str, asset_name: &str, url: &str) -> Option<&'static str> {
+    crate::mods::index::release_asset_problem(WEFT_REPO, tag, asset_name, url)
+}
+
 #[tauri::command]
 pub async fn install_version(
     app_handle: tauri::AppHandle,
@@ -198,9 +205,8 @@ pub async fn install_version(
     let expected_sha256 = expected_sha256
         .filter(|s| !s.is_empty())
         .ok_or(InstallError::HashMissing)?;
-    let allowed = format!("https://github.com/{WEFT_REPO}/releases/download/");
-    if !asset_url.starts_with(&allowed) {
-        return Err(InstallError::DownloadFailed(format!("unexpected URL: {asset_url}")).into());
+    if let Some(why) = version_url_problem(&tag, &asset_name, &asset_url) {
+        return Err(InstallError::DownloadFailed(format!("unexpected URL {asset_url}: {why}")).into());
     }
 
     let active = app_handle.state::<ActiveInstalls>().inner().clone();
@@ -255,9 +261,9 @@ async fn download_and_install(
     let client = crate::download::client()?;
     let tag_owned = tag.to_string();
     let downloaded = crate::download::to_file(&client, asset_url, temp_download, None, |p| {
-        let _ = app_handle.emit(
-            crate::ipc::INSTALL_PROGRESS,
-            InstallProgress {
+        crate::ipc::emit_install_progress(
+            app_handle,
+            &InstallProgress {
                 tag: tag_owned.clone(),
                 downloaded: p.downloaded,
                 total: p.total,
@@ -271,9 +277,9 @@ async fn download_and_install(
     .map_err(|e| InstallError::DownloadFailed(e.to_string()))?;
     let total_size = downloaded.bytes;
 
-    let _ = app_handle.emit(
-        crate::ipc::INSTALL_PROGRESS,
-        InstallProgress {
+    crate::ipc::emit_install_progress(
+        app_handle,
+        &InstallProgress {
             tag: tag.to_string(),
             downloaded: downloaded.bytes,
             total: total_size,
@@ -294,9 +300,9 @@ async fn download_and_install(
     let downloaded = downloaded.bytes;
 
     // Extract to temp directory
-    let _ = app_handle.emit(
-        crate::ipc::INSTALL_PROGRESS,
-        InstallProgress {
+    crate::ipc::emit_install_progress(
+        app_handle,
+        &InstallProgress {
             tag: tag.to_string(),
             downloaded,
             total: total_size,
@@ -360,9 +366,9 @@ async fn download_and_install(
     }
 
     // Finalizing
-    let _ = app_handle.emit(
-        crate::ipc::INSTALL_PROGRESS,
-        InstallProgress {
+    crate::ipc::emit_install_progress(
+        app_handle,
+        &InstallProgress {
             tag: tag.to_string(),
             downloaded,
             total: total_size,
@@ -685,5 +691,31 @@ mod tests {
             assert!(validate_name(bad).is_err(), "{bad:?} should be refused");
         }
         assert!(validate_name("v26.10.4").is_ok());
+    }
+
+    #[test]
+    fn version_urls_are_the_release_asset() {
+        let (tag, name) = ("v26.11.1", "weft-linux-x64.tar.gz");
+        let good = "https://github.com/Weft-Rust/Weft/releases/download/v26.11.1/weft-linux-x64.tar.gz";
+        assert_eq!(version_url_problem(tag, name, good), None);
+        for bad in [
+            "https://github.com/Weft-Rust/Weft/releases/download/../../../evil/repo/releases/download/v26.11.1/weft-linux-x64.tar.gz",
+            "https://github.com/Weft-Rust/Weft/releases/download/%2e%2e/%2e%2e/evil/repo/releases/download/v26.11.1/weft-linux-x64.tar.gz",
+            r"https://github.com/Weft-Rust/Weft/releases/download/..\..\evil\v26.11.1/weft-linux-x64.tar.gz",
+            "https://github.com/Weft-Rust/Weft/releases/download/v26.11.1/../v26.11.1/weft-linux-x64.tar.gz",
+            "https://github.com/Weft-Rust/Weft/releases/download/v26.10.4/weft-linux-x64.tar.gz",
+            "https://github.com/Weft-Rust/Weft/releases/download/v26.11.1/other.tar.gz",
+            "https://github.com/Weft-Rust/Weft-evil/releases/download/v26.11.1/weft-linux-x64.tar.gz",
+            "https://github.com.evil.example/Weft-Rust/Weft/releases/download/v26.11.1/weft-linux-x64.tar.gz",
+            "https://github.com:444/Weft-Rust/Weft/releases/download/v26.11.1/weft-linux-x64.tar.gz",
+            "https://u@github.com/Weft-Rust/Weft/releases/download/v26.11.1/weft-linux-x64.tar.gz",
+            "http://github.com/Weft-Rust/Weft/releases/download/v26.11.1/weft-linux-x64.tar.gz",
+            "https://github.com/Weft-Rust/Weft/releases/download/v26.11.1/weft-linux-x64.tar.gz?x",
+            "https://github.com/Weft-Rust/Weft/releases/download/v26.11.1/weft-linux-x64.tar.gz#x",
+            "https://github.com/Weft-Rust/Weft/releases/download/v26.11.1/sub/weft-linux-x64.tar.gz",
+            "not a url",
+        ] {
+            assert!(version_url_problem(tag, name, bad).is_some(), "{bad}");
+        }
     }
 }
