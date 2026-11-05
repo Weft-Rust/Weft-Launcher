@@ -69,6 +69,8 @@ The engine checks these folders in order; for each id, the first copy found wins
 ## 3. Architecture (launcher side)
 
 ### On-disk layout (`%APPDATA%\dev.weft.launcher\…`)
+*Shipped as described.*
+
 
 As built (`src-tauri/src/mods/paths.rs`):
 
@@ -97,6 +99,8 @@ The index URL is built in (`index/fetch.rs`); `sources.json` holds only repos.
 Launch becomes `weft --mods <profiles/<tag>/mods>`. Turning a mod on or off copies its build into that folder or removes it. When a version is deleted, its profile goes with it, and unused store entries are garbage-collected. Garbage collection skips any store object an install is still working on or a removal can still undo, and deletes nothing if any lock file can't be read. Lock files are checked when read: an id that isn't a mod id or a hash that isn't one is an error, never a path.
 
 ### Backend modules (`src-tauri/src/mods/`)
+*Shipped as described.*
+
 
 | Module | Job |
 |---|---|
@@ -123,6 +127,8 @@ Pure rules (`plan/`, `profile.rs`, `catalog.rs`, `index/format.rs`, `diagnose.rs
 Tauri commands: `list_mod_catalog`, `refresh_mod_source`, `get_mod_sources`, `add_mod_source`, `remove_mod_source`, `get_mod_profile`, `plan_mod_install`, `install_mod`, `inspect_mod_file`, `install_mod_file`, `set_mod_enabled`, `remove_mod`, `restore_mod`, `preview_copy_mod_profile`, `copy_mod_profile`, `cancel_mod_operation`, `get_mod_icon`, `open_player_mods_folder`. (`doc_tests.rs` checks this list against `lib.rs`.) The pre-Play check runs inside `launch_version`, which holds the mod lock from that check until the game counts as running, so no mod change can land in between.
 
 ### Changing a mod set safely
+*Shipped as described.*
+
 - Every change to a profile or the store's contents happens under the mods lock. Downloads happen before taking it; their store files are reserved so garbage collection leaves them alone.
 - **Dependencies resolve through the whole graph.** An install, a copy and turning a mod on walk every dependency, through builds the change picks and through installed mods alike. An installed dependency that fits and isn't revoked is used, turned on if it is off, and what *it* needs is resolved in turn. `InstallPlan.enable` lists everything that turns on.
 - **The reviewed plan is binding.** `plan_mod_install`, `preview_copy_mod_profile` and `inspect_mod_file` return a `planToken`: a digest of everything the player agrees to, namely every build that will be installed (hash and trust), every mod that ends up on, what turns on, what is installed off or missing, and the version's ABI. `install_mod`, `copy_mod_profile` and `install_mod_file` take it back. The backend recomputes it from the current catalogue, profile and ABI before downloading anything, and again under the lock at commit. When it differs, the command fails with `ModChangedMeanwhile` and writes nothing; the page plans again and shows the new plan. At commit the version must also still be installed and not running, and no build may be revoked in the latest catalogue. A file install checks revocation again at commit by the file's hash, whether the catalogue knows the file or not.
@@ -133,6 +139,8 @@ Tauri commands: `list_mod_catalog`, `refresh_mod_source`, `get_mod_sources`, `ad
 - **Remove can be undone.** `remove_mod` keeps the removed entry in `removed.json`, and its store file, until the version's next change; `restore_mod` puts it back exactly as it was, and turns on again what the removal turned off.
 
 ### Checking the zip structure (before it is stored)
+*Shipped, and changed: sizes are counted by inflating every entry, not only read from the zip; see [Changed from the proposal](#changed-from-the-proposal).*
+
 - Only `<id>.dll`, `lib<id>.so`, `lib<id>.dylib` and `assets/**` are allowed, for the expected `<id>`.
 - No `..`, absolute paths or symlinks.
 - Caps on entry count, uncompressed size and compression ratio (zip bombs).
@@ -141,6 +149,8 @@ Tauri commands: `list_mod_catalog`, `refresh_mod_source`, `get_mod_sources`, `ad
 The launcher never unpacks the zip to run anything, and **never `dlopen`s a mod to read its metadata**: that would run its code.
 
 ### The pre-Play check
+*Shipped. Changed: ABIs are compared from published metadata, never the library; see [Changed from the proposal](#changed-from-the-proposal).*
+
 - Every turned-on mod's ABI must equal the version's ABI.
 - Every dependency must be turned on, or be `base`.
 - If either fails, Play is blocked with the reason and a fix (turn off / find update).
@@ -148,6 +158,8 @@ The launcher never unpacks the zip to run anything, and **never `dlopen`s a mod 
 - Also list what is in the player's own `<data>/mods`. The path comes from the `game folder …` log line the launcher already parses. Warn: "these load in every version and can't be checked". This is the one place the launcher *reads* the game folder, and it's a listing only.
 
 ### The player's folder and precedence
+*Shipped as described.*
+
 The engine names a mod by its folder, or by the stem of `<id>.zip`, and loads the **first** copy of each id it finds, searching the `--mods` folder (the launcher's, for this version) before the player's `<data>/mods`, and that before the shipped mods. The player's folder loads even when the launcher passes no `--mods` at all.
 
 So a file in the player's folder with the id of a mod in the set (`ProfileReport.shadowed`, with what the launcher's copy is: `on`, `off` or `revoked`):
@@ -158,6 +170,8 @@ So a file in the player's folder with the id of a mod in the set (`ProfileReport
 Names compare exactly, as the engine compares them: `Cogwork.zip` is another id than `cogwork`.
 
 ### Diagnosing a failure after Play
+*Shipped. A crash that names no mod offers turning off all of the version's mods, with Undo; a file mod's crash offers another file.*
+
 On `exit(1)`, scan the version's log for the engine's fixed messages. The engine's loader returns them as errors (`crates/engine/src/modloader.rs`, `content.rs`), and the `weft` binary logs them at ERROR, as `<time> ERROR [weft] <message>`. Only ERROR lines of the target `weft` count: a mod's own lines (`[mod:x]`) can say anything, so they never name the culprit (except the panic line below, which only names the panicking mod):
 - `mod X was built against another mod ABI (…)`
 - `loading mod X from <path>: <why>`
@@ -169,6 +183,8 @@ On `exit(1)`, scan the version's log for the engine's fixed messages. The engine
 Show "X stopped Weft from starting" with Turn off / Find update / Open log (mockup 4). This builds on the existing `lastCrash` UI in `Home.tsx`.
 
 ### Moving to a new Weft version
+*Shipped as "Copy mods from…" (`copy_mod_profile`).*
+
 When a new version is installed, offer "Copy mods from v26.10.4". Each mod is resolved to the build for the new ABI, and the launcher lists the ones that have no build yet. Because the ABI breaks with nearly every release, this is the feature players will use most.
 
 ---
@@ -180,6 +196,8 @@ What we can and can't promise:
 - We **cannot** prove *that it's harmless*. Every tier below still runs native code with the player's privileges, and the UI says so on every install.
 
 ### The trust tiers the UI shows
+*Shipped. Changed: "CI-built" is **Unreviewed**; see [Changed from the proposal](#changed-from-the-proposal).*
+
 
 Each build has exactly one tier. As built:
 
@@ -199,6 +217,8 @@ When it applies:
 **Age.** The launcher reports when the index was signed (`signedAt`, from the signature's trusted comment). An index signed more than 30 days ago is `stale`: it is still used, and the UI says revocations since then may be missing. The index repository re-signs weekly. An index older than the newest one ever accepted is refused, even after the cached copy was deleted (see [INDEX_FORMAT.md](INDEX_FORMAT.md#launcher-behaviour)).
 
 ### The checks, from cheapest to strongest
+*1–3 shipped. 4 changed: the index records provenance and the launcher shows that record, without verifying attestations itself. 5 and 6 deferred (engine changes, Phase 3).*
+
 
 1. **SHA-256 against GitHub `digest`.** Exists today. Proves only that the file wasn't corrupted in transit, because it comes over the same channel as the file.
 2. **Checking the zip structure.** Launcher-only, described above.
@@ -277,7 +297,7 @@ design; this is where the build differs from it, or settles what they left open.
 - **The catalogue is kept in order.** Each part (the index, each source) carries the ticket of the refresh that fetched it, so a slow refresh finishing last can't replace newer answers, and every catalogue has a `revision` the page keeps the highest of. One source can be asked again on its own (`refresh_mod_source`).
 - **Sources.** A source that shows no mods says why (`SourceStatus.noMods`: `noReleases`, `noModFiles`, `unreadable`, `noDigest`, `disagrees`, `invalid`). A damaged `sources.json` is never taken for an empty list or overwritten: it is renamed to `sources.damaged-<secs>.json` and reported (`ModSourcesDamaged`); adding a source then starts a new list. Icons come only from GitHub's hosts (INDEX_FORMAT, "icon").
 - **Errors** carry codes, never English sentences: `GameFolderNotFound` carries the folder; a server that answered with an error is `HttpStatus`, never "offline".
-- **In the UI:** one blocker at a time with all its fixes (a pager, and "Turn off all" when that is every blocker's fix), Play's reason next to Play, results as notices over the list, plans kept by content so a reload that brings the same plan doesn't flicker the button, and nothing that carries meaning cut off at the smallest window (960×565), which the UI tests check in every language.
+- **In the UI:** one blocker at a time with all its fixes (a pager, and "Turn off all" when that is every blocker's fix), Play's reason next to Play, results as notices over the list, plans kept by content so a reload that brings the same plan doesn't flicker the button, and, at the smallest window (960×565) in every language, what the UI tests check: every tier word, reason, version, cause, installed mod name and error marked `data-must-fit` shows whole (a long one wraps rather than being cut), blocker fixes and banner buttons are wholly in view, a set of rows and two rows of Browse cards stay in view, and a dialog's shown check rows are above its buttons. What doesn't fit scrolls, inside the list or the dialog, never the page; a few values are shortened on purpose (a hash, a commit, a long path, a long summary line) and stay reachable whole: on focus in a row, or with the check list's one Show control.
 - **Working on the UI without Tauri:** `npm run dev:mock` (see the README).
 
 ### Changed from the proposal

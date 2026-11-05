@@ -168,6 +168,7 @@ fn pattern_check(pattern: &str) -> fn(&str) -> bool {
         r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$" => {
             is_semver
         }
+        r"^\.github/workflows/[A-Za-z0-9._-]+\.ya?ml$" => super::index::is_workflow_path,
         "^https://" => |s| s.starts_with("https://"),
         r"^https://github\.com/" => |s| s.starts_with("https://github.com/"),
         r"^https://(github\.com|raw\.githubusercontent\.com|user-images\.githubusercontent\.com|[A-Za-z0-9-]+\.github\.io)/" => {
