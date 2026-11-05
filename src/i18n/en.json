@@ -511,7 +511,13 @@
     "sourcesPending_other": "Still checking {n} sources…",
     "turnOnAsk": "Turn on {0}? Play stops until this is fixed:",
     "keepOff": "Keep it off",
-    "turnOnAnyway": "Turn on anyway"
+    "turnOnAnyway": "Turn on anyway",
+    "crashNoneNamed": "The log names no mod. If it happens again, try without mods.",
+    "crashTurnOffAll": "Turn off all mods for {0}",
+    "crashAllOff_one": "Turned off {n} mod for {0}. Press Play to try without it.",
+    "crashAllOff_other": "Turned off {n} mods for {0}. Press Play to try without them.",
+    "crashAllOn_one": "Turned {n} mod for {0} back on.",
+    "crashAllOn_other": "Turned {n} mods for {0} back on."
   },
   "sizeUnits": {
     "B": "B",

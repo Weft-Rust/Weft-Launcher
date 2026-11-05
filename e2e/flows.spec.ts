@@ -48,7 +48,7 @@ test.describe("launch safety", () => {
     { kind: "wrongName", title: "My Tweak stopped Weft from starting: its file has the wrong name.", fix: "Turn off My Tweak" },
     { kind: "notAMod", title: "oldtweak stopped Weft from starting: it isn't a Weft mod.", fix: "Open mods folder" },
     { kind: "initPanicked", title: "Cogwork crashed while Weft was starting.", fix: "Turn off Cogwork" },
-    { kind: "exit", title: "Game closed with error (code 1)", fix: null },
+    { kind: "exit", title: "Game closed with error (code 1)", fix: "Turn off all mods for v26.11.1" },
   ];
   for (const c of CRASHES) {
     test(`a ${c.kind} crash says what happened, with the log a click away`, async ({ page }) => {
@@ -59,11 +59,28 @@ test.describe("launch safety", () => {
       await expect(notice.locator(".mod-failure-title")).toHaveText(c.title);
       await expect(notice.locator("button", { hasText: "Open log" })).toHaveCount(1);
       await expect(notice.locator("button", { hasText: "Dismiss" })).toHaveCount(1);
-      if (c.fix) await expect(notice.locator("button").first()).toHaveText(c.fix);
-      else await expect(notice.locator(".mod-failure-actions > button")).toHaveCount(0);
+      await expect(notice.locator("button").first()).toHaveText(c.fix);
       await expectWhole(page, `${c.kind} crash`);
     });
   }
+
+  test("a crash that names no mod offers trying without mods, with Undo", async ({ page }) => {
+    await open(page, "scenario=crash&crash=exit");
+    await page.locator(".btn-play").click();
+    const notice = page.locator(".mod-failure");
+    await expect(notice.getByTestId("crash-unnamed")).toHaveText("The log names no mod. If it happens again, try without mods.", { timeout: 10_000 });
+    await notice.locator("button", { hasText: "Turn off all mods for v26.11.1" }).click();
+    await expect(notice.getByTestId("crash-unnamed")).toHaveText(/^Turned off \d+ mods for v26\.11\.1\. Press Play to try without them\.$/);
+    await expect(spoken(page)).toContainText("Press Play to try without them.");
+    await expect(page.locator(".mods-line")).toContainText("No mods");
+    await expect(page.locator(".btn-play")).toBeEnabled();
+    // Undo turns the same mods back on.
+    await notice.locator("button", { hasText: "Undo" }).click();
+    await expect(notice.getByTestId("crash-unnamed")).toHaveText("The log names no mod. If it happens again, try without mods.");
+    await goToTab(page, MODS_TAB);
+    const on = await page.locator(".mod-row .toggle[aria-checked=true]").count();
+    expect(on).toBeGreaterThan(0);
+  });
 
   test("a crash notice for a mod with a copy in the player's folder stays until that copy goes", async ({ page }) => {
     await open(page, "scenario=crash&shadow=structures");

@@ -541,7 +541,15 @@
     "sourcesPending_other": "Ainda verificando {n} fontes…",
     "turnOnAsk": "Ativar {0}? O Jogar fica bloqueado até isto ser resolvido:",
     "keepOff": "Manter desativado",
-    "turnOnAnyway": "Ativar mesmo assim"
+    "turnOnAnyway": "Ativar mesmo assim",
+    "crashNoneNamed": "O log não cita nenhum mod. Se acontecer de novo, tente sem mods.",
+    "crashTurnOffAll": "Desativar todos os mods de {0}",
+    "crashAllOff_one": "{n} mod de {0} desativado. Pressione Jogar para tentar sem ele.",
+    "crashAllOff_many": "{n} de mods de {0} desativados. Pressione Jogar para tentar sem eles.",
+    "crashAllOff_other": "{n} mods de {0} desativados. Pressione Jogar para tentar sem eles.",
+    "crashAllOn_one": "{n} mod de {0} reativado.",
+    "crashAllOn_many": "{n} de mods de {0} reativados.",
+    "crashAllOn_other": "{n} mods de {0} reativados."
   },
   "sizeUnits": {
     "B": "B",

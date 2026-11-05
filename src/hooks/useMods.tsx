@@ -90,6 +90,11 @@ interface ModsContextValue {
   install: (tag: string, plan: InstallPlan) => Promise<ActionResult<ChangeResult>>;
   installFile: (tag: string, path: string, inspection: FileInspection, plan: InstallPlan | null) => Promise<ActionResult<ChangeResult>>;
   setEnabled: (tag: string, id: string, enabled: boolean) => Promise<ActionResult<ChangeResult>>;
+  /**
+   * Turns several mods on or off, one after the other, without a notice for each: the caller says
+   * the whole. Resolves with the ids changed; stops at the first failure.
+   */
+  setEnabledMany: (tag: string, ids: string[], enabled: boolean) => Promise<ActionResult<string[]>>;
   remove: (tag: string, id: string) => Promise<ActionResult<ChangeResult>>;
   restore: (tag: string, id: string) => Promise<ActionResult<ChangeResult>>;
   copyProfile: (preview: CopyPreview) => Promise<ActionResult<CopyResult>>;
@@ -246,6 +251,28 @@ export function ModsProvider({ children }: { children: ReactNode }) {
     [run, pushNotice, namer]
   );
 
+  const setEnabledMany = useCallback(
+    async (tag: string, ids: string[], enabled: boolean): Promise<ActionResult<string[]>> => {
+      const done: string[] = [];
+      for (const id of ids) {
+        const op = { kind: "mod", tag, id } as const;
+        if (!begin(op, null)) continue;
+        try {
+          const r = await modsApi.setEnabled(tag, id, enabled);
+          changed(tag, r.report);
+          done.push(id);
+        } catch (err) {
+          loadProfile(tag, true);
+          return failed(err);
+        } finally {
+          end(op);
+        }
+      }
+      return { status: "done", result: done };
+    },
+    [begin, end, changed, loadProfile]
+  );
+
   const profilesRef = useRef(profiles);
   profilesRef.current = profiles;
 
@@ -340,6 +367,7 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       install,
       installFile,
       setEnabled,
+      setEnabledMany,
       remove,
       restore,
       copyProfile,
@@ -368,6 +396,7 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       install,
       installFile,
       setEnabled,
+      setEnabledMany,
       remove,
       restore,
       copyProfile,

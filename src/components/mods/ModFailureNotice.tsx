@@ -28,8 +28,8 @@ interface ModFailureNoticeProps {
  * there. It stays until that mod is off, removed or replaced, or the player dismisses it.
  */
 export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNoticeProps) {
-  const { t, tm } = useI18n();
-  const { profile, nameIn, catalog, crashSnapshot } = useMods();
+  const { t, tn, tm } = useI18n();
+  const { profile, nameIn, catalog, crashSnapshot, setEnabledMany } = useMods();
   const { clearCrash } = useGameState();
   const { apply, error, lookAgain } = useFix(crash.tag, review);
   const [actionError, setActionError] = useState<Shown | null>(null);
@@ -54,6 +54,32 @@ export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNotice
     }
   };
 
+  // A crash that names no mod, with mods on: the next step is trying without them, with Undo.
+  const [turnedOff, setTurnedOff] = useState<string[] | null>(null);
+  const [working, setWorking] = useState(false);
+  const enabledIds = (report?.mods ?? []).filter((m) => m.enabled).map((m) => m.id);
+  const unnamed = !failure && (enabledIds.length > 0 || !!turnedOff);
+  const allOff = async () => {
+    setActionError(null);
+    setWorking(true);
+    const r = await setEnabledMany(crash.tag, enabledIds, false);
+    setWorking(false);
+    if (r.status === "failed") return setActionError(r.shown);
+    if (r.status !== "done") return;
+    setTurnedOff(r.result);
+    announce(`crash-all-off:${crashId(crash)}:${Date.now()}`, tn("mods.crashAllOff", r.result.length, crash.tag));
+  };
+  const undoAllOff = async () => {
+    if (!turnedOff) return;
+    setActionError(null);
+    setWorking(true);
+    const r = await setEnabledMany(crash.tag, turnedOff, true);
+    setWorking(false);
+    if (r.status === "failed") return setActionError(r.shown);
+    setTurnedOff(null);
+    announce(`crash-all-on:${crashId(crash)}:${Date.now()}`, tn("mods.crashAllOn", turnedOff.length, crash.tag));
+  };
+
   const title = failure
     ? tm(failureTitle(failure, managed?.name ?? failure.modId ?? "", nameIn(crash.tag)))
     : t("gameClosedError", String(crash.exitCode ?? "?"));
@@ -70,10 +96,25 @@ export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNotice
           {t(loadsInstead ? "mods.failureShadowedStill" : "mods.failureShadowed", shadowFile)}
         </span>
       )}
+      {unnamed && (
+        <span className="mod-failure-why" data-testid="crash-unnamed">
+          {turnedOff ? tn("mods.crashAllOff", turnedOff.length, crash.tag) : t("mods.crashNoneNamed")}
+        </span>
+      )}
       {/* The log's own line, folded: the sentence above says what it means. */}
       {failure?.line && <ErrorDetails detail={failure.line} label={t("mods.failureLogLine")} />}
       <span className="mod-failure-actions">
         <FixButtons tag={crash.tag} fixes={fixes} locked={false} review={review} apply={apply} />
+        {unnamed && !turnedOff && (
+          <button className="btn-primary btn-small" data-fix="turnOffAll" disabled={working} onClick={allOff}>
+            {t("mods.crashTurnOffAll", crash.tag)}
+          </button>
+        )}
+        {unnamed && turnedOff && (
+          <button className="btn-secondary btn-small" data-fix="undoTurnOffAll" disabled={working} onClick={undoAllOff}>
+            {t("mods.undo")}
+          </button>
+        )}
         {managed && onGoToMods && (
           <button className="btn-secondary btn-small" onClick={onGoToMods}>
             {t("mods.homeFixInMods")}

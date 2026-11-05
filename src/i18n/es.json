@@ -541,7 +541,15 @@
     "sourcesPending_other": "Aún comprobando {n} fuentes…",
     "turnOnAsk": "¿Activar {0}? Jugar queda bloqueado hasta que se arregle esto:",
     "keepOff": "Dejarlo desactivado",
-    "turnOnAnyway": "Activar de todos modos"
+    "turnOnAnyway": "Activar de todos modos",
+    "crashNoneNamed": "El registro no nombra ningún mod. Si vuelve a pasar, prueba sin mods.",
+    "crashTurnOffAll": "Desactivar todos los mods de {0}",
+    "crashAllOff_one": "Desactivado {n} mod de {0}. Pulsa Jugar para probar sin él.",
+    "crashAllOff_many": "Desactivados {n} de mods de {0}. Pulsa Jugar para probar sin ellos.",
+    "crashAllOff_other": "Desactivados {n} mods de {0}. Pulsa Jugar para probar sin ellos.",
+    "crashAllOn_one": "Reactivado {n} mod de {0}.",
+    "crashAllOn_many": "Reactivados {n} de mods de {0}.",
+    "crashAllOn_other": "Reactivados {n} mods de {0}."
   },
   "sizeUnits": {
     "B": "B",
