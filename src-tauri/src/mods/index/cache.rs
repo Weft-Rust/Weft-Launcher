@@ -186,8 +186,11 @@ impl IndexCache {
         })
     }
 
-    /// Records `age` as accepted, unless a newer one already is.
+    /// Records `age` as accepted, unless a newer one already is. Two refreshes at once can't
+    /// lower the floor: the read and the write happen under one lock.
     pub fn raise(&self, age: Age) -> Result<(), ModsError> {
+        static RAISING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _held = RAISING.lock().unwrap_or_else(|e| e.into_inner());
         if self.highest().is_some_and(|h| h >= age) {
             return Ok(());
         }

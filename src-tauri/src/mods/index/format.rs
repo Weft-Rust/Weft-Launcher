@@ -38,8 +38,45 @@ pub struct Index {
     pub weft: Vec<WeftAbi>,
     #[serde(default, deserialize_with = "lenient")]
     pub mods: Vec<IndexMod>,
-    #[serde(default, deserialize_with = "lenient")]
+    #[serde(default, deserialize_with = "revocations")]
     pub revoked: Vec<Revoked>,
+}
+
+/// What a revocation says when it gives no reason.
+pub const NO_REASON: &str = "No reason given";
+
+/// Reads `revoked[]` failing closed: an entry is dropped only when its hash can't be a SHA-256
+/// at all (and that is logged). The hash is lowercased; a missing, empty or odd `reason` becomes
+/// [`NO_REASON`] and an odd `at` unknown. A `revoked` that isn't a list refuses the whole index,
+/// so the last verified one stays in use.
+fn revocations<'de, D>(d: D) -> Result<Vec<Revoked>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = Vec::<serde_json::Value>::deserialize(d)?;
+    Ok(raw.into_iter().filter_map(revocation).collect())
+}
+
+/// One `revoked[]` entry, by the rules of [`revocations`].
+pub fn revocation(v: serde_json::Value) -> Option<Revoked> {
+    let text = |key: &str| {
+        v.get(key)
+            .and_then(|x| x.as_str())
+            .map(str::trim)
+            .filter(|x| !x.is_empty())
+            .map(str::to_string)
+    };
+    match text("sha256").map(|s| s.to_ascii_lowercase()) {
+        Some(sha256) if is_sha256(&sha256) => Some(Revoked {
+            sha256,
+            reason: text("reason").unwrap_or_else(|| NO_REASON.to_string()),
+            at: text("at"),
+        }),
+        _ => {
+            eprintln!("mod index: dropping a revocation without a SHA-256: {v}");
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -211,13 +248,13 @@ pub struct Reviewed {
     pub at: String,
 }
 
+/// A revoked build. Read with [`revocations`], so `sha256` is lowercase and `reason` is never
+/// empty.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Revoked {
     pub sha256: String,
-    #[serde(default)]
     pub reason: String,
-    #[serde(default)]
-    pub at: String,
+    pub at: Option<String>,
 }
 
 /// Ships inside every Weft; nothing may be installed under this id.
@@ -254,10 +291,22 @@ pub fn same_repo(a: &str, b: &str) -> bool {
     a.eq_ignore_ascii_case(b)
 }
 
-/// Why `url` is not the release asset `<id>.zip` of `tag` in `repo`, if it isn't. It must be
-/// `https://github.com/<owner>/<repo>/releases/download/<tag>/<id>.zip` exactly as written: no
-/// other host, port, user, query or fragment, no `\`, no percent-encoding, no `.` or `..`.
+/// Why `url` is not the release asset `<id>.zip` of `tag` in `repo`, if it isn't. See
+/// [`release_asset_problem`].
 pub fn asset_url_problem(id: &str, repo: &str, tag: &str, url: &str) -> Option<&'static str> {
+    release_asset_problem(repo, tag, &format!("{id}.zip"), url)
+}
+
+/// Why `url` is not the release asset `file` of `tag` in `repo`, if it isn't. It must be
+/// `https://github.com/<owner>/<repo>/releases/download/<tag>/<file>` exactly as written: no
+/// other host, port, user, query or fragment, no `\`, no percent-encoding, no `.` or `..`.
+/// Game versions (`install.rs`) and mods both go through it.
+pub fn release_asset_problem(
+    repo: &str,
+    tag: &str,
+    file: &str,
+    url: &str,
+) -> Option<&'static str> {
     if url.contains('\\') {
         return Some("contains a backslash");
     }
@@ -292,14 +341,13 @@ pub fn asset_url_problem(id: &str, repo: &str, tag: &str, url: &str) -> Option<&
     let Some((owner, name)) = repo.split_once('/') else {
         return Some("bad repo");
     };
-    let zip = format!("{id}.zip");
     match segments.as_slice() {
         [o, r, "releases", "download", t, n]
             if o.eq_ignore_ascii_case(owner)
                 && r.eq_ignore_ascii_case(name)
                 && *t == tag
                 && is_safe_ref(t)
-                && *n == zip =>
+                && *n == file =>
         {
             None
         }
@@ -682,5 +730,50 @@ pub(crate) mod tests {
         let mut two_lines = "First line.\nSecond line.".to_string();
         clamp_summary(&mut two_lines);
         assert_eq!(two_lines, "First line.");
+    }
+
+    /// Contract R4 §6: a revocation is dropped only when its hash can't be a SHA-256.
+    #[test]
+    fn revocations_fail_closed() {
+        let upper = "AB".repeat(32);
+        let json = format!(
+            r#"{{ "schema": 1, "generated": "2026-11-04T00:00:00Z", "revoked": [
+                {{ "sha256": "{upper}", "reason": "Corrupts worlds", "at": null }},
+                {{ "sha256": "{}" }},
+                {{ "sha256": "{}", "reason": 5, "at": 7 }},
+                {{ "sha256": " {} ", "reason": "" }},
+                {{ "sha256": "xyz" }},
+                {{ "reason": "no hash" }},
+                "not an object"
+            ] }}"#,
+            "c".repeat(64),
+            "d".repeat(64),
+            "e".repeat(64),
+        );
+        let index = parse(json.as_bytes()).unwrap();
+        let got: Vec<(&str, &str, Option<&str>)> = index
+            .revoked
+            .iter()
+            .map(|r| (r.sha256.as_str(), r.reason.as_str(), r.at.as_deref()))
+            .collect();
+        let (ab, c, d, e) = (
+            "ab".repeat(32),
+            "c".repeat(64),
+            "d".repeat(64),
+            "e".repeat(64),
+        );
+        assert_eq!(
+            got,
+            [
+                (ab.as_str(), "Corrupts worlds", None),
+                (c.as_str(), NO_REASON, None),
+                (d.as_str(), NO_REASON, None),
+                (e.as_str(), NO_REASON, None),
+            ]
+        );
+
+        // A `revoked` that isn't a list can't be read safely: the whole index is refused.
+        let bad = br#"{ "schema": 1, "generated": "2026-11-04T00:00:00Z", "revoked": { "x": 1 } }"#;
+        assert!(matches!(parse(bad), Err(ModsError::IndexInvalid(_))));
     }
 }

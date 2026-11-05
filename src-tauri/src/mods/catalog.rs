@@ -156,8 +156,11 @@ impl Catalog {
         self.mods.iter().find(|m| m.key.eq_ignore_ascii_case(key))
     }
 
+    /// The revocation of a build, by its hash in any case.
     pub fn revocation(&self, sha256: &str) -> Option<&RevokedView> {
-        self.revoked.iter().find(|r| r.sha256 == sha256)
+        self.revoked
+            .iter()
+            .find(|r| r.sha256.eq_ignore_ascii_case(sha256))
     }
 }
 
@@ -291,7 +294,7 @@ pub fn build(
                 i.revoked
                     .iter()
                     .map(|r| RevokedView {
-                        sha256: r.sha256.clone(),
+                        sha256: r.sha256.to_ascii_lowercase(),
                         reason: r.reason.clone(),
                     })
                     .collect()

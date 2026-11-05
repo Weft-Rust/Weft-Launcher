@@ -337,10 +337,47 @@ async fn list_releases(
     Ok(Listing::Releases(releases, first_etag))
 }
 
+/// The cached answer, checked again by the rules a fresh one passed ([`revalidate`]): the cache
+/// is only a file on disk.
 fn read_cache(paths: &Paths, repo: &str) -> Option<SourceCache> {
-    std::fs::read(cache_path(paths, repo))
+    let mut cache: SourceCache = std::fs::read(cache_path(paths, repo))
         .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
+        .and_then(|b| serde_json::from_slice(&b).ok())?;
+    cache.mods = revalidate(repo, std::mem::take(&mut cache.mods));
+    Some(cache)
+}
+
+/// What [`accept`] lets through, applied to mods read back from the cache: a mod id that isn't
+/// `base`, versions that follow the contract (`version_problem`, which includes the asset URL
+/// rule), from this repo and claiming no review. Anything else is dropped and logged.
+pub(crate) fn revalidate(repo: &str, mods: Vec<IndexMod>) -> Vec<IndexMod> {
+    mods.into_iter()
+        .filter_map(|mut m| {
+            if !is_mod_id(&m.id) || m.id == RESERVED_ID {
+                eprintln!("mod source {repo}: dropping cached mod {:?}", m.id);
+                return None;
+            }
+            let id = m.id.clone();
+            m.versions.retain(|v| {
+                let problem = version_problem(&id, v)
+                    .or_else(|| {
+                        (!same_repo(&v.source.repo, repo)).then(|| "another repo".to_string())
+                    })
+                    .or_else(|| v.reviewed.is_some().then(|| "claims a review".to_string()));
+                match problem {
+                    None => true,
+                    Some(why) => {
+                        eprintln!("mod source {repo}: dropping cached {id} {}: {why}", v.version);
+                        false
+                    }
+                }
+            });
+            m.icon = m.icon.take().filter(|u| u.starts_with("https://"));
+            m.homepage = m.homepage.take().filter(|u| u.starts_with("https://"));
+            clamp_summary(&mut m.summary);
+            (!m.versions.is_empty()).then_some(m)
+        })
+        .collect()
 }
 
 /// The last good answer of one source, without asking GitHub.
@@ -657,6 +694,40 @@ pub(crate) mod tests {
         let got = fall_back(None, ModsError::SourceNotFound("a/b".into()));
         assert_eq!(got.freshness, Freshness::Unavailable);
         assert!(got.mods.is_empty() && got.error.is_some());
+    }
+
+    /// Contract R4 §6: the cache is checked again on every read, not only when it was fetched.
+    #[test]
+    fn a_tampered_cache_is_checked_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::new(tmp.path());
+        let repo = "Zorro909/weft-mods";
+        let good = accept(repo, &release(false).0, &release(false).1, json()).unwrap();
+        let mut elsewhere = good.clone();
+        elsewhere.id = "showcase".into();
+        elsewhere.versions[0].asset.name = "showcase.zip".into();
+        elsewhere.versions[0].asset.url = "https://evil.example/showcase.zip".into();
+        let mut reviewed = good.clone();
+        reviewed.id = "lanterns".into();
+        reviewed.versions[0].reviewed = Some(super::super::index::Reviewed {
+            by: "me".into(),
+            at: "now".into(),
+        });
+        let mut reserved = good.clone();
+        reserved.id = RESERVED_ID.into();
+        let cache = SourceCache {
+            etag: None,
+            mods: vec![good, elsewhere, reviewed, reserved],
+            checked: None,
+        };
+        write_atomic(
+            &cache_path(&paths, repo),
+            &serde_json::to_vec(&cache).unwrap(),
+        )
+        .unwrap();
+        let got = cached(&paths, repo);
+        let ids: Vec<&str> = got.mods.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["cogwork"]);
     }
 
     #[test]
