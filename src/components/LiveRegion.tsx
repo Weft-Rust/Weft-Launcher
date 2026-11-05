@@ -1,29 +1,33 @@
-import { useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { Speech } from "./speech";
 
 /**
  * The one place results are said to a screen reader: a polite live region that exists from the
  * start, so a message put into it is read even when the control that caused it has gone (a
- * removed row, a closed dialog). Each message is said once per key.
+ * removed row, a closed dialog). Each message is said once per key. What has been said is held
+ * by the SpeechProvider, one per app tree (./speech).
  */
-type Listener = (text: string) => void;
-const listeners = new Set<Listener>();
-const said = new Set<string>();
+const SpeechContext = createContext<Speech | null>(null);
 
-/** Says `text` politely, once per `key`. */
-export function announce(key: string, text: string) {
-  if (!text || said.has(key)) return;
-  said.add(key);
-  // Bounded: keys are per notice, per error and per blocker set, so a long session can't grow it.
-  if (said.size > 500) said.delete(said.values().next().value!);
-  listeners.forEach((l) => l(text));
+export function SpeechProvider({ children }: { children: ReactNode }) {
+  const [speech] = useState(() => new Speech());
+  return <SpeechContext.Provider value={speech}>{children}</SpeechContext.Provider>;
 }
 
-/** Forgets a key, so the same thing coming back later is said again. */
-export function forget(key: string) {
-  said.delete(key);
+export function useSpeech(): Speech {
+  const speech = useContext(SpeechContext);
+  if (!speech) throw new Error("useSpeech outside a SpeechProvider");
+  return speech;
+}
+
+/** Says `text` politely, once per `key`. */
+export function useAnnounce(): (key: string, text: string) => void {
+  const speech = useSpeech();
+  return useCallback((key: string, text: string) => speech.say(key, text), [speech]);
 }
 
 export function LiveRegion() {
+  const speech = useSpeech();
   const [text, setText] = useState("");
   useEffect(() => {
     let clear: ReturnType<typeof setTimeout> | undefined;
@@ -31,7 +35,7 @@ export function LiveRegion() {
     // Messages that arrive in the same frame (a result and an error it caused) are said
     // together, in order, rather than the last one replacing the others.
     let pending: string[] = [];
-    const l: Listener = (t) => {
+    const stop = speech.listen((t) => {
       pending.push(t);
       if (frame) return;
       // A message the same as the last one would not change the region; clear it first.
@@ -43,14 +47,13 @@ export function LiveRegion() {
       });
       clearTimeout(clear);
       clear = setTimeout(() => setText(""), 8000);
-    };
-    listeners.add(l);
+    });
     return () => {
-      listeners.delete(l);
+      stop();
       cancelAnimationFrame(frame);
       clearTimeout(clear);
     };
-  }, []);
+  }, [speech]);
   return (
     <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-testid="live-region">
       {text}

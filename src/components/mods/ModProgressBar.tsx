@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useI18n } from "../../i18n/useI18n";
 import type { UiProgress, UiStage } from "../../mods/types";
 import type { MessageKey } from "../../i18n";
-import { announce } from "../LiveRegion";
+import { useAnnounce } from "../LiveRegion";
 import { dwellDelay, stepKey } from "../../mods/progress";
 
 /** What is shown: "downloading 40%" has the percent in it, the others don't. */
@@ -54,6 +54,7 @@ interface ModProgressBarProps {
  * "File 2 of 3: Glowmoss, downloading 40%". The step is said once per change, not each percent.
  */
 export function ModProgressBar({ progress, nameOf, onCancel, cancelling = false, compact = false }: ModProgressBarProps) {
+  const announce = useAnnounce();
   const { t } = useI18n();
   const shown = useDwell(progress);
   const stage = shown?.stage ?? "preparing";
@@ -72,7 +73,7 @@ export function ModProgressBar({ progress, nameOf, onCancel, cancelling = false,
   const bar = useId();
   useEffect(() => {
     if (!compact) announce(`progress:${bar}:${spoken}`, spoken);
-  }, [bar, compact, spoken]);
+  }, [bar, compact, spoken, announce]);
   return (
     <div className={`progress-container${compact ? " compact" : ""}`} data-stage={stage}>
       <div className="progress-row">

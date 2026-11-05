@@ -7,7 +7,7 @@ import { useI18n } from "../i18n/useI18n";
 import { StableLabel } from "./StableLabel";
 import { ErrorText } from "./ErrorText";
 import { LaunchRefusal } from "./LaunchRefusal";
-import { announce } from "./LiveRegion";
+import { useAnnounce } from "./LiveRegion";
 import { BlockerPanel, useReviewDialog } from "./mods/ModFixes";
 import { ModFailureNotice } from "./mods/ModFailureNotice";
 import { unreachable } from "../utils/never";
@@ -28,6 +28,7 @@ interface VersionActionsProps {
 }
 
 export function VersionActions({ release, installedVersion, onFixMods }: VersionActionsProps) {
+  const announce = useAnnounce();
   const { t, tn } = useI18n();
   const { progress, busy: busyTags, errors, install, remove } = useInstall();
   const { profile } = useMods();

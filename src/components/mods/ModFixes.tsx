@@ -7,7 +7,7 @@ import { catalogModFor } from "../../mods/select";
 import { blockers, type Fix } from "../../mods/status";
 import type { CatalogMod, InstalledMod } from "../../mods/types";
 import { Announce } from "../Announce";
-import { announce } from "../LiveRegion";
+import { useAnnounce } from "../LiveRegion";
 import { ErrorText } from "../ErrorText";
 import { InstallDialog } from "./InstallDialog";
 import { FileInstallDialog } from "./FileInstallDialog";
@@ -175,6 +175,7 @@ interface BlockerPanelProps {
  * Mods tab. Rendered also while nothing blocks, so a problem that comes back is said again.
  */
 export function BlockerPanel({ tag, locked, review, id, inBanner = false }: BlockerPanelProps) {
+  const announce = useAnnounce();
   const { t, tn, tm } = useI18n();
   const { profile, nameIn, catalog, isBusy } = useMods();
   const { apply, applyAll, error } = useFix(tag, review);

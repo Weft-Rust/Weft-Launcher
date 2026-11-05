@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useId } from "react";
 import { useI18n } from "../i18n/useI18n";
 import type { Shown } from "../i18n/errors";
-import { announce } from "./LiveRegion";
+import { useAnnounce } from "./LiveRegion";
 
 interface ErrorTextProps {
   error: Shown;
@@ -21,12 +21,13 @@ interface ErrorTextProps {
  * are any. Said once in the polite live region, not as an alert.
  */
 export function ErrorText({ error, className = "inline-error", children, lead, speak = true, id: domId }: ErrorTextProps) {
+  const announce = useAnnounce();
   const { t } = useI18n();
   const id = useId();
   const text = lead ? `${lead} ${error.message}` : error.message;
   useEffect(() => {
     if (speak && text) announce(`error:${id}:${text}`, text);
-  }, [speak, text, id]);
+  }, [speak, text, id, announce]);
   return (
     <div className={`${className} error-text${children ? " with-action" : ""}`} id={domId}>
       <span className="error-message" data-must-fit>

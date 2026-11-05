@@ -3,7 +3,7 @@ import { useI18n } from "../i18n/useI18n";
 import { showError, type Shown } from "../i18n/errors";
 import { bannerPlan } from "../mods/banners";
 import { ErrorDetails } from "../components/ErrorText";
-import { announce } from "../components/LiveRegion";
+import { useAnnounce } from "../components/LiveRegion";
 import { useInstall } from "../hooks/useInstall";
 import { useGameState } from "../hooks/useGameState";
 import { useMods, type Notice } from "../hooks/useMods";
@@ -35,6 +35,7 @@ interface ModsPageProps {
 }
 
 export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageProps) {
+  const announce = useAnnounce();
   const { t, tn, tm, formatList } = useI18n();
   const { installedVersions, loaded } = useInstall();
   const { isRunning, lastCrash } = useGameState();
@@ -76,7 +77,7 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
   // A failed row action is said once, politely, like every result.
   useEffect(() => {
     if (rowError) announce(`row-error:${Date.now()}`, rowError.message);
-  }, [rowError]);
+  }, [rowError, announce]);
 
   if (!loaded) return <main className="page mods-page" />;
 

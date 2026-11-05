@@ -5,7 +5,7 @@ import { useMods } from "../../hooks/useMods";
 import { useGameState, type GameCrash } from "../../hooks/useGameState";
 import { modsApi } from "../../mods/api";
 import { crashFixes, failureTitle, shadowOf, shadowStillThere } from "../../mods/status";
-import { announce } from "../LiveRegion";
+import { useAnnounce } from "../LiveRegion";
 import { ErrorDetails, ErrorText } from "../ErrorText";
 import { FixButtons, useFix, type Review } from "./ModFixes";
 
@@ -28,6 +28,7 @@ interface ModFailureNoticeProps {
  * there. It stays until that mod is off, removed or replaced, or the player dismisses it.
  */
 export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNoticeProps) {
+  const announce = useAnnounce();
   const { t, tn, tm } = useI18n();
   const { profile, nameIn, catalog, crashSnapshot, setEnabledMany } = useMods();
   const { clearCrash } = useGameState();
@@ -149,6 +150,7 @@ export function ModFailureNotice({ crash, review, onGoToMods }: ModFailureNotice
 
 /** A crash is a result of Play: said once, politely. */
 function CrashSaid({ id, text }: { id: string; text: string }) {
-  useEffect(() => announce(`crash:${id}`, text), [id, text]);
+  const announce = useAnnounce();
+  useEffect(() => announce(`crash:${id}`, text), [id, text, announce]);
   return null;
 }

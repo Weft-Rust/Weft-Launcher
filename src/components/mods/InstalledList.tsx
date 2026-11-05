@@ -8,7 +8,7 @@ import { depStates, modMeta, shadowOf, turnOnWarnings } from "../../mods/status"
 import type { Msg } from "../../i18n";
 import { activeStep } from "../../mods/checks";
 import type { Shown } from "../../i18n/errors";
-import { announce } from "../LiveRegion";
+import { useAnnounce } from "../LiveRegion";
 import { StableLabel } from "../StableLabel";
 import { Truncate } from "../Truncate";
 import { ModIcon } from "./ModIcon";
@@ -33,6 +33,7 @@ interface RowProps {
 }
 
 function ModRow({ tag, mod, report, onError, onUpdate, canUpdate, updateWhy, locked, onRemoving, onRemoved }: RowProps) {
+  const announce = useAnnounce();
   const { t, tm } = useI18n();
   const { setEnabled, remove, isBusy, progressOf, nameIn, catalog } = useMods();
   const hintId = useId();

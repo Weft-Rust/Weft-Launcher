@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useI18n } from "../../i18n/useI18n";
 import type { RichMsg } from "../../mods/checks";
-import { announce } from "../LiveRegion";
+import { useAnnounce } from "../LiveRegion";
 import { RichText } from "./RichText";
 
 /** What is different in the new plan, after the backend refused the one the player agreed to. */
@@ -23,6 +23,7 @@ export function PlanChanges({ changes }: { changes: RichMsg[] }) {
 
 /** A calm line in a dialog when the player cancelled: nothing changed, and that isn't an error. */
 export function useOutcomeNote() {
+  const announce = useAnnounce();
   const { t } = useI18n();
   const [cancelledAt, setCancelledAt] = useState<number | null>(null);
   return {

@@ -4,6 +4,7 @@ import App from "./App";
 import { GameStateProvider } from "./hooks/useGameState";
 import { InstallProvider } from "./hooks/useInstall";
 import { ModsProvider } from "./hooks/useMods";
+import { SpeechProvider } from "./components/LiveRegion";
 import { getLocale, initI18n } from "./i18n";
 import "./style.css";
 
@@ -39,13 +40,15 @@ async function start() {
 const render = () => ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <I18nProvider>
-      <GameStateProvider>
-        <InstallProvider>
-          <ModsProvider>
-            <App />
-          </ModsProvider>
-        </InstallProvider>
-      </GameStateProvider>
+      <SpeechProvider>
+        <GameStateProvider>
+          <InstallProvider>
+            <ModsProvider>
+              <App />
+            </ModsProvider>
+          </InstallProvider>
+        </GameStateProvider>
+      </SpeechProvider>
     </I18nProvider>
   </React.StrictMode>,
 );

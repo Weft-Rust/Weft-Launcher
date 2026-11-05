@@ -26,7 +26,7 @@ import type {
 } from "../mods/types";
 import { showError, type Shown } from "../i18n/errors";
 import { tm } from "../i18n";
-import { announce } from "../components/LiveRegion";
+import { useAnnounce } from "../components/LiveRegion";
 import { useInstall } from "./useInstall";
 import { useGameState } from "./useGameState";
 import { failed, type ActionResult } from "./result";
@@ -108,6 +108,7 @@ function without<T>(record: Record<string, T>, key: string): Record<string, T> {
 }
 
 export function ModsProvider({ children }: { children: ReactNode }) {
+  const announce = useAnnounce();
   const { installedVersions } = useInstall();
   const { lastCrash, clearCrash } = useGameState();
   const [profiles, setProfiles] = useState<Record<string, ProfileReport>>({});
@@ -182,7 +183,7 @@ export function ModsProvider({ children }: { children: ReactNode }) {
       if (!text) return others;
       return [...others, { ...text, id, tag, undo }];
     });
-  }, []);
+  }, [announce]);
 
   const dismissNotice = useCallback((id: number) => setNotices((all) => all.filter((n) => n.id !== id)), []);
 
