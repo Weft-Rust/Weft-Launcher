@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { FLAGS, SCENARIOS } from "./scenarios";
-import readme from "../../README.md?raw";
+import reference from "../../docs/dev-mock.md?raw";
 
-// The README's mock section is written from SCENARIOS and FLAGS; this keeps the two together.
+// docs/dev-mock.md is written from SCENARIOS and FLAGS; this keeps the two together.
 describe("mock scenarios", () => {
-  it("are each listed in the README", () => {
-    for (const s of SCENARIOS) expect(readme, s.name).toContain(`\`${s.name}\``);
+  it("are each listed in docs/dev-mock.md", () => {
+    for (const s of SCENARIOS) expect(reference, s.name).toContain(`\`${s.name}\``);
   });
 
-  it("have every flag listed in the README with its values", () => {
+  it("have every flag listed in docs/dev-mock.md with its values", () => {
     for (const f of FLAGS) {
-      expect(readme, f.name).toContain(`\`${f.name}\``);
-      for (const v of f.values) expect(readme, `${f.name}=${v}`).toContain(v);
+      expect(reference, f.name).toContain(`\`${f.name}\``);
+      for (const v of f.values) expect(reference, `${f.name}=${v}`).toContain(v);
     }
   });
 
