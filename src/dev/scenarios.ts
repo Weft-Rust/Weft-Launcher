@@ -1,4 +1,4 @@
-// The mock backend's scenarios and URL flags, in one table: the README lists them and the tests
+// The mock backend's scenarios and URL flags, in one table: docs/dev-mock.md lists them and the tests
 // check that list. Kept apart from mockBackend.ts so reading them pulls in nothing from Tauri.
 
 export interface Scenario {

@@ -2,7 +2,7 @@
 //
 // Pick a state with `?scenario=<name>` and adjust it with URL flags, e.g.
 // `?scenario=mods&index=cached&revoked=cogwork&slow=1`. SCENARIOS and FLAGS in ./scenarios are the
-// one list of both; the README and the tests read them from there.
+// one list of both; docs/dev-mock.md and the tests read them from there.
 //
 // The rules are src-tauri/src/mods' own, ported in ./mockRules and tested against the Rust table
 // tests' cases; crashes are read out of engine log lines with ./diagnose, like the backend does.

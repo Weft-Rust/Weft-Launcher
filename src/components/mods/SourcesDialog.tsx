@@ -15,7 +15,7 @@ import type { MessageKey } from "../../i18n";
 
 const INDEX_REPO = "https://github.com/Zorro909/weft-mods-index";
 /** What a repo must publish to be a source. */
-const SOURCE_FORMAT = "https://github.com/Zorro909/Weft-Launcher/blob/master/docs/mod-manager/INDEX_FORMAT.md#publishing-from-your-own-repo";
+const SOURCE_FORMAT = "https://github.com/Zorro909/Weft-Launcher/blob/master/docs/mod-manager/AUTHORING.md#when-a-source-shows-no-mods";
 
 /** One whole sentence per reason, so each language words it in its own order. */
 const NO_MODS: Record<NoModsReason, MessageKey> = {
