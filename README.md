@@ -44,7 +44,7 @@ npm run tauri build   # installer
 
 Before a PR:
 
-- `cargo fmt --check && cargo clippy && cargo test` in `src-tauri`.
+- `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test` in `src-tauri`.
 - `npm run build`. It runs `npm run check:i18n` first.
 - UI strings go through `src/i18n`: add every key to all four languages (en, pt-BR, es, ru), with the plural forms each needs. A key built from a prefix goes in the checker's `DYNAMIC` list.
 - `npm test`: the unit tests (vitest).
