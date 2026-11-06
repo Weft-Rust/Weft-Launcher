@@ -270,5 +270,3 @@ refused ([Freshness and cache](INDEX_FORMAT.md#freshness-and-cache)).
 server mod-set sync. All need engine design work.
 
 **Open questions:** who else reviews for the index, and moving its signing key offline.
-
-The first design mockup is archived at [`history/mockup.html`](history/mockup.html).
