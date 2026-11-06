@@ -51,7 +51,7 @@ Then add your repo in the launcher (Mods → Sources).
 
 ### When a source shows no mods
 
-The Sources dialog names the reason that got furthest across all releases (`SourceStatus.noMods`):
+The Sources dialog shows one reason: that of the release that passed the most checks. The checks run in this order:
 
 | Reason | Means |
 | --- | --- |
