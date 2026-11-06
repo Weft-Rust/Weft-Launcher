@@ -151,8 +151,8 @@ never loads a library to read its metadata: that would run its code.
 
 - Every turned-on mod's ABI must equal the version's ABI. ABIs come from published metadata
   (`weft.abi`), never the library, and a build fits every release with that ABI, tagged or not.
-  With the version's ABI unknown, `fitsVersion` is `null`, mods
-  are "unchecked", and Play isn't blocked for it.
+  With the version's ABI unknown, `fitsVersion` is `null`, mods are "unchecked", and Play isn't
+  blocked for it.
 - Every dependency must be turned on, or be `base`.
 - If either fails, Play is blocked with the reason and a fix (turn off, find update).
 - It never touches the network: it uses the catalogue the page last loaded (or the cached one) and
@@ -213,13 +213,14 @@ Each build has exactly one tier.
 | **Unverified** (red) | A local file that isn't in the catalogue | Zip structure only. The player types the mod id to confirm. |
 
 GitHub serves both a source's file and its digest, so their agreement only proves the download
-wasn't corrupted. A source build whose hash is in the index is Reviewed. A local file whose hash is in the catalogue
+wasn't corrupted.
+
+A source build whose hash is in the index is Reviewed. A local file whose hash is in the catalogue
 installs with that build's tier. An index version without a `reviewed` record is dropped.
 
-**Provenance** is shown only as the signed index's record: the index CI runs
-`gh attestation verify` and records the result. The launcher doesn't verify attestations itself. A
-source's own `provenance` is shown as the publisher's claim. The rules are in
-[INDEX_FORMAT.md](INDEX_FORMAT.md#provenance).
+**Provenance:** the launcher doesn't verify attestations. For index builds it shows the result of
+the index CI's `gh attestation verify` as the index's record; for source builds it shows
+`provenance` as the publisher's claim. See [INDEX_FORMAT.md](INDEX_FORMAT.md#provenance).
 
 The UI has **no permission list**: native code has no permissions to list.
 
