@@ -14,7 +14,7 @@ The examples below are complete and valid; `src-tauri/src/mods/doc_tests.rs` che
 - The signature is a **prehashed** minisign signature of the exact bytes of `index.json` (`minisign -S -H`, the default of current minisign). Legacy signatures are refused.
 - The launcher embeds the public key (`keys/index.pub` in the index repo; `INDEX_PUBLIC_KEY` in `src-tauri/src/mods/index/signature.rs`).
 - An index whose signature doesn't verify is refused, and the launcher keeps its last verified copy.
-- The trusted comment carries `timestamp:<unix seconds>`, as `minisign -S` writes by default (`timestamp:1793819114 file:index.json`). The launcher reports it as `signedAt`. If it is missing, staleness and rollback use `generated` alone.
+- The trusted comment carries `timestamp:<unix seconds>`, as `minisign -S` writes by default (`timestamp:1793819114 file:index.json`). The launcher reports it as `signedAt`. Without it, staleness uses `generated`, and rollback follows the pair ordering in [Freshness and cache](#freshness-and-cache).
 - The index repository re-signs the index weekly, even when nothing changed, so it never goes [stale](#freshness-and-cache).
 
 ### Key rotation
@@ -77,7 +77,7 @@ JSON Schemas: [`schema/index.schema.json`](schema/index.schema.json) and [`schem
 
 ### Fields
 
-"Default" is what the launcher uses when the field is missing. A field marked required has none.
+"Default" is what the launcher uses when the field is missing; a field marked required has none. "Value" is what the launcher accepts: anything else skips the entry, unless the row says what happens instead.
 
 | Field | Default | Value |
 |---|---|---|
@@ -115,22 +115,26 @@ Unknown fields are ignored.
 
 The whole index is refused, and the last verified copy kept, when `schema` isn't `1`, `generated` isn't RFC 3339, or `weft`, `mods` or `revoked` isn't a list.
 
-Otherwise a mod, version or `weft[]` entry that fails to parse or breaks a rule is skipped on its own:
+Otherwise a mod, version or `weft[]` entry is skipped on its own when it fails to parse, breaks a value in the [Fields](#fields) table (such as `id`, `version`, `published` or `deps[].id`), or breaks one of these rules:
 
-- `asset.sha256`, commits and `abi` are lowercase hex. A full commit is 40 characters, or 64 in a SHA-256 repository. `asset.sha256` is 64. `abi` is 16: the FNV-1a-64 hash of `crates/abi/src/lib.rs` at that commit.
+| Field | Form |
+|---|---|
+| Commits (`source.commit`, `weft.commit`, `weft[].commit`) | 40 lowercase hex characters, or 64 in a SHA-256 repository |
+| `asset.sha256` | 64 lowercase hex characters |
+| `weft.abi`, `weft[].abi` | 16 lowercase hex characters: the FNV-1a-64 hash of `crates/abi/src/lib.rs` at that commit |
+
 - `tag`, `weft.tag` and `weft[].tag` are 1–100 of `A–Z a–z 0–9 . - _`, and don't start with `.`.
 - `source.repo` is `owner/name`, each part 1–100 of `A–Z a–z 0–9 - _ .`, and neither `.` nor `..`.
 - `asset.name` is `<id>.zip`.
 - `asset.url` follows [the asset URL rule](#the-asset-url-rule).
-- In the index, `reviewed` is required: Reviewed means someone reviewed it.
 
-**Revocations fail closed.** A `revoked[]` entry is dropped only when its `sha256` can't be a SHA-256 at all (64 hex characters, any case, after trimming), and that is logged. Every other problem leaves it in force: the hash is lowercased and compared without case, and `reason` and `at` take their defaults. A revoked build is never installed; an installed one is turned off and recorded in the version's `mods.lock.json`, where it stays revoked until it is replaced or removed.
+**Revocations fail closed.** A `revoked[]` entry is dropped only when its `sha256` can't be a SHA-256 at all (64 hex characters, any case, after trimming), and that is logged. Every other problem leaves it in force: the hash is lowercased and compared without case, and `reason` and `at` take their defaults. What the launcher then does with a revoked build: [PROPOSAL, Revocation](PROPOSAL.md#revocation).
 
 Not enforced: that `summary` is one short line, that `versions[]` is sorted, and that `published` is in the past.
 
 ### Icons
 
-The same rule holds for `<id>.mod.json`. An `icon` is kept only when it is an `https://` URL on `github.com`, `raw.githubusercontent.com`, `user-images.githubusercontent.com` or a `<name>.github.io` site, with no port or user name: the launcher never asks another host, which would learn the player's address. It must be a PNG of at most 512 KB, or it isn't shown.
+In the index and in `<id>.mod.json`, an `icon` must be an `https://` URL on `github.com`, `raw.githubusercontent.com`, `user-images.githubusercontent.com` or a `<name>.github.io` site, with no port or user name; any other is dropped. It must be a PNG of at most 512 KB, or it isn't shown. Redirects follow the [download rules](#downloads).
 
 ## `<id>.mod.json`, for Unreviewed sources
 
@@ -190,6 +194,8 @@ A release may carry several mods: each `<id>.mod.json` with its `<id>.zip` is re
 
 A source mod is listed apart from an index mod with the same `id`. Dependencies resolve in the index first, then in the same source. A source build whose `sha256` is also in the index shows once, as Reviewed.
 
+Publishing steps, and why a source shows no mods: [AUTHORING.md](AUTHORING.md#when-a-source-shows-no-mods).
+
 ## Provenance
 
 The launcher never verifies an attestation. The index CI runs `gh attestation verify` when it adds a version and records the result in `provenance`; the index signature makes that record the index's word. The launcher shows it as the index's record, and only when it is complete:
@@ -202,10 +208,6 @@ The launcher never verifies an attestation. The index CI runs `gh attestation ve
 | `none` | No `provenance`. | ? (unknown): "No build record" |
 
 An incomplete record doesn't drop the version: the review stands, and only the build row is unknown (`catalog::build_record`).
-
-## Publishing from your own repo
-
-The steps are in [AUTHORING.md](AUTHORING.md). Why a source shows no mods: [AUTHORING, When a source shows no mods](AUTHORING.md#when-a-source-shows-no-mods).
 
 ## Launcher behaviour
 
@@ -235,7 +237,7 @@ Before a zip is stored, the launcher inflates every entry once, without writing 
 - **Rollback refusal.** An index's age is the pair (`generated`, signing time), compared by `generated` first; with equal `generated`, the later signing time is newer, and a signature without a time is older than one with it. A fetched index older than the newest pair ever accepted is refused with `IndexRollback`, and the launcher keeps its copy. That pair is kept in `cache/mod-index.state.json`, so deleting the cached index doesn't reset it. The same index fetched again is accepted.
 - **Dated in the future.** An index whose `generated` or signing time is more than a day ahead of the computer's clock is refused with `IndexInvalid`.
 - **Stale.** An index signed more than 30 days ago (by `generated` when there is no signing time) has freshness `stale`. It is still used; the launcher says revocations since then may be missing.
-- **Cache.** The launcher keeps the newest two verified generations, each index with its signature, and verifies and parses the cached copy on every read. If the newest doesn't verify, the previous one is used. Offline, the cache is used with freshness `cached` (or `stale`). The index is fetched only when the catalogue is refreshed; Play never waits for it. If saving a fetched index fails, it is used until the launcher closes and reported as `cacheError`.
+- **Cache.** The launcher keeps the newest two verified generations and verifies the cached copy on every read; if the newest fails, the previous one is used. Offline, freshness is `cached` (or `stale`). The index is fetched only on a catalogue refresh, never by Play. If saving a fetched index fails, it is used for this session and reported as `cacheError`.
 
 ### Duplicates
 
