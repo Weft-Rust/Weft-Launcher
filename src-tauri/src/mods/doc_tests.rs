@@ -128,28 +128,6 @@ fn assert_accepted(raw: serde_json::Value) {
     assert!(accepted.versions[0].reviewed.is_none());
 }
 
-/// The proposal's list of commands is the one `lib.rs` registers from `mods::commands`.
-#[test]
-fn the_proposal_lists_every_mod_command() {
-    let line = PROPOSAL
-        .lines()
-        .find(|l| l.starts_with("Tauri commands:"))
-        .expect("a 'Tauri commands:' line in PROPOSAL.md");
-    // The list is the first sentence.
-    let list = line.split("`. ").next().unwrap();
-    let listed: Vec<&str> = list
-        .split('`')
-        .skip(1)
-        .step_by(2)
-        .filter(|name| name.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'))
-        .collect();
-    let registered: Vec<String> = crate::bindings::command_paths()
-        .into_iter()
-        .filter_map(|p| p.strip_prefix("mods::commands::").map(str::to_string))
-        .collect();
-    assert_eq!(listed, registered, "PROPOSAL.md's command list");
-}
-
 /// The documented defaults of a revocation are the ones the parser uses.
 #[test]
 fn the_revocation_defaults_are_documented() {

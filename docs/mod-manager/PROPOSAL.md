@@ -4,7 +4,7 @@ The launcher keeps a separate mod set for each installed Weft version. It instal
 signed index, from GitHub repos the player adds, and from local zips; it checks the set before Play
 and names the mod when the game fails to load one.
 
-Status: built on `feat/mod-manager`. Engine-side changes are still needed; see
+Status: the launcher side is built. Engine-side changes are still needed; see
 [Remaining work](#5-remaining-work). The index contract is [INDEX_FORMAT.md](INDEX_FORMAT.md); the
 path for mod authors is [AUTHORING.md](AUTHORING.md).
 
@@ -73,9 +73,8 @@ cache/
 downloads/mod-<sha256>-<unique>.part   a download in progress; never shared by two downloads
 ```
 
-The index URL is built in (`index/fetch.rs`); `sources.json` holds only repos. A `sources.json`
-that can't be read is never taken for an empty list: it is set aside and reported
-(`ModSourcesDamaged`), and adding a source starts a new list.
+The index URL is built in (`index/fetch.rs`); `sources.json` holds only repos. A damaged
+`sources.json` is reported as `ModSourcesDamaged`, and adding a source starts a new list.
 
 Launch is `weft --mods <profiles/<tag>/mods>`. Turning a mod on or off copies its build into that
 folder or removes it. Deleting a version deletes its profile, and unused store entries are
@@ -95,11 +94,9 @@ an id or hash of the wrong form is an error, never a path.
 | IPC | `commands.rs`, `error.rs` | Each command is one call into `service/`. Errors reach the page as an `ErrorCode`, never an English sentence. |
 
 Everything outside `service/` takes plain data, a `Paths` root or a `Ctx`, so it is tested without
-the app (`service_tests.rs` runs installs against a local HTTP server). The IPC types are generated
-into `src/mods/bindings/`, and `src/mods/api.ts` calls commands only through them; the README says
-how to regenerate them.
-
-Tauri commands: `list_mod_catalog`, `refresh_mod_source`, `get_mod_sources`, `add_mod_source`, `remove_mod_source`, `get_mod_profile`, `plan_mod_install`, `install_mod`, `inspect_mod_file`, `install_mod_file`, `set_mod_enabled`, `remove_mod`, `restore_mod`, `preview_copy_mod_profile`, `copy_mod_profile`, `cancel_mod_operation`, `get_mod_icon`, `open_player_mods_folder`. `doc_tests.rs` checks this list against `lib.rs`.
+the app; `service_tests.rs` runs the operations against a local HTTP server. The IPC types are
+generated into `src/mods/bindings/`, and `src/mods/api.ts` calls commands only through them (the
+README says how to regenerate them).
 
 The catalogue merges the index and every source. Each part carries the ticket of the refresh that
 fetched it, so a slow refresh that finishes last can't replace newer answers; the page keeps the
@@ -114,18 +111,15 @@ catalogue with the highest `revision`.
   every dependency, through new builds and installed mods alike. An installed dependency that fits
   and isn't revoked is used, and turned on if it is off. `InstallPlan.enable` lists everything that
   turns on.
-- **The reviewed plan is binding.** `plan_mod_install`, `preview_copy_mod_profile` and
-  `inspect_mod_file` return a `planToken`: a digest of the builds (hash and trust), what ends up
-  on, what is installed off or missing, and the version's ABI. The matching install command passes
-  it back. The backend recomputes it before downloading and again under the lock at commit. If it
-  differs, the command fails with `ModChangedMeanwhile`, writes nothing, and the page plans again.
-  At commit the version must still be installed and not running, and no build may be revoked. A
-  file install re-checks revocation by the file's hash.
-- **Operations can be cancelled.** `install_mod`, `copy_mod_profile`, `install_mod_file` and
-  `restore_mod` take an `operationId`, which every `mod-progress` event carries with the file's
-  place (`index` of `count`). `cancel_mod_operation` works until the operation starts writing: the
-  download is aborted, the command fails with `ModCancelled`, and nothing is left behind. After
-  that it returns `false`.
+- **The reviewed plan is binding.** What the player approves is what gets committed. Install,
+  copy and file-install previews return a `planToken` covering the builds (hash and trust), what
+  ends up on, what is installed off or missing, and the version's ABI. The backend checks it before
+  downloading and again under the lock at commit. A changed plan fails with `ModChangedMeanwhile`,
+  writes nothing, and the page plans again. At commit the version must still be installed and not
+  running, and no build may be revoked; a file install re-checks revocation by the file's hash.
+- **Operations can be cancelled.** Installs, copies and restores carry an `operationId` that every
+  progress event repeats. Until the operation starts writing, cancelling aborts it with
+  `ModCancelled` and leaves nothing behind; after that, cancelling returns `false`.
 - **A new install never breaks Play.** A mod is installed on when it is new or was on, and nothing
   it needs is missing at any depth (`InstallPlan.turnsOn`). Otherwise it and the dependencies it
   brought are installed off (`ChangeResult.installedOff`). Copies follow the same rule per mod.
@@ -147,24 +141,17 @@ catalogue with the highest `revision`.
 
 ### Checking the zip
 
-Before a zip is stored:
-
-- Only `<id>.dll`, `lib<id>.so`, `lib<id>.dylib` and `assets/**` are allowed, for a valid mod id
-  `<id>`. No `..`, absolute paths or symlinks.
-- Entry count, unpacked size and compression ratio are capped. Every entry is inflated once,
-  without writing it anywhere, so a zip that lies about its sizes, is damaged or is encrypted is
-  refused. The limits are in [INDEX_FORMAT.md](INDEX_FORMAT.md#size-limits).
-- The store names the file `<sha256>.zip`; the version's folder names it `<id>.zip`, as the engine
-  requires.
-
-The launcher never unpacks a mod to run it, and never loads a library to read its metadata: that
-would run its code.
+Before a zip is stored, `archive.rs` checks its contents and limits and inflates every entry once
+without writing it to disk ([contents](INDEX_FORMAT.md#downloads),
+[limits](INDEX_FORMAT.md#size-limits)). The store names the file `<sha256>.zip`; the version's
+folder names it `<id>.zip`, as the engine requires. The launcher never unpacks a mod to run it, and
+never loads a library to read its metadata: that would run its code.
 
 ### The pre-Play check
 
 - Every turned-on mod's ABI must equal the version's ABI. ABIs come from published metadata
-  (`weft.abi`), never the library. A build from an untagged Weft commit fits
-  every release with the same ABI. With the version's ABI unknown, `fitsVersion` is `null`, mods
+  (`weft.abi`), never the library, and a build fits every release with that ABI, tagged or not.
+  With the version's ABI unknown, `fitsVersion` is `null`, mods
   are "unchecked", and Play isn't blocked for it.
 - Every dependency must be turned on, or be `base`.
 - If either fails, Play is blocked with the reason and a fix (turn off, find update).
@@ -193,17 +180,11 @@ launcher never deletes the player's file.
 
 ### Diagnosing a failure after Play
 
-On `exit(1)`, `diagnose.rs` reads the version's log for the engine's fixed messages, logged as
-`<time> ERROR [weft] <message>`. Only ERROR lines of target `weft` count; a mod's own lines
-(`[mod:x]`) can say anything, so they never name the culprit:
-
-- `mod X was built against another mod ABI (…)`
-- `loading mod X from <path>: <why>`
-- `<path> is not a Weft mod`
-- `mod X is the crate Y: name its folder or zip Y`
-- `mod X requires missing mod Y`
-- `X: init panicked`, after the mod's own `[mod:X] panicked at …` line. Without the `X:` prefix,
-  the mod comes from that line.
+On `exit(1)`, `diagnose.rs` looks for the engine's mod-loading failures in the version's log. Only
+ERROR lines of target `weft` establish a failure; a mod's own lines (`[mod:x]`) can say anything.
+The one exception: when the engine reports an init panic without naming the mod, the mod's own
+panic line before it, else the nearest "loading mod" line, names it. The messages it matches are
+listed in `diagnose.rs`.
 
 Home shows "X stopped Weft from starting" with Turn off, Find update and Open log. A crash that
 names no mod offers turning off all the version's mods, with Undo; a crash of a file-installed mod
@@ -213,7 +194,7 @@ offers picking another file.
 
 "Copy mods from…" (`preview_copy_mod_profile`, `copy_mod_profile`) resolves each mod of another
 version to the build for this version's ABI, lists the ones with no build yet, and merges into a
-set that already has mods. Since the ABI breaks with nearly every release, players use this most.
+set that already has mods.
 
 ## 4. Trust and revocation
 
@@ -228,10 +209,11 @@ Each build has exactly one tier.
 | Badge | Meaning | What was checked |
 |---|---|---|
 | **Reviewed** (green) | In the signed index, with a recorded review (`reviewed.by`) | Index signature, SHA-256 equals the index pin, zip structure. A compromised mod repo or GitHub account can't change pinned bytes without the index key. |
-| **Unreviewed** (grey) | From a GitHub repo the player added as a source | The `<id>.mod.json` agrees with GitHub's record of the release, SHA-256 equals GitHub's `digest` (which comes from the same server as the file, so it only proves the download wasn't corrupted), zip structure. |
+| **Unreviewed** (grey) | From a GitHub repo the player added as a source | The `<id>.mod.json` agrees with GitHub's record of the release, SHA-256 equals GitHub's `digest`, zip structure. |
 | **Unverified** (red) | A local file that isn't in the catalogue | Zip structure only. The player types the mod id to confirm. |
 
-A source build whose hash is in the index is Reviewed. A local file whose hash is in the catalogue
+GitHub serves both a source's file and its digest, so their agreement only proves the download
+wasn't corrupted. A source build whose hash is in the index is Reviewed. A local file whose hash is in the catalogue
 installs with that build's tier. An index version without a `reviewed` record is dropped.
 
 **Provenance** is shown only as the signed index's record: the index CI runs
@@ -256,10 +238,9 @@ needs it. The UI shows a Revoked badge and the reason.
 - An install already downloading when a revocation arrives fails at commit with
   `ModChangedMeanwhile`.
 
-**Age.** The launcher reports when the index was signed (`signedAt`). An index signed over 30 days
-ago is `stale`: still used, with a note that revocations since then may be missing. The index
-repository re-signs weekly. An index older than the newest ever accepted is refused (see
-[INDEX_FORMAT.md](INDEX_FORMAT.md#freshness-and-cache)).
+**Age.** The launcher reports when the index was signed (`signedAt`). A stale index is still used,
+with a note that revocations since then may be missing; an index older than one already accepted is
+refused ([Freshness and cache](INDEX_FORMAT.md#freshness-and-cache)).
 
 ## 5. Remaining work
 
