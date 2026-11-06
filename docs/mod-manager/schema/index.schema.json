@@ -112,7 +112,7 @@
           }
         },
         "provenance": {
-          "description": "The attestation the index CI checked; the launcher doesn't verify it. See INDEX_FORMAT.md, Provenance.",
+          "description": "How the build was made: the signed index's record, or a source's claim. The launcher doesn't verify attestations. See INDEX_FORMAT.md, Provenance.",
           "anyOf": [
             { "type": "null" },
             {
