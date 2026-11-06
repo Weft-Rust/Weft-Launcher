@@ -14,12 +14,12 @@ The examples below are complete and valid; `src-tauri/src/mods/doc_tests.rs` che
 - The signature is a **prehashed** minisign signature of the exact bytes of `index.json` (`minisign -S -H`, the default of current minisign). Legacy signatures are refused.
 - The launcher embeds the public key (`keys/index.pub` in the index repo; `INDEX_PUBLIC_KEY` in `src-tauri/src/mods/index/signature.rs`).
 - An index whose signature doesn't verify is refused, and the launcher keeps its last verified copy.
-- The trusted comment carries `timestamp:<unix seconds>`, as `minisign -S` writes by default (`timestamp:1793819114 file:index.json`). The launcher reports it as `signedAt`. Without it, staleness uses `generated`, and rollback follows the pair ordering in [Freshness and cache](#freshness-and-cache).
+- The trusted comment carries `timestamp:<unix seconds>`, as `minisign -S` writes by default (`timestamp:1793819114 file:index.json`). The launcher reports it as `signedAt` ([how it is used](#freshness-and-cache)).
 - The index repository re-signs the index weekly, even when nothing changed, so it never goes [stale](#freshness-and-cache).
 
 ### Key rotation
 
-The launcher trusts exactly one built-in key. To rotate it: ship a launcher release that embeds the new key, keep signing with the old key until players run that release, then switch the index to the new key. An index signed with an unknown key is refused like any bad signature.
+The launcher trusts exactly one built-in key, for fetched and cached indexes alike, so there is no overlap period. Rotating it takes a launcher release and a coordinated switch of the index's signing key. An index signed with another key is refused like any bad signature.
 
 ## `index.json`
 
@@ -77,7 +77,7 @@ JSON Schemas: [`schema/index.schema.json`](schema/index.schema.json) and [`schem
 
 ### Fields
 
-"Default" is what the launcher uses when the field is missing; a field marked required has none. "Value" is what the launcher accepts: anything else skips the entry, unless the row says what happens instead.
+"Default" is what the launcher uses when the field is missing; a field marked required has none. "Value" gives the accepted values and any field-specific handling. What happens to a value outside them is in [Rules the launcher enforces](#rules-the-launcher-enforces).
 
 | Field | Default | Value |
 |---|---|---|
@@ -176,13 +176,13 @@ The launcher reads the repo's releases (drafts are ignored) and accepts a `<id>.
 4. `source.repo` equals the source repo (compared without case).
 5. `asset.name`, `asset.url` and `asset.size` equal the zip's name, `browser_download_url` and size.
 6. GitHub reports a `digest` for the zip, and `asset.sha256` equals it.
-7. Every [rule the launcher enforces](#rules-the-launcher-enforces) except `reviewed`.
+7. Every [rule the launcher enforces](#rules-the-launcher-enforces).
 
 Then:
 
 - If GitHub marks the release a prerelease, a `channel` of `release` becomes `prerelease`.
 - `published` comes from GitHub when it has one.
-- `reviewed` is never read: source builds are always **Unreviewed**.
+- `reviewed` is ignored: a source can't mark its own build Reviewed.
 - `provenance` is the publisher's claim (`buildRecord: "claimed"`), never a record.
 
 The launcher can't check `weft.abi`, `source.commit`, `deps` or `provenance` of a source; the UI shows them as claims. The game has the last word on the ABI when it loads the library.
