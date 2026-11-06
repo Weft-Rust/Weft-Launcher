@@ -23,7 +23,9 @@ The builds aren't code-signed yet:
 
 **Versions** -> **Install** -> back to **Home** -> **Play**. Delete a version with a double click on **Delete** (blocked while the game is running).
 
-**Mods** -> pick the game version -> **Browse** -> **Install**. Each game version keeps its own mods. Mods are native programs that run with your privileges. Besides the signed [Weft mod index](https://github.com/Zorro909/weft-mods-index), you can add GitHub repos under **Sources** or install a zip **From file**. Builds pinned in the index are Reviewed; others are Unreviewed or Unverified. See the [mod manager design](docs/mod-manager/PROPOSAL.md).
+**Mods** -> pick the game version -> **Browse** -> **Install**. Each game version keeps its own mods. Mods are native programs that run with your privileges.
+
+Besides the signed [Weft mod index](https://github.com/Zorro909/weft-mods-index), you can add GitHub repos under **Sources** or install a zip **From file**. Builds pinned in the index are Reviewed; others are Unreviewed or Unverified. See the [mod manager design](docs/mod-manager/PROPOSAL.md).
 
 ## Data
 
