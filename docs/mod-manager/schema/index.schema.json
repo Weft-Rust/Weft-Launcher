@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "index.schema.json",
   "title": "Weft mod index, schema 1",
-  "description": "What index.json holds for every entry in it to be used: INDEX_FORMAT.md, 'index.json'. The launcher ignores fields it doesn't know and skips an entry that breaks a rule rather than refusing the index; only schema, generated and a revoked[] that isn't a list refuse it. Rules a schema can't say (asset.name is <id>.zip, asset.url names source.repo and tag, a repo part is neither . nor ..) are in INDEX_FORMAT.md, 'Rules the launcher enforces'.",
+  "description": "Weft mod index, schema 1. Cross-field rules and how the launcher handles a bad entry are in INDEX_FORMAT.md.",
   "type": "object",
   "required": ["schema", "generated"],
   "properties": {
@@ -112,11 +112,11 @@
           }
         },
         "provenance": {
-          "description": "How the build was made, as the index's maintainers record it (INDEX_FORMAT.md, Provenance). The launcher shows it as recorded only for a whole github-attestation record; any other kind, or a record missing a part, is accepted and shown as not known. The launcher doesn't check the attestation itself.",
+          "description": "The attestation the index CI checked; the launcher doesn't verify it. See INDEX_FORMAT.md, Provenance.",
           "anyOf": [
             { "type": "null" },
             {
-              "description": "A GitHub Actions build attestation that the index's CI checked: every part is needed for the launcher to show it.",
+              "description": "A complete GitHub attestation record.",
               "type": "object",
               "required": ["kind", "repo", "workflow", "verified_at"],
               "properties": {
@@ -128,7 +128,7 @@
               }
             },
             {
-              "description": "Another kind, or an incomplete record: accepted, and shown as not known.",
+              "description": "Another kind or an incomplete record, shown as unknown.",
               "type": "object",
               "required": ["kind"],
               "properties": {
