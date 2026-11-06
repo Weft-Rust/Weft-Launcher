@@ -3,9 +3,9 @@
 `npm run dev:mock` serves the UI at http://localhost:1420/?scenario=mods against a fake backend
 (`src/dev/mockBackend.ts`). The mock never ships in a production build.
 
-Its rules are ported from the Rust backend (`src/dev/mockRules.ts`). The mock (`npm test`) and the
-backend (`cargo test`) are both checked against the shared cases in `src/dev/fixtures/`. It doesn't simulate file system or network
-failures beyond the error code they end in; those are tested in Rust against real files and a local
+Its rules are ported from the Rust backend (`src/dev/mockRules.ts`), and both are checked against
+the shared cases in `src/dev/fixtures/` (`npm test`, `cargo test`). File system and network failures
+are only simulated as the error code they end in; Rust tests them against real files and a local
 HTTP server.
 
 Pick a state with `?scenario=` and adjust it with flags, which combine:
@@ -47,7 +47,7 @@ sets. Both lists come from `src/dev/scenarios.ts`; `npm test` fails if this page
 | `refreshrevokes` | `<mod id>` | The next refresh's index revokes that mod's installed builds, once. |
 | `revoked` | `<mod id>` | Revokes that mod's installed builds. |
 | `abi` | `error` | The version's ABI can't be found. |
-| `fail` | `install`, `network`, `toolarge`, `dep`, `meanwhile`, `catalog`, `sources` | Comma-separated. Installs fail at the hash check, mid-download, before it, or on a dependency; `meanwhile` publishes a newer Glowmoss after the first plan, so that plan is refused and planned again; the catalogue fails; `sources` finds the sources list damaged. |
+| `fail` | `install`, `network`, `toolarge`, `dep`, `meanwhile`, `catalog`, `sources` | Comma-separated. `install`: the hash check fails. `network`: the download breaks off midway. `toolarge`: the zip is refused before downloading. `dep`: a dependency's download fails. `meanwhile`: a newer Glowmoss appears after the first plan, so that plan is refused and planned again. `catalog`: the catalogue fails to load. `sources`: the sources list is damaged. |
 | `file` | `unverified`, `known`, `notamod`, `revoked`, `revokedlate`, `wrongplatform` | What From file picks; `revokedlate` is revoked during the install. |
 | `shadow` | `<mod id>` | The player's own folder has a copy of that mod. Tests delete it with `window.mockPlayer.deleteFile(name)`. |
 | `revocations` | `messy` | Uppercase hashes, no reason or time, and one entry that isn't a hash: only that one is dropped. |
