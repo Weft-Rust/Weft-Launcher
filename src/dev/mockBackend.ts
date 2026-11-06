@@ -486,7 +486,7 @@ const progress = (op: Op, file: { sha256: string; id: string; index: number; cou
 
 /** Download and check one file, with the backend's stages and failures. */
 async function fetchBuild(op: Op, file: { sha256: string; id: string; index: number; count: number }, isDep: boolean) {
-  if (failures.has("toolarge")) fail("ModTooLarge", `${file.id}.zip is over 64 MB`);
+  if (failures.has("toolarge")) fail("ModTooLarge", `${file.id}.zip is over 512 MB`);
   for (let p = 0; p <= 100; p += 10) {
     op.check();
     await progress(op, file, "downloading", p);
