@@ -1,0 +1,922 @@
+{
+  "schema": 1,
+  "generated": "2026-11-04T19:04:11Z",
+  "weft": [
+    {
+      "tag": "v26.11.1",
+      "commit": "ff9c7128511fc0dce7719b67c9a59274d70bdd5a",
+      "abi": "f470b1cbb1f9ad91"
+    },
+    {
+      "tag": "v26.10.4",
+      "commit": "34fa22b1b6546aa8a8d3d12252bd7a5b01dbb0ec",
+      "abi": "5f0569a6bea71b81"
+    },
+    {
+      "tag": "v26.10.3",
+      "commit": "7e32b4217b6ada9ae6567845256caf42d203fdeb",
+      "abi": "0c4348eac3c90c5c"
+    },
+    {
+      "tag": "v26.10.2",
+      "commit": "23d2a3b5fa95a674c993ae9f115851e8318c3c8c",
+      "abi": "7f70a596eee22b6f"
+    },
+    {
+      "tag": "v26.10.1",
+      "commit": "d444d448770c5648d452fe76ebe4e1166322d67e",
+      "abi": "7f70a596eee22b6f"
+    },
+    {
+      "tag": "v0.1.0",
+      "commit": "54a5829f3c25fc6975379f6421cd64c9d0e378b0",
+      "abi": "27b2fc40e2fd67eb"
+    }
+  ],
+  "mods": [
+    {
+      "id": "cogwork",
+      "name": "Cogwork",
+      "summary": "Gears, item tubes and engines, an excavator that digs out a whole area layer by layer…",
+      "authors": [
+        "Zorro909"
+      ],
+      "license": null,
+      "homepage": "https://github.com/Zorro909/weft-mods/tree/main/cogwork",
+      "icon": "https://raw.githubusercontent.com/Zorro909/weft-mods/514b2feb25af29f7dabbadfec36a3f24f4c8e6b2/cogwork/assets/textures/gui/icon.png",
+      "versions": [
+        {
+          "version": "0.2.1-rc.1",
+          "channel": "prerelease",
+          "tag": "cogwork-v0.2.1-rc.1",
+          "published": "2026-11-04T12:08:06Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "514b2feb25af29f7dabbadfec36a3f24f4c8e6b2"
+          },
+          "weft": {
+            "tag": "v26.11.1",
+            "commit": "ff9c7128511fc0dce7719b67c9a59274d70bdd5a",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "cogwork.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/cogwork-v0.2.1-rc.1/cogwork.zip",
+            "size": 3114153,
+            "sha256": "f4b03a760afa163167307b57dd8ff10e4443aef9a5fc5f26fe907982aa7b8d07"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.2.0",
+          "channel": "release",
+          "tag": "cogwork-v0.2.0",
+          "published": "2026-11-04T02:39:03Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "cceea7805df5902d62017d2008d1bb29ed84e152"
+          },
+          "weft": {
+            "tag": "v26.11.1",
+            "commit": "ff9c7128511fc0dce7719b67c9a59274d70bdd5a",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "cogwork.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/cogwork-v0.2.0/cogwork.zip",
+            "size": 2642469,
+            "sha256": "989b21912db1c53d06460cf7bbf9a979ce461c3fe197215124851a427bf7d20c"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.2-experimental.4563878.917596d",
+          "channel": "experimental",
+          "tag": "cogwork-v0.1.2-experimental.4563878.917596d",
+          "published": "2026-11-03T12:00:56Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "8c2543e950d06004c66c49fab96b7ecce4e6343b"
+          },
+          "weft": {
+            "tag": "v26.11.1-46-g4563878",
+            "commit": "4563878b067425085701268f074f9483b2625e4c",
+            "abi": "5d449b795eda0099"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "cogwork.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/cogwork-v0.1.2-experimental.4563878.917596d/cogwork.zip",
+            "size": 2591246,
+            "sha256": "322afb5a502472fe5bf05b41416f73d14c40e22794f71eea99063312406609ef"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.2-experimental.b5958a1.917596d",
+          "channel": "experimental",
+          "tag": "cogwork-v0.1.2-experimental.b5958a1.917596d",
+          "published": "2026-11-02T18:03:48Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "917596da05afdf1fc87a4e20a20a6e6e427a5a86"
+          },
+          "weft": {
+            "tag": "v26.11.1-5-gb5958a1",
+            "commit": "b5958a15ba4f528cb349d7b8788e3892a18be091",
+            "abi": "d3dae6ede60ad004"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "cogwork.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/cogwork-v0.1.2-experimental.b5958a1.917596d/cogwork.zip",
+            "size": 2589353,
+            "sha256": "fb1cff0624ad2b7f20b61186e27afab48b7f7cfef602f629646e986b1f1792ce"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.2",
+          "channel": "release",
+          "tag": "cogwork-v0.1.2",
+          "published": "2026-11-02T18:03:45Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "917596da05afdf1fc87a4e20a20a6e6e427a5a86"
+          },
+          "weft": {
+            "tag": "v26.11.1",
+            "commit": "ff9c7128511fc0dce7719b67c9a59274d70bdd5a",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "cogwork.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/cogwork-v0.1.2/cogwork.zip",
+            "size": 2586387,
+            "sha256": "cb39cecb64e22ab2a6e6cad761e131b42b7a57e055924776561e72ea87ba0db5"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.1",
+          "channel": "release",
+          "tag": "cogwork-v0.1.1",
+          "published": "2026-11-02T14:13:07Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "5855730cc0a423eee7fd7e0a0eebb67bb8f355ac"
+          },
+          "weft": {
+            "tag": "v26.11.1",
+            "commit": "ff9c7128511fc0dce7719b67c9a59274d70bdd5a",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "cogwork.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/cogwork-v0.1.1/cogwork.zip",
+            "size": 2585995,
+            "sha256": "a35711d9e0188c9e086ac55088283f754d0617f62b4c2a31bcddfe5deed0e65f"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.1-experimental.090722d.5855730",
+          "channel": "experimental",
+          "tag": "cogwork-v0.1.1-experimental.090722d.5855730",
+          "published": "2026-11-02T14:12:55Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "5855730cc0a423eee7fd7e0a0eebb67bb8f355ac"
+          },
+          "weft": {
+            "tag": "v26.11.1-2-g090722d",
+            "commit": "090722d8954973e0badcd130446cbebbe0016181",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "cogwork.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/cogwork-v0.1.1-experimental.090722d.5855730/cogwork.zip",
+            "size": 2585993,
+            "sha256": "98ae1eb863b47855576523529d3c34b004e9eecbc9fb8ec010ce62e2c53b597c"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.0-experimental.090722d.8da6d93",
+          "channel": "experimental",
+          "tag": "cogwork-v0.1.0-experimental.090722d.8da6d93",
+          "published": "2026-11-02T12:34:24Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "66de7e3a57c8edb1c6da476948f7092527bdc5c2"
+          },
+          "weft": {
+            "tag": "v26.11.1-2-g090722d",
+            "commit": "090722d8954973e0badcd130446cbebbe0016181",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "cogwork.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/cogwork-v0.1.0-experimental.090722d.8da6d93/cogwork.zip",
+            "size": 2586504,
+            "sha256": "c4577a2a2abd1ff6d42419a3bfc798f02c5e8392a8311c516ad07c6d2475919e"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.0",
+          "channel": "release",
+          "tag": "cogwork-v0.1.0",
+          "published": "2026-11-02T00:54:53Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "f90064856310bcbfd5f00c9f83d5813a8e3fbb21"
+          },
+          "weft": {
+            "tag": "v26.10.4-56-g5faf2e3",
+            "commit": "5faf2e3e57697dd3476b03a300f1231b84f6419e",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "cogwork.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/cogwork-v0.1.0/cogwork.zip",
+            "size": 2586992,
+            "sha256": "07ca439eb9d20aa1563220097d27b097b4a6c5ac250ce15ee049fc47d86b6774"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.0-experimental.ff9c712.8da6d93",
+          "channel": "experimental",
+          "tag": "cogwork-v0.1.0-experimental.ff9c712.8da6d93",
+          "published": "2026-11-02T00:54:35Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "f90064856310bcbfd5f00c9f83d5813a8e3fbb21"
+          },
+          "weft": {
+            "tag": "v26.11.1",
+            "commit": "ff9c7128511fc0dce7719b67c9a59274d70bdd5a",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "cogwork.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/cogwork-v0.1.0-experimental.ff9c712.8da6d93/cogwork.zip",
+            "size": 2586505,
+            "sha256": "cbac69292b213670369957c94e0eafc4511e6bd1fd5cf6133d2d88328478565a"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        }
+      ]
+    },
+    {
+      "id": "showcase",
+      "name": "Showcase",
+      "summary": "Plays the films other mods make of their content: a set built in the world and a camera flying around it in orbits, flybys and cranes.",
+      "authors": [
+        "Zorro909"
+      ],
+      "license": null,
+      "homepage": "https://github.com/Zorro909/weft-mods/tree/main/showcase",
+      "icon": null,
+      "versions": [
+        {
+          "version": "0.1.1-rc.2",
+          "channel": "prerelease",
+          "tag": "showcase-v0.1.1-rc.2",
+          "published": "2026-11-04T12:08:09Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "514b2feb25af29f7dabbadfec36a3f24f4c8e6b2"
+          },
+          "weft": {
+            "tag": "v26.11.1",
+            "commit": "ff9c7128511fc0dce7719b67c9a59274d70bdd5a",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "showcase.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/showcase-v0.1.1-rc.2/showcase.zip",
+            "size": 2115903,
+            "sha256": "707745d8fc940031256060434d0a64ef0e7f5bdb016c716c24458ca4e0a13bf0"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.1-rc.1",
+          "channel": "prerelease",
+          "tag": "showcase-v0.1.1-rc.1",
+          "published": "2026-11-04T02:39:06Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "cceea7805df5902d62017d2008d1bb29ed84e152"
+          },
+          "weft": {
+            "tag": "v26.11.1",
+            "commit": "ff9c7128511fc0dce7719b67c9a59274d70bdd5a",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "showcase.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/showcase-v0.1.1-rc.1/showcase.zip",
+            "size": 2116303,
+            "sha256": "97ab1bbbaae5b3664bfa6164810ebe3af8b4590f1a89b860f0800203b1766d30"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.0-experimental.4563878.7ce8734",
+          "channel": "experimental",
+          "tag": "showcase-v0.1.0-experimental.4563878.7ce8734",
+          "published": "2026-11-03T12:00:58Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "8c2543e950d06004c66c49fab96b7ecce4e6343b"
+          },
+          "weft": {
+            "tag": "v26.11.1-46-g4563878",
+            "commit": "4563878b067425085701268f074f9483b2625e4c",
+            "abi": "5d449b795eda0099"
+          },
+          "deps": [],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "showcase.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/showcase-v0.1.0-experimental.4563878.7ce8734/showcase.zip",
+            "size": 2107517,
+            "sha256": "d592062bb4d8a77635f46125de20f7f7ac8bd682bc52a6e7f31b938c55dd7cf6"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.0-experimental.b5958a1.7ce8734",
+          "channel": "experimental",
+          "tag": "showcase-v0.1.0-experimental.b5958a1.7ce8734",
+          "published": "2026-11-02T18:03:50Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "917596da05afdf1fc87a4e20a20a6e6e427a5a86"
+          },
+          "weft": {
+            "tag": "v26.11.1-5-gb5958a1",
+            "commit": "b5958a15ba4f528cb349d7b8788e3892a18be091",
+            "abi": "d3dae6ede60ad004"
+          },
+          "deps": [],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "showcase.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/showcase-v0.1.0-experimental.b5958a1.7ce8734/showcase.zip",
+            "size": 2105349,
+            "sha256": "6c1549b381f3902f88673df293c235366407a878a5e6e00c1bab8436ffe800ae"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.0",
+          "channel": "release",
+          "tag": "showcase-v0.1.0",
+          "published": "2026-11-02T18:03:47Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "917596da05afdf1fc87a4e20a20a6e6e427a5a86"
+          },
+          "weft": {
+            "tag": "v26.11.1",
+            "commit": "ff9c7128511fc0dce7719b67c9a59274d70bdd5a",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "showcase.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/showcase-v0.1.0/showcase.zip",
+            "size": 2102725,
+            "sha256": "45ab76b2768694a68918800260b4058d6b16c3471498fe44c5792cfb905a0331"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        }
+      ]
+    },
+    {
+      "id": "structures",
+      "name": "Structures",
+      "summary": "Generates structures from .wst files in the overworld, alone and as hamlets.",
+      "authors": [
+        "Zorro909"
+      ],
+      "license": null,
+      "homepage": "https://github.com/Zorro909/weft-mods/tree/main/structures",
+      "icon": "https://raw.githubusercontent.com/Zorro909/weft-mods/cceea7805df5902d62017d2008d1bb29ed84e152/structures/assets/textures/gui/icon.png",
+      "versions": [
+        {
+          "version": "0.1.3-rc.1",
+          "channel": "prerelease",
+          "tag": "structures-v0.1.3-rc.1",
+          "published": "2026-11-04T02:39:09Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "cceea7805df5902d62017d2008d1bb29ed84e152"
+          },
+          "weft": {
+            "tag": "v26.11.1",
+            "commit": "ff9c7128511fc0dce7719b67c9a59274d70bdd5a",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "structures.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/structures-v0.1.3-rc.1/structures.zip",
+            "size": 2268217,
+            "sha256": "ca444b61dc22c04fe053b8acd9f809b1e659e874df644731ad10918abeaca239"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.2-experimental.4563878.917596d",
+          "channel": "experimental",
+          "tag": "structures-v0.1.2-experimental.4563878.917596d",
+          "published": "2026-11-03T12:01:02Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "8c2543e950d06004c66c49fab96b7ecce4e6343b"
+          },
+          "weft": {
+            "tag": "v26.11.1-46-g4563878",
+            "commit": "4563878b067425085701268f074f9483b2625e4c",
+            "abi": "5d449b795eda0099"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "structures.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/structures-v0.1.2-experimental.4563878.917596d/structures.zip",
+            "size": 2274880,
+            "sha256": "abf92f44774cb9fef02e8d7cee365aea1993cb39536b4fb713c5f1b11e48eae1"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.2-experimental.b5958a1.917596d",
+          "channel": "experimental",
+          "tag": "structures-v0.1.2-experimental.b5958a1.917596d",
+          "published": "2026-11-02T18:03:53Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "917596da05afdf1fc87a4e20a20a6e6e427a5a86"
+          },
+          "weft": {
+            "tag": "v26.11.1-5-gb5958a1",
+            "commit": "b5958a15ba4f528cb349d7b8788e3892a18be091",
+            "abi": "d3dae6ede60ad004"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "structures.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/structures-v0.1.2-experimental.b5958a1.917596d/structures.zip",
+            "size": 2272769,
+            "sha256": "5d2efc634fa4d091437de643864f79cf2e70ebbd315523b8bb26c1f4573436e0"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.2",
+          "channel": "release",
+          "tag": "structures-v0.1.2",
+          "published": "2026-11-02T18:03:50Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "917596da05afdf1fc87a4e20a20a6e6e427a5a86"
+          },
+          "weft": {
+            "tag": "v26.11.1",
+            "commit": "ff9c7128511fc0dce7719b67c9a59274d70bdd5a",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "structures.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/structures-v0.1.2/structures.zip",
+            "size": 2270608,
+            "sha256": "4579c714fd0768e2f71c41a1e08064199797e1d0378a19dd1d563e8348d415cc"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.1",
+          "channel": "release",
+          "tag": "structures-v0.1.1",
+          "published": "2026-11-02T14:13:10Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "5855730cc0a423eee7fd7e0a0eebb67bb8f355ac"
+          },
+          "weft": {
+            "tag": "v26.11.1",
+            "commit": "ff9c7128511fc0dce7719b67c9a59274d70bdd5a",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "structures.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/structures-v0.1.1/structures.zip",
+            "size": 2268411,
+            "sha256": "dc5c4390c0bc2fd0f458ea6f02208e502fff5eb730ecba4dbed409f9e75f4434"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.1-experimental.090722d.5855730",
+          "channel": "experimental",
+          "tag": "structures-v0.1.1-experimental.090722d.5855730",
+          "published": "2026-11-02T14:12:58Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "5855730cc0a423eee7fd7e0a0eebb67bb8f355ac"
+          },
+          "weft": {
+            "tag": "v26.11.1-2-g090722d",
+            "commit": "090722d8954973e0badcd130446cbebbe0016181",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "structures.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/structures-v0.1.1-experimental.090722d.5855730/structures.zip",
+            "size": 2268414,
+            "sha256": "729a55916c94584c409284eedf6b79bbef53a82e4012554ab194e51b044cc10d"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.0-experimental.090722d.935cf10",
+          "channel": "experimental",
+          "tag": "structures-v0.1.0-experimental.090722d.935cf10",
+          "published": "2026-11-02T12:34:28Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "66de7e3a57c8edb1c6da476948f7092527bdc5c2"
+          },
+          "weft": {
+            "tag": "v26.11.1-2-g090722d",
+            "commit": "090722d8954973e0badcd130446cbebbe0016181",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "structures.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/structures-v0.1.0-experimental.090722d.935cf10/structures.zip",
+            "size": 2268456,
+            "sha256": "079db519167c2cd09eeef42d7234ebc8b1424985dfc95a16798d01f614dd4a7e"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.0",
+          "channel": "release",
+          "tag": "structures-v0.1.0",
+          "published": "2026-11-02T00:54:55Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "f90064856310bcbfd5f00c9f83d5813a8e3fbb21"
+          },
+          "weft": {
+            "tag": "v26.10.4-56-g5faf2e3",
+            "commit": "5faf2e3e57697dd3476b03a300f1231b84f6419e",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "structures.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/structures-v0.1.0/structures.zip",
+            "size": 2268416,
+            "sha256": "417656fde1e77a2eee43def2cba34dc3a87f3f571c5db6ab34435b9de98381de"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        },
+        {
+          "version": "0.1.0-experimental.ff9c712.935cf10",
+          "channel": "experimental",
+          "tag": "structures-v0.1.0-experimental.ff9c712.935cf10",
+          "published": "2026-11-02T00:54:37Z",
+          "source": {
+            "repo": "Zorro909/weft-mods",
+            "commit": "f90064856310bcbfd5f00c9f83d5813a8e3fbb21"
+          },
+          "weft": {
+            "tag": "v26.11.1",
+            "commit": "ff9c7128511fc0dce7719b67c9a59274d70bdd5a",
+            "abi": "f470b1cbb1f9ad91"
+          },
+          "deps": [
+            {
+              "id": "base"
+            }
+          ],
+          "platforms": [
+            "windows-x64",
+            "linux-x64",
+            "macos-arm64"
+          ],
+          "asset": {
+            "name": "structures.zip",
+            "url": "https://github.com/Zorro909/weft-mods/releases/download/structures-v0.1.0-experimental.ff9c712.935cf10/structures.zip",
+            "size": 2268460,
+            "sha256": "c9c1bf6797cd91d332397426ab666f3cf2caf41665330d3e5332ac5a8e83e6db"
+          },
+          "provenance": null,
+          "reviewed": {
+            "by": "Zorro909",
+            "at": "2026-11-04"
+          }
+        }
+      ]
+    }
+  ],
+  "revoked": []
+}

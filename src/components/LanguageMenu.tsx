@@ -1,63 +1,95 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n/useI18n";
+import type { Locale } from "../i18n";
 
-const OPTIONS: { code: 'pt-BR' | 'en' | 'es' | 'ru'; label: string; name: string }[] = [
+const OPTIONS: { code: Locale; label: string; name: string }[] = [
   { code: "en", label: "EN", name: "English" },
-  { code: "pt-BR", label: "BR", name: "Português" },
+  { code: "pt-BR", label: "PT", name: "Português" },
   { code: "es", label: "ES", name: "Español" },
   { code: "ru", label: "RU", name: "Русский" },
 ];
 
+/** A menu of languages: arrows move, Enter picks, Escape closes and returns to the button. */
 export function LanguageMenu() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const items = useRef<(HTMLButtonElement | null)[]>([]);
   const { locale, changeLocale } = useI18n();
+  const current = OPTIONS.find((o) => o.code === locale) ?? OPTIONS[0];
 
   useEffect(() => {
     if (!open) return;
+    items.current[Math.max(0, OPTIONS.findIndex((o) => o.code === locale))]?.focus();
     const onClick = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
     document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open, locale]);
 
-  const choose = (code: 'pt-BR' | 'en' | 'es' | 'ru') => {
+  const close = () => {
     setOpen(false);
-    if (code === locale) return;
-    changeLocale(code);
+    button.current?.focus();
   };
 
-  const currentLabel = OPTIONS.find((o) => o.code === locale)?.label ?? "EN";
+  const choose = (code: Locale) => {
+    close();
+    if (code !== locale) changeLocale(code);
+  };
+
+  const onMenuKey = (e: React.KeyboardEvent) => {
+    const i = items.current.findIndex((el) => el === document.activeElement);
+    const move = (n: number) => {
+      e.preventDefault();
+      items.current[(n + OPTIONS.length) % OPTIONS.length]?.focus();
+    };
+    if (e.key === "ArrowDown") move(i + 1);
+    else if (e.key === "ArrowUp") move(i - 1);
+    else if (e.key === "Home") move(0);
+    else if (e.key === "End") move(OPTIONS.length - 1);
+    else if (e.key === "Escape" || e.key === "Tab") {
+      e.preventDefault();
+      close();
+    }
+  };
 
   return (
     <div className="lang" ref={ref}>
       <button
         type="button"
         className="lang-btn"
-        onClick={() => setOpen((o: boolean) => !o)}
-        aria-haspopup="listbox"
+        ref={button}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setOpen(true);
+          }
+        }}
+        aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={`${current.name} (${current.label})`}
       >
-        {currentLabel}
+        {current.label}
       </button>
       {open && (
-        <ul className="lang-menu" role="listbox">
-          {OPTIONS.map((o) => (
-            <li key={o.code} role="option" aria-selected={o.code === locale}>
+        <ul className="lang-menu" role="menu" aria-label={current.name} onKeyDown={onMenuKey}>
+          {OPTIONS.map((o, i) => (
+            <li key={o.code} role="none">
               <button
                 type="button"
+                role="menuitemradio"
+                aria-checked={o.code === locale}
+                lang={o.code}
+                tabIndex={-1}
+                ref={(el) => {
+                  items.current[i] = el;
+                }}
                 className={`lang-item${o.code === locale ? " active" : ""}`}
                 onClick={() => choose(o.code)}
               >
-                <strong>{o.label}</strong> <span>{o.name}</span>
+                <strong aria-hidden="true">{o.label}</strong> <span>{o.name}</span>
               </button>
             </li>
           ))}

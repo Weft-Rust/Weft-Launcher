@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mod.schema.json",
+  "title": "<id>.mod.json for an Unreviewed source, schema 1",
+  "description": "One build of one mod, published next to <id>.zip. It must also match GitHub's record of the release; see INDEX_FORMAT.md. reviewed is never read from a source.",
+  "allOf": [
+    { "$ref": "index.schema.json#/$defs/modFields" },
+    { "$ref": "index.schema.json#/$defs/build" },
+    { "type": "object", "required": ["schema"], "properties": { "schema": { "const": 1 } } }
+  ]
+}

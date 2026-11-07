@@ -18,6 +18,9 @@
   --r1: #7c2c22;
   --r2: #c2503c;
   --r3: #ff9a80;
+  --v1: #2e6b3e;
+  --v2: #4fa25e;
+  --v3: #9be3a4;
   --px: 4px;
   --sidebar: 192px;
   color-scheme: dark;
@@ -104,12 +107,13 @@ button:disabled { cursor: not-allowed; }
 }
 .new-dot { display: inline-block; width: 8px; height: 8px; margin-left: 8px; background: var(--a3); box-shadow: 0 2px 0 var(--a1); }
 .tab-btn.active .new-dot { background: var(--ink); box-shadow: none; }
+.tab-list { display: flex; align-items: center; }
 .tabs-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 
 /* Blocks seen from the front: lit top edge, side face below, pressing pushes them in. The side
    belongs to the button, so it can be clicked too, and pressing moves only what's drawn: the box
    stays put, so nothing around it shifts and a press on the top edge doesn't slip off it. */
-:is(.btn-play, .install-btn, .play-btn, .btn-primary, .btn-refresh, .btn-secondary, .delete-btn, .version-select-btn) {
+:is(.btn-play, .install-btn, .play-btn, .btn-primary, .btn-refresh, .btn-secondary, .delete-btn, .version-select-btn, .btn-danger, .toggle) {
   --top: 8px;
   --side: 16px;
   --face: var(--g2);
@@ -125,20 +129,20 @@ button:disabled { cursor: not-allowed; }
     linear-gradient(var(--lit) 0 var(--px), var(--face) 0) 0 0 / 100% calc(100% - 12px) no-repeat,
     linear-gradient(var(--edge) 0 8px, var(--ink) 0) 0 100% / 100% 12px no-repeat;
 }
-:is(.btn-refresh, .btn-secondary, .delete-btn, .version-select-btn):hover:not(:disabled) { --face: var(--g3); --lit: var(--g4); }
+:is(.btn-refresh, .btn-secondary, .delete-btn, .version-select-btn, .toggle):hover:not(:disabled) { --face: var(--g3); --lit: var(--g4); }
 
 :is(.btn-play, .install-btn, .play-btn, .btn-primary) { --face: var(--a2); --lit: var(--a3); --edge: var(--a1); color: var(--ink); }
 :is(.btn-play, .install-btn, .play-btn, .btn-primary):hover:not(:disabled) { --face: var(--a3); --lit: #ffe0a0; }
 
-.delete-btn.confirming, .delete-btn.confirming:hover:not(:disabled) { --face: var(--r2); --lit: var(--r3); --edge: var(--r1); color: var(--ink); }
+:is(.btn-danger, .delete-btn.confirming), :is(.btn-danger, .delete-btn.confirming):hover:not(:disabled) { --face: var(--r2); --lit: var(--r3); --edge: var(--r1); color: var(--ink); }
 
-:is(.btn-play, .install-btn, .play-btn, .btn-primary, .btn-refresh, .btn-secondary, .delete-btn, .version-select-btn):is(:active:not(:disabled), :disabled) {
+:is(.btn-play, .install-btn, .play-btn, .btn-primary, .btn-refresh, .btn-secondary, .delete-btn, .version-select-btn, .btn-danger, .toggle):is(:active:not(:disabled), :disabled) {
   padding: calc(var(--top) + 8px) var(--side) calc(var(--top) + 4px);
   background:
     linear-gradient(var(--lit) 0 var(--px), var(--face) 0) 0 8px / 100% calc(100% - 12px) no-repeat,
     linear-gradient(var(--ink), var(--ink)) 0 100% / 100% 4px no-repeat;
 }
-:is(.btn-play, .install-btn, .play-btn, .btn-primary, .btn-refresh, .btn-secondary, .delete-btn, .version-select-btn):disabled {
+:is(.btn-play, .install-btn, .play-btn, .btn-primary, .btn-refresh, .btn-secondary, .delete-btn, .version-select-btn, .btn-danger, .toggle):disabled {
   --face: var(--g1); --lit: var(--g1);
   color: var(--g4);
 }
@@ -165,7 +169,7 @@ button:disabled { cursor: not-allowed; }
 .lang-menu, .version-select-menu { margin: 0; padding: var(--px); list-style: none; background: var(--ink); }
 .lang-menu { position: absolute; right: 0; top: 40px; min-width: 176px; }
 .lang-item { display: flex; gap: 16px; width: 100%; padding: 2px 8px; text-align: left; }
-.lang-item:hover { background: var(--g2); }
+.lang-item:hover, .lang-item:focus-visible { background: var(--g2); outline: none; }
 .lang-item strong { color: var(--g5); }
 .lang-item.active strong { color: var(--a3); }
 
@@ -185,6 +189,7 @@ button:disabled { cursor: not-allowed; }
 
 /* Pages sit over the voxel field. A long page's scrollbar must not shift it against a short one. */
 .page-container { grid-area: page; min-height: 0; overflow: hidden auto; scrollbar-gutter: stable; }
+.page-container:has(> .mods-page) { overflow: hidden; }
 .page { max-width: 960px; padding: 24px 32px 32px; }
 .page-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 24px; margin-bottom: 24px; }
 .page h1 { font-size: 32px; line-height: 44px; text-shadow: 2px 2px 0 var(--ink); }
@@ -192,7 +197,7 @@ button:disabled { cursor: not-allowed; }
 .cache-banner { line-height: 24px; color: var(--a3); text-shadow: 2px 2px 0 var(--ink); }
 .empty-state { color: var(--g5); text-shadow: 2px 2px 0 var(--ink); }
 
-.error-banner, .launch-error, .install-error {
+.error-banner, .launch-error, .install-error, .inline-error {
   padding: 8px 16px;
   background: var(--ink); color: var(--r3);
   box-shadow: inset var(--px) 0 0 var(--r2);
@@ -201,7 +206,7 @@ button:disabled { cursor: not-allowed; }
 }
 
 /* The banner's corner, a three pixel step, on anything framed. */
-.card, .version-entry, .note-entry {
+.card, .version-entry, .note-entry, .framed {
   background: var(--g1);
   clip-path: polygon(
     calc(var(--px) * 2) 0, calc(100% - var(--px) * 2) 0, calc(100% - var(--px) * 2) var(--px), calc(100% - var(--px)) var(--px),
@@ -215,6 +220,12 @@ button:disabled { cursor: not-allowed; }
 .hero { margin-bottom: 24px; }
 .page .hero-title { font-size: 80px; line-height: 72px; text-shadow: 4px 4px 0 var(--ink); }
 .hero-version-badge { margin-top: 8px; font-size: 16px; line-height: 24px; color: var(--a2); text-shadow: 2px 2px 0 var(--ink); }
+.hero-version-badge.bad { color: var(--r3); }
+.hero.compact { margin-bottom: 16px; }
+.hero.compact .hero-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 24px; }
+.page .hero.compact .hero-title { font-size: 48px; line-height: 48px; text-shadow: 2px 2px 0 var(--ink); }
+.hero.compact .hero-version-badge { margin-top: 0; }
+.hero.compact .hero-play-area { margin-top: 16px; }
 .hero-play-area { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; margin-top: 24px; }
 .btn-play { --top: 12px; --side: 32px; font-size: 32px; line-height: 32px; }
 .launch-error { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; max-width: 640px; }
@@ -234,6 +245,12 @@ button:disabled { cursor: not-allowed; }
 .detail-row { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 24px; align-items: baseline; }
 .detail-row + .detail-row { margin-top: 4px; }
 .detail-label { color: var(--g5); }
+/* Home's instance card: the folder's button on the title's line, the details on one line that wraps. */
+.instance-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.instance-head .card-title { margin-bottom: 0; }
+.instance-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 32px; margin: 0; }
+.instance-pair { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.instance-pair dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .btn-open-folder { justify-self: start; margin-top: 4px; }
 .select-version-hint { color: var(--g5); }
 
@@ -249,8 +266,10 @@ button:disabled { cursor: not-allowed; }
 .prerelease-badge { background: var(--g3); color: var(--pale); }
 .version-meta { display: flex; flex-wrap: wrap; gap: 0 24px; margin-top: 4px; line-height: 24px; color: var(--g5); }
 .version-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 16px; }
-.version-actions:has(.install-error) { flex-basis: 100%; }
-.install-error { flex-basis: 100%; }
+.version-actions:has(.install-error, .launch-error, .version-blockers, .version-crash) { flex-basis: 100%; }
+.install-error, .version-actions .launch-error, .version-blockers, .version-crash { flex-basis: 100%; }
+.version-blockers, .version-crash { text-align: left; }
+.version-crash .mod-failure, .version-blockers .blockers.play-blocked { max-width: none; margin: 0; }
 
 .progress-container { width: 320px; }
 .progress-bar { height: 16px; padding: var(--px); background: var(--ink); }
@@ -269,3 +288,392 @@ button:disabled { cursor: not-allowed; }
 .note-gap { height: 12px; }
 .note-item { position: relative; padding-left: 24px; margin-top: 4px; }
 .note-item::before { content: ""; position: absolute; left: 0; top: 8px; width: 8px; height: 8px; background: var(--a2); box-shadow: 0 2px 0 var(--a1); }
+
+/* Mods */
+.btn-small { --top: 2px; --side: 12px; }
+.toggle.on { --face: var(--a2); --lit: var(--a3); --edge: var(--a1); color: var(--ink); }
+.toggle.on:hover:not(:disabled) { --face: var(--a3); --lit: #ffe0a0; }
+.toggle { --top: 2px; --side: 12px; display: inline-flex; align-items: center; gap: 8px; }
+.toggle-knob { width: 12px; height: 12px; box-shadow: inset 0 0 0 var(--px) currentColor; }
+.toggle.on .toggle-knob { background: currentColor; }
+.link-btn { color: var(--g5); line-height: 24px; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; white-space: nowrap; }
+.link-btn:hover { color: var(--a3); }
+
+.header-for { color: var(--g5); text-shadow: 2px 2px 0 var(--ink); }
+/* A refresh whose index is in while a source is still asked: the button pulses, its title names the source. */
+.mods-refresh.pending { animation: pending-pulse 1s steps(2) infinite; }
+@keyframes pending-pulse { 50% { opacity: .5; } }
+@media (prefers-reduced-motion: reduce) { .mods-refresh.pending { animation: none; box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--a2); } }
+.version-select.compact .version-select-btn { --top: 8px; min-width: 160px; }
+.version-select.compact .version-select-menu { top: 56px; }
+
+.switch { display: flex; }
+.mods-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 8px; }
+.toolbar-actions .btn-flat { min-width: 0; }
+.toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* The Mods page fills the window: its header, version picker, switch, toolbar and notes stay put,
+   and only the list under them scrolls. */
+.page.mods-page { display: flex; flex-direction: column; height: 100%; padding-top: 8px; padding-bottom: 0; }
+.mods-page > * { flex: none; }
+.mods-page .page-header { margin-bottom: 4px; }
+.mods-page .page-header h1 { line-height: 40px; }
+/* The page's own controls are flat, like the switch beside them and the bar above: two short
+   lines of chrome, so the list keeps the height. Raised blocks are for what acts on a mod. */
+.mods-page .page-header h1 { font-size: 24px; line-height: 32px; }
+.mods-page .header-actions { gap: 8px 12px; }
+.mods-page .version-select.compact .version-select-btn,
+.mods-page .version-select.compact .version-select-btn:is(:active:not(:disabled), :disabled) {
+  height: 32px; padding: 4px 12px; gap: 12px; min-width: 144px;
+  background: var(--g2); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g1);
+}
+.mods-page .version-select.compact .version-select-btn:hover:not(:disabled) { background: var(--g3); }
+.mods-page .version-select.compact .version-select-menu { top: 36px; }
+.mods-page .icon-btn { width: 40px; padding: 0; display: grid; place-items: center; }
+.mods-panel { flex: 1 1 auto; min-height: 0; scroll-padding-bottom: calc(16px + var(--toast-room, 0px)); overflow-y: auto; overscroll-behavior: contain; padding-bottom: 16px; scrollbar-gutter: stable; margin-right: -8px; padding-right: 8px; }
+.mods-panel:focus { outline: none; }
+/* Behind the rows and cards, a near-opaque backing: the field's bright seams don't show between them and compete with the text. */
+.mods-panel { background: #14161ef2; }
+/* Browse's filters stay on top as the cards scroll: a card brought into view by focus stops
+   below them, not half under them. (Banners and toasts are outside the scroller.) */
+.mods-panel:has(.filters) { scroll-padding-top: 64px; }
+/* Browse's search and filters stay above its cards. */
+.mods-panel .filters { position: sticky; top: 0; z-index: 2; padding-bottom: 8px; margin-bottom: 0; background: linear-gradient(var(--seam) 0 calc(100% - 8px), transparent 0); }
+.switch button { height: 32px; padding: 2px 12px; background: var(--g2); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g1); }
+.switch button:hover:not(.on) { background: var(--g3); }
+/* The selected view is the dark tab with the amber underline. Amber on a pale tab can't be both
+   amber and readable; on the dark one the count stays bright amber (10.5:1). */
+.switch button.on { background: var(--deep); color: var(--pale); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--a2); }
+/* The count is only coloured text, selected or not: the same box both ways, so neither tab moves
+   when the selection changes. */
+.switch .count { margin-left: 8px; color: var(--a2); font-variant-numeric: tabular-nums; }
+.switch button.on .count { color: var(--a3); }
+
+.banners { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-bottom: 8px; }
+.banners:empty { display: none; }
+.banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 4px 8px 4px 16px; min-height: 40px; background: var(--ink); line-height: 24px; }
+.banner > span { padding: 0; }
+.banner-text { min-width: 0; }
+/* The folded row: the cause in a few words, whole (it wraps rather than being cut), then what it
+   is about (a repo, names), which may be cut with the full text a hover or Tab away. */
+.banner-summary { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; flex: 1 1 auto; }
+.banner-cause { min-width: 0; overflow-wrap: anywhere; }
+.banner-subject { flex: 1 1 0; min-width: 8ch; }
+/* Right under a banner shown in full: one block of notes, not two with a gap between. */
+.banner-fold.docked { margin-top: -6px; }
+.banner-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex: none; }
+.banner.compact { min-height: 32px; padding-top: 0; padding-bottom: 0; }
+.banner.compact .banner-toggle { flex: none; }
+/* Open, the notes scroll in a box of their own, so the list below stays on screen. */
+.banner-fold.open { display: grid; gap: 4px; }
+.banner-group { display: grid; gap: 8px; max-height: 168px; overflow-y: auto; overscroll-behavior: contain; }
+.banner-group[hidden] { display: none; }
+.banner-fold.open .banner-toggle { justify-self: start; }
+.banner-detail { color: var(--g5); }
+/* One blocking mod at a time, whole: its name, why, and every fix, never cut by a scroller. A
+   pager goes to the others. However many mods block, the banner is the same few lines tall. */
+.blockers.in-banner { width: 100%; gap: 4px; }
+.blocker-pager { display: inline-flex; align-items: center; gap: 4px; flex: none; margin-left: auto; color: var(--pale); }
+.pager-btn { width: 28px; height: 28px; line-height: 24px; background: var(--g2); color: var(--pale); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g1); }
+.pager-btn:hover { background: var(--g3); }
+.pager-at { min-width: 56px; text-align: center; white-space: nowrap; }
+.banner .blocker { display: grid; gap: 4px; }
+/* The sentence (with "Turn off all" at its right when that fixes every one); the fixes and the
+   pager to the other mods on the line below. */
+.blocker-head { display: flex; align-items: flex-start; gap: 4px 12px; }
+.blocker-head > .blocker-text { flex: 1 1 auto; min-width: 0; }
+.blocker-line { display: block; }
+.blocker-line strong { color: var(--a3); }
+.banner .blocker-text { color: var(--g5); }
+.blocker-lead { color: var(--r3); }
+.blocker-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.banner .blocker-actions { gap: 8px; }
+
+/* The banners' buttons: flat, like the switch and the bar's, so a banner is a line or two, not
+   the height of a raised block. */
+.btn-flat { height: 32px; padding: 2px 12px; line-height: 24px; white-space: nowrap; flex: none; background: var(--g2); color: var(--pale); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g1); }
+.btn-flat:hover:not(:disabled) { background: var(--g3); }
+.btn-flat.primary { background: var(--a2); color: var(--ink); box-shadow: inset 0 var(--px) 0 var(--a3), inset 0 calc(-1 * var(--px)) 0 var(--a1); }
+.btn-flat.primary:hover:not(:disabled) { background: var(--a3); }
+.btn-flat:disabled { background: var(--g1); color: var(--g4); box-shadow: none; }
+
+/* Results over the bottom of the list. The list's own padding makes room for them under its last row. */
+.mods-list-area { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.mods-list-area > .mods-panel { padding-bottom: calc(16px + var(--toast-room, 0px)); }
+.toasts { position: absolute; left: 0; right: 8px; bottom: 8px; z-index: 3; display: grid; gap: 8px; }
+.toasts[hidden] { display: none; }
+.banner.toast { box-shadow: inset var(--px) 0 0 currentColor, 0 0 0 var(--px) var(--seam); }
+.banner.toast.ok { box-shadow: inset var(--px) 0 0 var(--v2), 0 0 0 var(--px) var(--seam); }
+.banner.toast.warn { box-shadow: inset var(--px) 0 0 var(--a2), 0 0 0 var(--px) var(--seam); }
+.banner.toast.bad { box-shadow: inset var(--px) 0 0 var(--r2), 0 0 0 var(--px) var(--seam); }
+.banner.toast.info { box-shadow: inset var(--px) 0 0 var(--g4), 0 0 0 var(--px) var(--seam); }
+.banner-line { display: block; }
+.banner .btn-secondary { flex: none; }
+.banner.info { color: var(--pale); box-shadow: inset var(--px) 0 0 var(--g4); }
+.banner.ok { color: var(--v3); box-shadow: inset var(--px) 0 0 var(--v2); }
+.banner.warn { color: var(--a3); box-shadow: inset var(--px) 0 0 var(--a2); }
+.banner.bad { color: var(--r3); box-shadow: inset var(--px) 0 0 var(--r2); }
+
+.text-input { height: 40px; padding: 6px 12px; background: var(--ink); color: var(--pale); border: 0; border-radius: 0; font: inherit; box-shadow: inset 0 var(--px) 0 #07080c; -webkit-user-select: text; user-select: text; min-width: 0; }
+.text-input::placeholder { color: var(--g5); }
+.text-input:focus-visible { outline: var(--px) solid var(--a2); outline-offset: 0; }
+.text-input::-webkit-search-cancel-button { display: none; }
+
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; margin-bottom: 8px; }
+.filters .text-input { height: 36px; }
+.filters .search { flex: 1 1 160px; }
+.checkbox { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; white-space: nowrap; text-shadow: 2px 2px 0 var(--ink); }
+.checkbox input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.checkbox .box { width: 16px; height: 16px; flex: none; background: var(--ink); box-shadow: inset 0 0 0 var(--px) var(--g3); }
+.checkbox input:checked + .box { background: var(--a2); box-shadow: inset 0 0 0 var(--px) var(--a1); }
+.checkbox input:focus-visible + .box { outline: var(--px) solid var(--pale); outline-offset: 2px; }
+
+.mod-list, .mod-grid, .checks, .source-list { margin: 0; padding: 0; list-style: none; }
+.mod-list { display: grid; gap: 8px; }
+/* A row: the icon; the name with its tier; under them the version and what the launcher knows;
+   the buttons at the right. A row with a reason gives that reason the width under the buttons
+   too, so it is read whole in a line or two rather than squeezed into the name's column. */
+.mod-row {
+  display: grid; grid-template-columns: 48px minmax(0, 1fr) auto;
+  grid-template-areas: "icon title actions" "icon meta actions";
+  align-items: center; gap: 0 8px; padding: 4px 4px 4px 8px;
+}
+.mod-row.wide { grid-template-areas: "icon title actions" "icon meta meta"; }
+/* A very long name has the row's width; the switch and Remove go to the line under it. */
+.mod-row.long-name { grid-template-areas: "icon title title" "icon meta actions"; }
+.mod-row.long-name.wide { grid-template-areas: "icon title title" "icon meta meta" "icon . actions"; }
+/* Asked before a switch is turned on that would stop Play: the reason and the choice, under the row. */
+.mod-ask { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; margin-top: 4px; padding: 4px 8px; background: var(--ink); box-shadow: inset var(--px) 0 0 var(--r2); line-height: 24px; }
+.mod-ask-text { flex: 1 1 320px; min-width: 0; overflow-wrap: anywhere; color: var(--g5); }
+.mod-ask-lead { display: block; color: var(--r3); }
+.mod-ask-line { display: block; }
+.mod-ask-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.mod-row > .mod-icon { grid-area: icon; align-self: start; }
+.mod-row.is-off { background: #20252f; }
+/* Off: the switch and its word say so. The name turns a solid grey that still reads (5.6:1), never faded by opacity. */
+.mod-row.is-off .mod-name { color: var(--g5); }
+.mod-row.is-off .mod-icon { opacity: .55; }
+.mod-row.has-problem { box-shadow: inset var(--px) 0 0 var(--r2); }
+.mod-icon { width: 48px; height: 48px; display: grid; place-items: center; background: var(--ink); flex: none; }
+.mod-icon img { image-rendering: pixelated; }
+/* The name whole, and its tier beside it: both are what the player decides by, so neither is
+   cut. When they don't fit side by side the tier goes under the name, a line of its own. */
+.mod-title { grid-area: title; display: flex; flex-wrap: wrap; align-items: center; gap: 0 12px; min-width: 0; align-self: end; }
+.mod-name { font-size: 24px; line-height: 32px; color: var(--a3); }
+.mod-row .mod-name { min-width: 0; overflow-wrap: anywhere; }
+.mod-title .mod-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; min-width: 0; }
+.mod-title .mod-badges > .badge { flex: none; }
+.mod-version { color: var(--g5); }
+.mod-meta { grid-area: meta; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; color: var(--g5); line-height: 24px; align-self: start; }
+.mod-meta > .mod-version { flex: none; }
+.mod-meta > .mod-version:not(:last-child)::after { content: "·"; margin-left: 8px; }
+.mod-meta > .mod-meta-text { flex: 1 1 0; min-width: 8ch; }
+/* A reason reads as a sentence after the version: it wraps under it, across the row. */
+.mod-row.wide .mod-meta { display: block; overflow-wrap: anywhere; }
+.mod-row.wide .mod-meta > * { margin-right: 8px; }
+.mod-row.wide .mod-meta > .mod-version:not(:last-child)::after { margin-left: 8px; }
+.mod-row.wide .mod-meta > .chip { display: inline-flex; vertical-align: bottom; }
+.mod-meta.bad > .mod-reason { color: var(--r3); }
+.mod-update-why { flex-basis: 100%; color: var(--a3); line-height: 24px; }
+.update-btn-row { display: inline-flex; align-items: center; gap: 8px; }
+.update-btn-row .pixel-icon { margin-top: 0; }
+/* A flat button the height of a line of text, for an action inside a line (an update by its version). */
+.btn-flat.chip { height: 24px; padding: 0 8px; box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--a1); align-self: center; }
+.btn-flat.chip:disabled { box-shadow: none; }
+.mod-actions { grid-area: actions; display: flex; align-items: center; gap: 8px; }
+/* Narrow blocks, so the name and its tier keep the room. */
+.mod-actions :is(.btn-small, .toggle) { --side: 8px; }
+.mod-actions .toggle { gap: 4px; }
+.mod-actions .progress-container { width: 200px; }
+.mod-card-foot .progress-container { width: 160px; }
+.progress-container.compact .progress-label { margin-top: 0; }
+
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; line-height: 24px; white-space: nowrap; cursor: default; }
+.trust-reviewed { background: var(--v2); color: var(--ink); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--v1); }
+.trust-unreviewed { background: var(--g3); color: var(--pale); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g2); }
+.trust-unverified { background: var(--r3); color: var(--ink); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--r2); }
+/* Small text at 4.5:1 or more: #b9c1d3 on --g2 is 6.6:1, ink on #e0705a 5.2:1. */
+.badge.channel { background: var(--g2); color: #b9c1d3; }
+/* The index's own state, never a mod's tier: signed and checked (7.6:1), old or a saved copy
+   (amber, ink on --a2 8:1), or never verified (5.7:1). */
+.badge.index-badge.ok { background: var(--g2); color: var(--v3); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g1); }
+.badge.index-badge.stale { background: var(--a2); color: var(--ink); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--a1); }
+.badge.index-badge.none { background: var(--g2); color: var(--r3); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--g1); }
+.source-meta.warn { color: var(--a3); }
+.badge.revoked { background: #e0705a; color: var(--ink); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--r1); }
+
+.mod-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+/* The name has the card's whole width: the tier and where it is from sit on the line under it,
+   and the button beside the summary. */
+.mod-card { display: grid; align-content: start; grid-template-columns: 48px minmax(0, 1fr) auto; grid-template-areas: "icon title title" "icon badges badges" "summary summary summary" "by by foot"; gap: 0 12px; padding: 8px 12px; }
+.mod-card-head { display: contents; }
+.mod-card-head .mod-icon { grid-area: icon; align-self: start; }
+.mod-card-title { grid-area: title; min-width: 0; }
+.mod-card-title .mod-name { display: block; }
+.mod-name-btn { display: block; max-width: 100%; text-align: left; }
+.mod-name-btn:hover .mod-name { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
+.mod-card-version { flex: none; color: var(--g5); line-height: 24px; }
+.mod-badges { grid-area: badges; display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; min-width: 0; }
+.mod-card-by { grid-area: by; align-self: center; min-width: 0; color: var(--g5); line-height: 24px; overflow-wrap: anywhere; margin-top: 4px; }
+.mod-badges > .badge { flex: none; }
+.mod-summary { grid-area: summary; color: #b9c1d3; line-height: 24px; height: 24px; margin-top: 4px; align-self: start; }
+.mod-card-foot { grid-area: foot; display: flex; flex-direction: column; align-items: flex-end; justify-content: flex-end; gap: 0; margin-top: 4px; }
+.mod-card-foot .needs-net { color: var(--a3); font-size: 16px; line-height: 24px; white-space: nowrap; }
+/* Offline, the note goes beside the button on a line of its own, under who it is from. */
+.mod-card.needs-net-card { grid-template-areas: "icon title title" "icon badges badges" "by by by" "foot foot foot"; }
+.needs-net-card .mod-card-foot { flex-direction: row; align-items: center; justify-content: flex-end; gap: 12px; }
+.needs-net-card .needs-net { order: -1; }
+.installed-mark { color: var(--v3); line-height: 24px; white-space: nowrap; }
+
+.empty-state p + p { margin-top: 8px; }
+.framed-empty { padding: 24px; background: #1a1e28cc; max-width: 640px; }
+.empty-state .hint { color: var(--g5); }
+.empty-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+.framed-empty > .btn-primary { margin-top: 16px; }
+
+/* Dialog */
+.scrim { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px; background: #07080ccc; }
+.dialog { display: flex; flex-direction: column; width: min(720px, 100%); max-height: 100%; overflow: hidden; box-shadow: 0 0 0 var(--px) var(--ink); }
+.dialog-head { flex: none; padding: 16px 24px 0; }
+.dialog-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 24px 4px; overscroll-behavior: contain; }
+.dialog-body > :first-child { margin-top: 12px; }
+.dialog-title { font-size: 24px; line-height: 32px; color: var(--a3); overflow-wrap: anywhere; }
+.dialog-title:focus { outline: none; }
+.dialog-sub { margin-top: 4px; color: var(--g5); line-height: 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.dialog-sub code, .check code { color: var(--a3); }
+.dialog-summary { margin-top: 12px; color: #b9c1d3; line-height: 24px; }
+.dialog-field { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; }
+.dialog-field .dialog-note { margin: 0; }
+.dialog-field .text-input { flex: 1; }
+.dialog-field-label { color: var(--g5); white-space: nowrap; }
+.dialog-field-value { color: var(--a3); }
+.checks { display: grid; gap: 6px; margin-top: 16px; }
+.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; align-items: start; line-height: 24px; }
+.check[hidden] { display: none; }
+.check-fold { color: var(--g5); }
+.check-fold:not(.check-yes) .check-mark { background: none; }
+.check-mark { width: 24px; height: 24px; display: grid; place-items: center; }
+.check-yes .check-mark { background: var(--v2); color: var(--ink); }
+.check-no .check-mark { background: var(--r2); color: var(--ink); }
+.check-unknown .check-mark { background: var(--g3); color: var(--pale); }
+.check small { display: block; font-size: 16px; color: var(--g5); overflow-wrap: anywhere; }
+.dialog-warning { margin-top: 16px; padding: 10px 16px; background: var(--ink); line-height: 24px; }
+.dialog-warning.amber { color: var(--a3); box-shadow: inset var(--px) 0 0 var(--a2); }
+.dialog-warning.red { color: var(--r3); box-shadow: inset var(--px) 0 0 var(--r2); }
+.dialog-note { margin-top: 12px; color: var(--g5); line-height: 24px; }
+.dialog .inline-error { margin-top: 12px; }
+.dialog-actions { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 24px 16px; background: var(--g1); box-shadow: 0 calc(-1 * var(--px)) 0 var(--seam); }
+.dialog-actions .progress-container { width: 280px; }
+.dialog-sub .truncate { max-width: 320px; }
+.dialog-note.trust-change { color: var(--a3); }
+.dialog-actions .spacer { flex: 1; }
+/* In the footer, beside the button it unlocks: never below the fold. */
+.typed-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; flex: 1 1 100%; line-height: 24px; color: var(--pale); }
+.typed-confirm strong { color: var(--a3); }
+.typed-summary { flex: 1 1 100%; color: var(--a3); line-height: 24px; }
+.typed-confirm .text-input { flex: 1 1 160px; height: 36px; }
+.source-list { display: grid; gap: 4px; margin-top: 16px; }
+.source-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "name retry action" "meta meta meta"; gap: 0 12px; align-items: center; padding: 8px 12px; background: var(--ink); }
+.source-row-retry { grid-area: retry; }
+.source-actions { grid-area: action; display: flex; align-items: center; gap: 12px; }
+.source-detail { color: var(--g5); overflow-wrap: anywhere; }
+.source-refresh { display: block; }
+/* The name, then what kind of source it is; the badge goes under the name when both don't fit. */
+.source-title { grid-area: name; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
+.source-name { overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
+/* Under the name and the buttons, across the row: a cause in Russian has room to say itself. */
+.source-meta { grid-area: meta; color: var(--g5); line-height: 24px; margin-top: 4px; }
+.source-meta.bad { color: var(--r3); }
+.source-row > button { grid-area: action; }
+.source-name.truncate { display: block; }
+.source-row.confirming { grid-template-areas: "name name name" "meta meta meta" "confirm confirm confirm"; }
+.source-confirm { grid-area: confirm; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-top: 8px; color: var(--a3); line-height: 24px; }
+.source-confirm-actions { display: flex; gap: 8px; }
+.source-error { grid-column: 1 / -1; margin-top: 8px; }
+.inline-error.with-action { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.copy-list { margin-top: 12px; }
+.browse-note { margin: 12px 0 0; color: var(--g5); }
+.copy-item { display: grid; gap: 2px; min-width: 0; }
+.copy-item-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
+.copy-item .progress-container { width: 240px; }
+.copy-name { max-width: 100%; }
+.copy-name.whole { overflow-wrap: anywhere; }
+
+/* Home: what will load */
+.mods-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-top: 16px; color: var(--g5); text-shadow: 2px 2px 0 var(--ink); line-height: 24px; max-width: 640px; }
+.mod-failure { display: grid; gap: 4px; justify-content: stretch; }
+.mod-failure-title { color: var(--r3); }
+.mod-failure-line { color: var(--g5); font-size: 16px; overflow-wrap: anywhere; }
+.mod-failure-why { color: var(--pale); }
+.mod-failure-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+/* Looking at the log and putting the notice away: links after the fixes, apart from them. */
+.mod-failure-quiet { display: flex; align-items: center; gap: 8px; margin-left: auto; color: var(--g5); }
+.mods-page .mod-failure { max-width: none; margin: 0 0 8px; }
+/* The log's own line, opened: at most four lines, scrolling inside, so the notice stays bounded. */
+.mod-failure .error-details[open] code { max-height: 96px; overflow-y: auto; overscroll-behavior: contain; }
+.mods-line .truncate { min-width: 0; max-width: 520px; }
+.blockers { display: grid; gap: 8px; justify-content: stretch; }
+/* Home: why Play is off, as big as the title over it, and the fixes right under Play. */
+.blockers.play-blocked { display: grid; align-items: stretch; margin-top: 16px; max-width: 720px; padding: 8px 16px 12px; background: var(--ink); box-shadow: inset var(--px) 0 0 var(--r2); line-height: 24px; }
+.play-off { font-size: 24px; line-height: 32px; color: var(--r3); }
+.play-blocked .blockers-title { color: var(--g5); }
+.blockers-title { color: var(--r3); }
+.blocker-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.blocker { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; }
+.blocker-text { min-width: 0; flex: 1 1 320px; color: var(--g5); }
+.blocker-text strong { color: var(--a3); }
+.blocker-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.blockers-error { color: var(--r3); }
+
+/* Versions: mod counts and why Play is off. */
+.version-mods { color: var(--g5); }
+.version-note { flex-basis: 100%; text-align: right; line-height: 24px; }
+.version-note.bad { color: var(--r3); }
+
+/* Text cut deliberately: an ellipsis, and the full value on hover or focus. */
+.truncate { min-width: 0; overflow: hidden; }
+.truncate.lines-1 { display: inline-block; max-width: 100%; vertical-align: bottom; white-space: nowrap; text-overflow: ellipsis; }
+.truncate.lines-2 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+.truncate.lines-3 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow-wrap: anywhere; }
+.truncate[tabindex]:focus-visible { outline: var(--px) solid var(--pale); outline-offset: 0; }
+/* A row with focus in it shows its cut details whole: the keyboard reads them there, with no tab
+   stop per line. (A card's summary is whole in its details, one press on its name.) */
+.mod-row:focus-within .truncate.is-cut { display: block; white-space: normal; overflow: visible; overflow-wrap: anywhere; -webkit-line-clamp: unset; }
+.code-short { cursor: help; }
+.code-full { overflow-wrap: anywhere; }
+.tip {
+  position: fixed; z-index: 40; max-width: 320px; padding: 4px 8px;
+  background: var(--ink); color: var(--pale); box-shadow: 0 0 0 var(--px) var(--g3);
+  line-height: 24px; overflow-wrap: anywhere; pointer-events: none;
+  transform: translateY(-100%);
+}
+.tip.below { transform: none; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* Errors: the sentence, and the backend's own words behind Details. */
+.error-text { display: block; }
+.error-text.with-action { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.error-details { display: inline; margin-left: 8px; }
+.error-details summary { display: inline; cursor: pointer; color: var(--g5); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
+.error-details summary::-webkit-details-marker { display: none; }
+.error-details[open] code { display: block; margin-top: 4px; color: var(--pale); overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+
+/* Progress: which file of how many, and Cancel beside the bar. */
+.progress-row { display: flex; align-items: center; gap: 12px; }
+.progress-row .progress-bar { flex: 1 1 auto; }
+.progress-label { overflow: hidden; text-overflow: ellipsis; }
+.dialog-actions .progress-container { width: auto; flex: 1 1 360px; min-width: 0; }
+.progress-container.compact .progress-row { gap: 8px; }
+
+/* A plan that changed since the player looked. */
+.plan-changes { margin-top: 12px; padding: 8px 16px; background: var(--ink); color: var(--a3); box-shadow: inset var(--px) 0 0 var(--a2); line-height: 24px; }
+.plan-changes ul { margin: 4px 0 0; padding-left: 24px; }
+.dialog-note.calm-note { color: var(--pale); }
+.check-retry { margin-left: 4px; }
+.check-same .check-mark { background: var(--g2); color: var(--pale); }
+.version-note { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px 12px; }
+.filters { padding-right: 4px; }
+.mod-meta .mod-version { color: var(--g5); }

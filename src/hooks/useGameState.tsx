@@ -1,25 +1,22 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { translateError } from "../i18n/errors";
-
-interface GameStateEvent {
-  tag: string;
-  state: "running" | "stopped";
-  exitCode: number | null;
-  crashed: boolean;
-}
+import { launcherApi, listenTo } from "../mods/api";
+import { EVENTS } from "../mods/ipc";
+import type { ModFailure } from "../mods/types";
+import { failed, type ActionResult } from "./result";
 
 export interface GameCrash {
   tag: string;
   exitCode: number | null;
+  /** The mod the log blames, when the game stopped while loading mods. */
+  modFailure: ModFailure | null;
 }
 
 interface GameStateContextValue {
   runningTags: Set<string>;
   anyRunning: boolean;
   isRunning: (tag: string) => boolean;
-  launch: (tag: string) => Promise<string | null>;
+  launch: (tag: string) => Promise<ActionResult>;
+  /** The last crash, until its problem is fixed, the player dismisses it or the game starts again. */
   lastCrash: GameCrash | null;
   clearCrash: () => void;
 }
@@ -38,7 +35,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
   // Fetch initially running versions on mount
   useEffect(() => {
     let mounted = true;
-    invoke<string[]>("get_running_versions")
+    launcherApi.runningVersions()
       .then((tags) => {
         if (mounted) setRunningTags(new Set(tags));
       })
@@ -54,8 +51,8 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
 
-    listen<GameStateEvent>("game-state", (event) => {
-      const { tag, state, exitCode, crashed } = event.payload;
+    listenTo(EVENTS.gameState, (event) => {
+      const { tag, state, exitCode, crashed, modFailure } = event.payload;
       setRunningTags((prev) => {
         const next = new Set(prev);
         if (state === "running") {
@@ -66,7 +63,7 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
         return next;
       });
       if (state === "stopped" && crashed) {
-        setLastCrash({ tag, exitCode });
+        setLastCrash({ tag, exitCode, modFailure: modFailure ?? null });
       }
     }).then((fn) => {
       if (cancelled) fn();
@@ -79,18 +76,19 @@ export function GameStateProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const launch = useCallback(async (tag: string): Promise<string | null> => {
-    setLastCrash(null);
+  const launch = useCallback(async (tag: string): Promise<ActionResult> => {
     try {
-      await invoke("launch_version", { tag });
+      await launcherApi.launch(tag);
+      // Only now: a launch the mods refused leaves the last crash's advice in place.
+      setLastCrash(null);
       try {
         localStorage.setItem("lastPlayed", tag);
       } catch {
         // ignore localStorage errors
       }
-      return null; // success
+      return { status: "done", result: undefined };
     } catch (err) {
-      return translateError(err);
+      return failed(err);
     }
   }, []);
 

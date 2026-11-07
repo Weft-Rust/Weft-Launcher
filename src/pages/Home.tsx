@@ -1,66 +1,79 @@
-import { useState, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useId, useMemo, useState } from "react";
 import { useI18n } from "../i18n/useI18n";
-import { translateError } from "../i18n/errors";
+import { showError } from "../i18n/errors";
+import { ErrorText } from "../components/ErrorText";
 import { useInstall } from "../hooks/useInstall";
 import { useGameState } from "../hooks/useGameState";
+import { useMods } from "../hooks/useMods";
+import { useLaunch } from "../hooks/useLaunch";
+import { LaunchRefusal } from "../components/LaunchRefusal";
+import { launcherApi } from "../mods/api";
+import { enabledNames, heroState } from "../mods/status";
 import { StableLabel } from "../components/StableLabel";
 import { VersionSelect } from "../components/VersionSelect";
+import { Truncate } from "../components/Truncate";
+import { BlockerPanel, useReviewDialog } from "../components/mods/ModFixes";
+import { ModFailureNotice } from "../components/mods/ModFailureNotice";
 import { compareTags } from "../utils/version";
+import type { MessageKey } from "../i18n";
+import type { HeroState } from "../mods/status";
 
 interface HomeProps {
   onGoToVersions: () => void;
+  onGoToMods: () => void;
   latestTag: string | null;
   selectedTag: string | null;
   onSelectTag: (tag: string | null) => void;
 }
 
-export function Home({ onGoToVersions, latestTag, selectedTag, onSelectTag }: HomeProps) {
-  const { t, locale } = useI18n();
+const BADGE: Record<HeroState, MessageKey> = {
+  ready: "heroBadge",
+  playing: "heroBadgePlaying",
+  blocked: "heroBadgeBlocked",
+  checking: "heroBadgeChecking",
+  unchecked: "heroBadgeUnchecked",
+};
+
+export function Home({ onGoToVersions, onGoToMods, latestTag, selectedTag, onSelectTag }: HomeProps) {
+  const { t, tn, locale, formatList } = useI18n();
   const { installedVersions, loaded } = useInstall();
-  const { anyRunning, isRunning, launch, lastCrash, clearCrash } = useGameState();
+  const { anyRunning, isRunning, lastCrash } = useGameState();
+  const { profile, profileError, isCopying, loadProfile } = useMods();
+  const launch = useLaunch();
+  const [rereading, setRereading] = useState(false);
+  const blockersId = useId();
+  const folderLabelId = useId();
+  const folderButtonId = useId();
 
-  const [launchError, setLaunchError] = useState<string | null>(null);
-
-  const sortedVersions = useMemo(
-  () => [...installedVersions].sort((a, b) => compareTags(b.tag, a.tag)),
-  [installedVersions]
-  );
+  const sortedVersions = useMemo(() => [...installedVersions].sort((a, b) => compareTags(b.tag, a.tag)), [installedVersions]);
 
   // The selection may be a version that has been deleted since.
   const selectedVersion = useMemo(
-  () => sortedVersions.find((v) => v.tag === selectedTag) ?? sortedVersions[0] ?? null,
-  [sortedVersions, selectedTag]
-);
+    () => sortedVersions.find((v) => v.tag === selectedTag) ?? sortedVersions[0] ?? null,
+    [sortedVersions, selectedTag]
+  );
 
   const effectiveTag = selectedVersion?.tag ?? null;
-
-  const handleLaunch = async (tag: string) => {
-    setLaunchError(null);
-    setLaunchError(await launch(tag));
-  };
-
-  const handleOpenLog = async (tag: string) => {
-    clearCrash();
-    try {
-      await invoke("open_log", { tag });
-    } catch (err) {
-      setLaunchError(translateError(err));
-    }
-  };
+  const report = profile(effectiveTag);
+  const review = useReviewDialog(effectiveTag);
+  const isSelectedRunning = effectiveTag ? isRunning(effectiveTag) : false;
+  const readError = effectiveTag ? profileError(effectiveTag) : null;
+  const state = heroState(report, isSelectedRunning, !!readError);
+  const blocked = state === "blocked";
+  const crash = lastCrash && lastCrash.tag === effectiveTag ? lastCrash : null;
+  const busyWithMods = effectiveTag ? isCopying(effectiveTag) : false;
+  const launching = !!launch.launching;
+  const playDisabled = !effectiveTag || anyRunning || isSelectedRunning || blocked || launching || busyWithMods;
 
   const handleOpenFolder = async () => {
     if (!effectiveTag) return;
-    setLaunchError(null);
+    launch.clear();
     try {
-      await invoke("open_game_folder", { tag: effectiveTag });
+      await launcherApi.openGameFolder(effectiveTag);
     } catch (err) {
-      setLaunchError(translateError(err));
+      launch.fail(effectiveTag, { code: "Unknown", detail: null }, showError(err));
     }
   };
-
-  const isSelectedRunning = effectiveTag ? isRunning(effectiveTag) : false;
-  const playDisabled = anyRunning || isSelectedRunning;
 
   if (!loaded) {
     return <main className="page home-page" />;
@@ -80,13 +93,28 @@ export function Home({ onGoToVersions, latestTag, selectedTag, onSelectTag }: Ho
     );
   }
 
+  // A refused launch says why, unless the blocker panel below already says it with its fixes.
+  const { shownError, unread: unreadRefusal } = launch.refusalFor(effectiveTag);
+  // The set couldn't be read at all (no refusal involved): say so, with Retry, also here.
+  const shownReadError = !report && readError && !unreadRefusal ? readError : null;
+  // With something to read under Play, the title steps back so the actions stay in view.
+  const compact = blocked || !!crash || !!shownError || !!unreadRefusal || !!shownReadError;
+  const names = enabledNames(report);
+  // What loads, said whole: the launcher's mods, and the files in the player's own folder, which
+  // load in every version.
+  const modsLine = (own: number) => {
+    if (!effectiveTag) return "";
+    if (!own) return names.length ? t("mods.homeMods", effectiveTag, formatList(names)) : t("mods.homeModsNone", effectiveTag);
+    return names.length ? tn("mods.homeModsOwn", own, effectiveTag, formatList(names)) : tn("mods.homeModsOnlyOwn", own, effectiveTag);
+  };
+
   return (
     <main className="page home-page">
-      <section className="hero clear">
+      <section className={`hero clear${compact ? " compact" : ""}`}>
         <div className="hero-header">
           <h1 className="hero-title">WEFT</h1>
-          <div className="hero-version-badge">
-            {t(isSelectedRunning ? "heroBadgePlaying" : "heroBadge", effectiveTag || "—")}
+          <div className={`hero-version-badge${blocked ? " bad" : ""}`} role="status">
+            {t(BADGE[state], effectiveTag || "—")}
           </div>
         </div>
         <div className="hero-play-area">
@@ -101,61 +129,76 @@ export function Home({ onGoToVersions, latestTag, selectedTag, onSelectTag }: Ho
             label={t("selectVersionLabel")}
           />
           <button
-              className="btn-play"
-              onClick={() => effectiveTag && handleLaunch(effectiveTag)}
-              disabled={!effectiveTag || playDisabled}
-              aria-label={isSelectedRunning ? t("playing") : t("playButton")}
-            >
+            className="btn-play"
+            onClick={() => effectiveTag && launch.start(effectiveTag)}
+            disabled={playDisabled}
+            aria-describedby={blocked ? `${blockersId}-why` : undefined}
+          >
             <StableLabel
               text={isSelectedRunning ? t("playing") : t("playButton")}
               widest={[t("playing"), t("playButton")]}
             />
           </button>
         </div>
-        {launchError && (
-          <div className="launch-error" role="alert">
-            {launchError}
-          </div>
-        )}
-        {lastCrash && (
-          <div className="launch-error" role="alert">
-            <span>{t("gameClosedError", String(lastCrash.exitCode ?? "?"))}</span>
-            <button className="btn-secondary" onClick={() => handleOpenLog(lastCrash.tag)}>
-              {t("openLogButton")}
+        {/* Why Play is off, and the fixes, right under it. */}
+        {effectiveTag && <BlockerPanel id={blockersId} tag={effectiveTag} locked={anyRunning} review={review} />}
+        {effectiveTag && <LaunchRefusal tag={effectiveTag} launch={launch} review={review} />}
+        {shownReadError && effectiveTag && (
+          <ErrorText error={{ ...shownReadError, message: t("mods.homeProfileFailed", effectiveTag, shownReadError.message) }} className="launch-error">
+            <button className="btn-secondary btn-small" disabled={rereading} onClick={async () => {
+              setRereading(true);
+              await loadProfile(effectiveTag, true);
+              setRereading(false);
+            }}>
+              {rereading ? t("mods.retrying") : t("mods.profileRetry")}
             </button>
-          </div>
+          </ErrorText>
         )}
+        {report && effectiveTag && (
+          <p className="mods-line">
+            <Truncate focusable text={modsLine(report.unmanaged.length)} />
+            <button className="link-btn" onClick={onGoToMods}>
+              {names.length ? t("mods.homeChange") : t("mods.homeAdd")}
+            </button>
+          </p>
+        )}
+        {crash && <ModFailureNotice crash={crash} review={review} onGoToMods={onGoToMods} />}
       </section>
 
       <section className="card clear">
-        <div className="card-header">
+        {/* The folder's button on the title's line: in view under a crash notice at 565px. */}
+        <div className="card-header instance-head">
           <h2 className="card-title">{t("instanceCardTitle")}</h2>
+          {selectedVersion && (
+            <>
+              <span className="sr-only" id={folderLabelId}>
+                {t("gameFolderTitle")}
+              </span>
+              <button className="btn-secondary btn-small btn-open-folder" id={folderButtonId} aria-labelledby={`${folderLabelId} ${folderButtonId}`} onClick={handleOpenFolder}>
+                {t("openFolderButton")}
+              </button>
+            </>
+          )}
         </div>
         <div className="card-body">
           {selectedVersion ? (
-            <>
-              <div className="detail-row">
-                <span className="detail-label">{t("versionLabel")}</span>
-                <span className="detail-value">{selectedVersion.tag}</span>
+            // One line that wraps, so the card stays short.
+            <dl className="instance-line">
+              <div className="instance-pair">
+                <dt className="detail-label">{t("versionLabel")}</dt>
+                <dd className="detail-value">{selectedVersion.tag}</dd>
               </div>
-              <div className="detail-row">
-                <span className="detail-label">{t("installedAtLabel")}</span>
-                <span className="detail-value">
-                  {new Date(selectedVersion.installed_at).toLocaleString(locale)}
-                </span>
+              <div className="instance-pair">
+                <dt className="detail-label">{t("installedAtLabel")}</dt>
+                <dd className="detail-value">{new Date(selectedVersion.installed_at).toLocaleString(locale)}</dd>
               </div>
-              <div className="detail-row">
-  <span className="detail-label">{t("gameFolderTitle")}</span>
-  <button className="btn-secondary btn-open-folder" onClick={handleOpenFolder}>
-  {t("openFolderButton")}
-</button>
-</div>
-            </>
+            </dl>
           ) : (
             <p className="select-version-hint">{t("selectVersionHint")}</p>
           )}
         </div>
       </section>
+      {review.dialog}
     </main>
   );
 }

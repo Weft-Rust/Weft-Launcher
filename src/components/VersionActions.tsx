@@ -1,8 +1,16 @@
-import { useState, useEffect } from "react";
 import { useInstall, InstalledVersion, InstallProgress } from "../hooks/useInstall";
 import { useGameState } from "../hooks/useGameState";
+import { useModProfiles } from "../hooks/useMods";
+import { useLaunch } from "../hooks/useLaunch";
+import { useConfirmPress } from "../hooks/useConfirmPress";
 import { useI18n } from "../i18n/useI18n";
 import { StableLabel } from "./StableLabel";
+import { ErrorText } from "./ErrorText";
+import { LaunchRefusal } from "./LaunchRefusal";
+import { useAnnounce } from "./LiveRegion";
+import { BlockerPanel, useReviewDialog } from "./mods/ModFixes";
+import { ModFailureNotice } from "./mods/ModFailureNotice";
+import { unreachable } from "../utils/never";
 
 interface VersionActionsProps {
   release: {
@@ -15,48 +23,43 @@ interface VersionActionsProps {
     };
   };
   installedVersion: InstalledVersion | null;
+  /** Opens the Mods tab on this version, where what blocks it can be fixed. */
+  onFixMods?: (tag: string) => void;
 }
 
-export function VersionActions({ release, installedVersion }: VersionActionsProps) {
-  const { t } = useI18n();
+export function VersionActions({ release, installedVersion, onFixMods }: VersionActionsProps) {
+  const announce = useAnnounce();
+  const { t, tn } = useI18n();
   const { progress, busy: busyTags, errors, install, remove } = useInstall();
-  const { anyRunning, isRunning, launch, runningTags } = useGameState();
-
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [launchError, setLaunchError] = useState<string | null>(null);
+  const { profile } = useModProfiles();
+  const report = installedVersion ? profile(release.tag) : undefined;
+  const modCount = report?.mods.length ?? 0;
+  const blocked = (report?.blocking.length ?? 0) > 0;
+  const { anyRunning, isRunning, runningTags, lastCrash } = useGameState();
+  const launch = useLaunch();
+  const review = useReviewDialog(installedVersion ? release.tag : null);
 
   const busy = !!busyTags[release.tag];
   const currentProgress = busy ? progress[release.tag] : undefined;
   const error = errors[release.tag];
   const thisVersionRunning = isRunning(release.tag);
+  const starting = launch.launching === release.tag;
+  // Play was refused here because of mods: the blockers show here, with their fixes, until fixed.
+  const refusedForMods = launch.refusalFor(release.tag).refusedForMods;
+  const crash = installedVersion && lastCrash?.tag === release.tag ? lastCrash : null;
 
-  useEffect(() => {
-    if (confirmDelete) {
-      const timer = setTimeout(() => {
-        setConfirmDelete(false);
-      }, 4000);
-      return () => clearTimeout(timer);
-    }
-  }, [confirmDelete]);
+  // Deleting a version deletes its mod set too: the same deliberate confirmation as a mod's Remove.
+  const deletion = useConfirmPress({
+    onAsk: () =>
+      announce(`delete-ask:${release.tag}:${Date.now()}`, t(modCount > 0 ? "deleteConfirmHint" : "deleteConfirmHintBare", release.tag)),
+    onCancel: (said) => said && announce(`delete-cancelled:${release.tag}:${Date.now()}`, t("deleteCancelled", release.tag)),
+    onDoubleClick: () => announce(`delete-double:${release.tag}:${Date.now()}`, t("deleteDoubleClick", release.tag)),
+    onConfirm: () => remove(release.tag),
+  });
+  const confirmDelete = deletion.confirming;
 
   const handleInstall = () =>
     install(release.tag, release.asset.url, release.asset.name, release.asset.sha256);
-
-  const handleRemove = async () => {
-    if (!confirmDelete) {
-      setConfirmDelete(true);
-      return;
-    }
-
-    // Second click - proceed with deletion
-    setConfirmDelete(false);
-    await remove(release.tag);
-  };
-
-  const handleLaunch = async () => {
-    setLaunchError(null);
-    setLaunchError(await launch(release.tag));
-  };
 
   const getProgressLabel = (current: InstallProgress): string => {
     switch (current.stage) {
@@ -72,6 +75,8 @@ export function VersionActions({ release, installedVersion }: VersionActionsProp
         return t("progressExtracting");
       case "finalizing":
         return t("progressFinalizing");
+      default:
+        return unreachable(current.stage);
     }
   };
 
@@ -79,51 +84,65 @@ export function VersionActions({ release, installedVersion }: VersionActionsProp
   const playTooltip = anyRunning && otherRunningTag ? t("playDisabledTooltip", otherRunningTag) : undefined;
 
   const deleteDisabled = anyRunning || busy;
-  const playDisabled = anyRunning || thisVersionRunning || busy;
+  const playDisabled = anyRunning || thisVersionRunning || busy || blocked || !!launch.launching;
+  const blockedId = `blocked-${release.tag}`;
+  const playText = thisVersionRunning ? t("playing") : starting ? t("starting") : t("playButton");
+  const confirmText = modCount > 0 ? tn("deleteWithMods", modCount) : t("deleteForReal");
 
   if (installedVersion) {
     return (
       <div className="version-actions installed">
         <button
           className="play-btn"
-          onClick={handleLaunch}
+          onClick={() => launch.start(release.tag)}
           disabled={playDisabled}
           title={playTooltip}
-          aria-label={thisVersionRunning ? t("playing") : t("playButton")}
+          aria-label={playText}
+          aria-describedby={blocked ? (refusedForMods ? `${blockedId}-why` : blockedId) : undefined}
+          aria-busy={starting || undefined}
         >
-          <StableLabel
-            text={thisVersionRunning ? t("playing") : t("playButton")}
-            widest={[t("playing"), t("playButton")]}
-          />
+          <StableLabel text={playText} widest={[t("playing"), t("starting"), t("playButton")]} />
         </button>
         <button
           className={`delete-btn${confirmDelete ? " confirming" : ""}`}
-          onClick={handleRemove}
           disabled={deleteDisabled}
           title={anyRunning ? t("deleteDisabledTooltip") : undefined}
-          aria-label={confirmDelete ? t("deleteForReal") : t("deleteButton")}
+          aria-label={confirmDelete ? confirmText : t("deleteButton")}
+          {...deletion.handlers}
         >
-          <StableLabel
-            text={confirmDelete ? t("deleteForReal") : t("deleteButton")}
-            widest={[t("deleteForReal"), t("deleteButton")]}
-          />
+          <StableLabel text={confirmDelete ? confirmText : t("deleteButton")} widest={[confirmText, t("deleteButton")]} />
         </button>
-        {(launchError || error) && (
-          <div className="install-error" role="alert">
-            {launchError || error}
+        {blocked && !thisVersionRunning && !refusedForMods && (
+          <span className="version-note bad">
+            <span id={blockedId}>{t("versionModsBlocked")}</span>
+            {onFixMods && (
+              <button className="btn-secondary btn-small" onClick={() => onFixMods(release.tag)}>
+                {t("mods.homeFixInMods")}
+              </button>
+            )}
+          </span>
+        )}
+        {/* Play was refused here: why, and the fixes, here too, as on Home. */}
+        {refusedForMods && blocked && (
+          <div className="version-blockers">
+            <BlockerPanel id={blockedId} tag={release.tag} locked={anyRunning} review={review} />
           </div>
         )}
+        <LaunchRefusal tag={release.tag} launch={launch} review={review} />
+        {error && <ErrorText error={error} className="install-error" />}
+        {crash && (
+          <div className="version-crash">
+            <ModFailureNotice crash={crash} review={review} onGoToMods={onFixMods ? () => onFixMods(release.tag) : undefined} />
+          </div>
+        )}
+        {review.dialog}
       </div>
     );
   }
 
   return (
     <div className="version-actions">
-      {error && (
-        <div className="install-error" role="alert">
-          {error}
-        </div>
-      )}
+      {error && <ErrorText error={error} className="install-error" />}
 
       {/* In the button's place and no taller than it, so the list doesn't jump during an install. */}
       {currentProgress ? (

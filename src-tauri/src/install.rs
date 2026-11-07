@@ -1,15 +1,11 @@
-use futures_util::StreamExt;
-use reqwest::header::USER_AGENT;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs::File as StdFile;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 use thiserror::Error;
 use tokio::fs;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use zip::result::ZipError;
 
 #[cfg(unix)]
@@ -19,7 +15,6 @@ use crate::config::WEFT_REPO;
 use crate::error::AppError;
 use crate::launch::running_game;
 
-const USER_AGENT_VALUE: &str = concat!("weft-launcher/", env!("CARGO_PKG_VERSION"));
 const TEMP_EXTRACT_PREFIX: &str = ".tmp-";
 const REMOVING_PREFIX: &str = ".removing-";
 
@@ -67,7 +62,30 @@ pub enum InstallError {
     InstallInProgress(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// What a game version install is doing.
+#[derive(Debug, Clone, Copy, Serialize, ts_rs::TS)]
+#[serde(rename_all = "lowercase")]
+pub enum InstallStage {
+    Downloading,
+    Verifying,
+    Extracting,
+    Finalizing,
+}
+
+/// The `install-progress` event.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallProgress {
+    pub tag: String,
+    pub downloaded: u64,
+    /// 0 when the server doesn't say.
+    pub total: u64,
+    pub percent: u32,
+    pub stage: InstallStage,
+    pub speed_mbps: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub struct InstalledVersion {
     pub tag: String,
     pub path: String,
@@ -167,6 +185,17 @@ pub fn sweep_leftovers(app_handle: &tauri::AppHandle) {
     }
 }
 
+/// Why `url` is not the release asset `asset_name` of game version `tag`, if it isn't: the mods'
+/// rule ([`crate::mods::index::release_asset_problem`]) for the game's own repo. A URL that only
+/// starts right, like `…/releases/download/../../../other/repo/…`, is refused.
+pub fn version_url_problem(
+    tag: &str,
+    asset_name: &str,
+    url: &str,
+) -> Option<crate::mods::index::UrlProblem> {
+    crate::mods::index::release_asset_problem(WEFT_REPO, tag, asset_name, url)
+}
+
 #[tauri::command]
 pub async fn install_version(
     app_handle: tauri::AppHandle,
@@ -180,9 +209,10 @@ pub async fn install_version(
     let expected_sha256 = expected_sha256
         .filter(|s| !s.is_empty())
         .ok_or(InstallError::HashMissing)?;
-    let allowed = format!("https://github.com/{WEFT_REPO}/releases/download/");
-    if !asset_url.starts_with(&allowed) {
-        return Err(InstallError::DownloadFailed(format!("unexpected URL: {asset_url}")).into());
+    if let Some(why) = version_url_problem(&tag, &asset_name, &asset_url) {
+        return Err(
+            InstallError::DownloadFailed(format!("unexpected URL {asset_url}: {why}")).into(),
+        );
     }
 
     let active = app_handle.state::<ActiveInstalls>().inner().clone();
@@ -234,146 +264,58 @@ async fn download_and_install(
         fs::remove_dir_all(&version_dir).await?;
     }
 
-    // No total timeout: a slow connection may take long, as long as data keeps coming.
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .read_timeout(std::time::Duration::from_secs(60))
-        .build()?;
+    let client = crate::download::client()?;
+    let tag_owned = tag.to_string();
+    let downloaded = crate::download::to_file(&client, asset_url, temp_download, None, |p| {
+        crate::ipc::emit_install_progress(
+            app_handle,
+            &InstallProgress {
+                tag: tag_owned.clone(),
+                downloaded: p.downloaded,
+                total: p.total,
+                percent: p.percent,
+                stage: InstallStage::Downloading,
+                speed_mbps: p.speed_mbps,
+            },
+        );
+    })
+    .await
+    .map_err(|e| InstallError::DownloadFailed(e.to_string()))?;
+    let total_size = downloaded.bytes;
 
-    let response = client
-        .get(asset_url)
-        .header(USER_AGENT, USER_AGENT_VALUE)
-        .send()
-        .await
-        .map_err(|e| InstallError::DownloadFailed(e.to_string()))?;
-
-    if !response.status().is_success() {
-        return Err(InstallError::DownloadFailed(format!("HTTP {}", response.status())).into());
-    }
-
-    let total_size = response.content_length().unwrap_or(0);
-    let mut downloaded: u64 = 0;
-    let mut last_reported_percent = 0u32;
-    let mut last_reported_bytes = 0u64;
-    let mut last_report_time = std::time::Instant::now();
-
-    #[cfg(debug_assertions)]
-    let download_start = std::time::Instant::now();
-
-    let mut file = fs::File::create(temp_download).await?;
-
-    // Stream download with progress
-    let mut stream = response.bytes_stream();
-    while let Some(chunk_result) = stream.next().await {
-        let chunk = chunk_result?;
-
-        file.write_all(&chunk).await?;
-
-        downloaded += chunk.len() as u64;
-
-        // Throttle progress: emit every ~1% or 100KB
-        let percent = if total_size > 0 {
-            ((downloaded as f64 / total_size as f64) * 100.0) as u32
-        } else {
-            0
-        };
-        let should_report = if total_size > 0 {
-            percent > last_reported_percent
-        } else {
-            downloaded >= last_reported_bytes + 100_000
-        };
-
-        if should_report {
-            let now = std::time::Instant::now();
-            let elapsed = now.duration_since(last_report_time).as_secs_f64();
-            let bytes_since_last = downloaded.saturating_sub(last_reported_bytes);
-            let speed_mbps = if elapsed > 0.0 {
-                (bytes_since_last as f64 * 8.0 / 1_000_000.0) / elapsed
-            } else {
-                0.0
-            };
-
-            let _ = app_handle.emit(
-                "install-progress",
-                serde_json::json!({
-                    "tag": tag,
-                    "downloaded": downloaded,
-                    "total": total_size,
-                    "percent": percent,
-                    "stage": "downloading",
-                    "speedMbps": speed_mbps
-                }),
-            );
-            last_reported_percent = percent;
-            last_reported_bytes = downloaded;
-            last_report_time = now;
-        }
-
-        #[cfg(debug_assertions)]
-        {
-            if let Ok(val) = std::env::var("WEFT_THROTTLE_KBPS")
-                && let Ok(kbps) = val.parse::<f64>()
-                && kbps > 0.0
-            {
-                let bytes_per_sec = kbps * 1024.0;
-                let expected_duration = downloaded as f64 / bytes_per_sec;
-                let actual_duration = download_start.elapsed().as_secs_f64();
-                if expected_duration > actual_duration {
-                    let sleep_secs = expected_duration - actual_duration;
-                    tokio::time::sleep(std::time::Duration::from_secs_f64(sleep_secs)).await;
-                }
-            }
-        }
-    }
-
-    file.flush().await?;
-    drop(file);
-
-    // Final download progress
-    let _ = app_handle.emit(
-        "install-progress",
-        serde_json::json!({
-            "tag": tag,
-            "downloaded": downloaded,
-            "total": total_size,
-            "percent": 100,
-            "stage": "verifying",
-            "speedMbps": 0.0
-        }),
+    crate::ipc::emit_install_progress(
+        app_handle,
+        &InstallProgress {
+            tag: tag.to_string(),
+            downloaded: downloaded.bytes,
+            total: total_size,
+            percent: 100,
+            stage: InstallStage::Verifying,
+            speed_mbps: 0.0,
+        },
     );
 
-    // Verify SHA256
-    let mut file = fs::File::open(temp_download).await?;
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0u8; 8192];
-    loop {
-        let n = file.read(&mut buffer).await?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buffer[..n]);
-    }
-    let actual = format!("{:x}", hasher.finalize());
-    if !actual.eq_ignore_ascii_case(expected_sha256) {
+    // Hashed while it downloaded.
+    if !downloaded.sha256.eq_ignore_ascii_case(expected_sha256) {
         return Err(InstallError::Sha256Mismatch {
             expected: expected_sha256.to_string(),
-            actual,
+            actual: downloaded.sha256,
         }
         .into());
     }
-    drop(file);
+    let downloaded = downloaded.bytes;
 
     // Extract to temp directory
-    let _ = app_handle.emit(
-        "install-progress",
-        serde_json::json!({
-            "tag": tag,
-            "downloaded": downloaded,
-            "total": total_size,
-            "percent": 100,
-            "stage": "extracting",
-            "speedMbps": 0.0
-        }),
+    crate::ipc::emit_install_progress(
+        app_handle,
+        &InstallProgress {
+            tag: tag.to_string(),
+            downloaded,
+            total: total_size,
+            percent: 100,
+            stage: InstallStage::Extracting,
+            speed_mbps: 0.0,
+        },
     );
 
     if temp_extract.exists() {
@@ -430,16 +372,16 @@ async fn download_and_install(
     }
 
     // Finalizing
-    let _ = app_handle.emit(
-        "install-progress",
-        serde_json::json!({
-            "tag": tag,
-            "downloaded": downloaded,
-            "total": total_size,
-            "percent": 100,
-            "stage": "finalizing",
-            "speedMbps": 0.0
-        }),
+    crate::ipc::emit_install_progress(
+        app_handle,
+        &InstallProgress {
+            tag: tag.to_string(),
+            downloaded,
+            total: total_size,
+            percent: 100,
+            stage: InstallStage::Finalizing,
+            speed_mbps: 0.0,
+        },
     );
 
     // Atomic rename
@@ -672,6 +614,7 @@ pub async fn remove_version(app_handle: tauri::AppHandle, tag: String) -> Result
         Ok(_) => {
             // Rename succeeded, now delete the renamed folder
             fs::remove_dir_all(&removing_dir).await?;
+            crate::mods::forget_version(&app_handle, &tag).await;
             Ok(())
         }
         Err(e) => {
@@ -754,5 +697,32 @@ mod tests {
             assert!(validate_name(bad).is_err(), "{bad:?} should be refused");
         }
         assert!(validate_name("v26.10.4").is_ok());
+    }
+
+    #[test]
+    fn version_urls_are_the_release_asset() {
+        let (tag, name) = ("v26.11.1", "weft-linux-x64.tar.gz");
+        let good =
+            "https://github.com/Weft-Rust/Weft/releases/download/v26.11.1/weft-linux-x64.tar.gz";
+        assert_eq!(version_url_problem(tag, name, good), None);
+        for bad in [
+            "https://github.com/Weft-Rust/Weft/releases/download/../../../evil/repo/releases/download/v26.11.1/weft-linux-x64.tar.gz",
+            "https://github.com/Weft-Rust/Weft/releases/download/%2e%2e/%2e%2e/evil/repo/releases/download/v26.11.1/weft-linux-x64.tar.gz",
+            r"https://github.com/Weft-Rust/Weft/releases/download/..\..\evil\v26.11.1/weft-linux-x64.tar.gz",
+            "https://github.com/Weft-Rust/Weft/releases/download/v26.11.1/../v26.11.1/weft-linux-x64.tar.gz",
+            "https://github.com/Weft-Rust/Weft/releases/download/v26.10.4/weft-linux-x64.tar.gz",
+            "https://github.com/Weft-Rust/Weft/releases/download/v26.11.1/other.tar.gz",
+            "https://github.com/Weft-Rust/Weft-evil/releases/download/v26.11.1/weft-linux-x64.tar.gz",
+            "https://github.com.evil.example/Weft-Rust/Weft/releases/download/v26.11.1/weft-linux-x64.tar.gz",
+            "https://github.com:444/Weft-Rust/Weft/releases/download/v26.11.1/weft-linux-x64.tar.gz",
+            "https://u@github.com/Weft-Rust/Weft/releases/download/v26.11.1/weft-linux-x64.tar.gz",
+            "http://github.com/Weft-Rust/Weft/releases/download/v26.11.1/weft-linux-x64.tar.gz",
+            "https://github.com/Weft-Rust/Weft/releases/download/v26.11.1/weft-linux-x64.tar.gz?x",
+            "https://github.com/Weft-Rust/Weft/releases/download/v26.11.1/weft-linux-x64.tar.gz#x",
+            "https://github.com/Weft-Rust/Weft/releases/download/v26.11.1/sub/weft-linux-x64.tar.gz",
+            "not a url",
+        ] {
+            assert!(version_url_problem(tag, name, bad).is_some(), "{bad}");
+        }
     }
 }

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_opener::{Error as OpenerError, OpenerExt};
 use thiserror::Error;
 use tokio::fs;
@@ -27,14 +27,16 @@ pub enum LaunchError {
     ProcessSpawnFailed(String),
     #[error("Failed to create log directory: {0}")]
     LogDirCreateFailed(String),
-    #[error("Game folder not found: {0}")]
-    GameFolderNotFound(String),
+    /// The page's sentence says what to do; the detail, if any, is the backend's own words (a
+    /// path), never a sentence of its own.
+    #[error("Game folder not found{}", .0.as_ref().map(|d| format!(": {d}")).unwrap_or_default())]
+    GameFolderNotFound(Option<String>),
     #[error("Failed to open: {0}")]
     OpenerError(#[from] OpenerError),
 }
 
 /// Remove ANSI escape codes from a string.
-fn strip_ansi_codes(input: &str) -> String {
+pub(crate) fn strip_ansi_codes(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
 
@@ -103,20 +105,47 @@ fn extract_game_folder_path(line: &str) -> Option<String> {
     Some(cleaned[start..start + end].trim().to_string())
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[serde(rename_all = "lowercase")]
+pub enum GameState {
+    Running,
+    Stopped,
+}
+
+/// The `game-state` event.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct GameStateEvent {
     pub tag: String,
-    pub state: String,
+    pub state: GameState,
     pub exit_code: Option<i32>,
     /// The game only ends with an error of its own, a panic or a fault when something went
     /// wrong. On Unix a signal leaves no exit code at all, so the code alone can't tell.
     pub crashed: bool,
+    /// The mod that stopped the game from starting, when the log names one.
+    pub mod_failure: Option<crate::mods::diagnose::ModFailure>,
 }
 
 /// Tags of the games this launcher has started and is waiting for.
 #[derive(Default, Clone)]
 pub struct RunningGames(Arc<Mutex<HashSet<String>>>);
+
+impl RunningGames {
+    /// The game that is running now, if any: only one runs at a time.
+    pub fn current(&self) -> Option<String> {
+        self.0.lock().unwrap().iter().next().cloned()
+    }
+
+    #[cfg(test)]
+    pub fn insert(&self, tag: &str) {
+        self.0.lock().unwrap().insert(tag.to_string());
+    }
+
+    #[cfg(test)]
+    pub fn remove(&self, tag: &str) {
+        self.0.lock().unwrap().remove(tag);
+    }
+}
 
 fn running_games(app_handle: &AppHandle) -> RunningGames {
     app_handle.state::<RunningGames>().inner().clone()
@@ -124,9 +153,7 @@ fn running_games(app_handle: &AppHandle) -> RunningGames {
 
 /// The game that is running now, if any: only one runs at a time.
 pub fn running_game(app_handle: &AppHandle) -> Option<String> {
-    let games = running_games(app_handle);
-    let games = games.0.lock().unwrap();
-    games.iter().next().cloned()
+    running_games(app_handle).current()
 }
 
 fn get_versions_dir(app_handle: &AppHandle) -> Result<PathBuf, LaunchError> {
@@ -179,6 +206,18 @@ pub async fn launch_version(app_handle: AppHandle, tag: String) -> Result<(), Ap
     if !executable.exists() {
         return Err(LaunchError::ExecutableNotFound(tag).into());
     }
+    if let Some(running) = running_game(&app_handle) {
+        return Err(if running == tag {
+            LaunchError::AlreadyRunning(tag)
+        } else {
+            LaunchError::AnotherGameRunning(running)
+        }
+        .into());
+    }
+
+    // Refuses a mod set the game would refuse, before anything starts. Holds the mod lock until
+    // the game is registered, so no mod change lands in between.
+    let mods = crate::mods::prepare_launch(&app_handle, &tag).await?;
 
     let games = running_games(&app_handle);
 
@@ -193,23 +232,67 @@ pub async fn launch_version(app_handle: AppHandle, tag: String) -> Result<(), Ap
         }
         running.insert(tag.clone());
     }
+    let mods_dir = mods.release();
 
-    if let Err(e) = start_game(&app_handle, &games, &tag, &executable, &version_dir).await {
+    let launch = Launch {
+        tag: &tag,
+        executable: &executable,
+        version_dir: &version_dir,
+        mods_dir: mods_dir.as_deref(),
+    };
+    if let Err(e) = start_game(&app_handle, &games, launch).await {
         games.0.lock().unwrap().remove(&tag);
         return Err(e.into());
     }
     Ok(())
 }
 
+/// The game's arguments. `--mods` is searched before the player's own mods folder, and the
+/// first copy of a mod wins; without a folder nothing is passed.
+fn game_args(mods_dir: Option<&Path>) -> Vec<std::ffi::OsString> {
+    match mods_dir {
+        Some(dir) => vec!["--mods".into(), dir.as_os_str().to_owned()],
+        None => Vec::new(),
+    }
+}
+
+struct Launch<'a> {
+    tag: &'a str,
+    executable: &'a Path,
+    version_dir: &'a Path,
+    mods_dir: Option<&'a Path>,
+}
+
+/// The first mod failure logged since `start`, the size of the log when this run began.
+async fn mod_failure_since(
+    log_path: &Path,
+    start: u64,
+) -> Option<crate::mods::diagnose::ModFailure> {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    let mut file = fs::File::open(log_path).await.ok()?;
+    file.seek(std::io::SeekFrom::Start(start)).await.ok()?;
+    let mut bytes = Vec::new();
+    file.take(4 * 1024 * 1024)
+        .read_to_end(&mut bytes)
+        .await
+        .ok()?;
+    crate::mods::diagnose::find(&String::from_utf8_lossy(&bytes))
+}
+
 async fn start_game(
     app_handle: &AppHandle,
     games: &RunningGames,
-    tag: &str,
-    executable: &Path,
-    version_dir: &Path,
+    launch: Launch<'_>,
 ) -> Result<(), LaunchError> {
+    let Launch {
+        tag,
+        executable,
+        version_dir,
+        mods_dir,
+    } = launch;
     let logs_dir = get_logs_dir(app_handle)?;
     let log_path = logs_dir.join(format!("{tag}.log"));
+    let log_start = fs::metadata(&log_path).await.map(|m| m.len()).unwrap_or(0);
     let log_stdout = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -219,6 +302,7 @@ async fn start_game(
 
     let mut cmd = TokioCommand::new(executable);
     cmd.current_dir(version_dir)
+        .args(game_args(mods_dir))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -236,13 +320,14 @@ async fn start_game(
     let stdout_log = tokio::spawn(copy_to_log(stdout, log_stdout, "stdout"));
     let stderr_log = tokio::spawn(copy_to_log(stderr, log_stderr, "stderr"));
 
-    let _ = app_handle.emit(
-        "game-state",
-        GameStateEvent {
+    crate::ipc::emit_game_state(
+        app_handle,
+        &GameStateEvent {
             tag: tag.to_string(),
-            state: "running".to_string(),
+            state: GameState::Running,
             exit_code: None,
             crashed: false,
+            mod_failure: None,
         },
     );
 
@@ -258,13 +343,22 @@ async fn start_game(
         let _ = tokio::time::timeout(Duration::from_secs(2), logs).await;
 
         games.0.lock().unwrap().remove(&tag);
-        let _ = app_handle.emit(
-            "game-state",
-            GameStateEvent {
+        // Revocations that arrived while it ran turn those mods off now.
+        crate::mods::after_game(&app_handle, &tag).await;
+        let crashed = status.is_some_and(|s| !s.success());
+        let mod_failure = if crashed {
+            mod_failure_since(&log_path, log_start).await
+        } else {
+            None
+        };
+        crate::ipc::emit_game_state(
+            &app_handle,
+            &GameStateEvent {
                 tag,
-                state: "stopped".to_string(),
+                state: GameState::Stopped,
                 exit_code: status.and_then(|s| s.code()),
-                crashed: status.is_some_and(|s| !s.success()),
+                crashed,
+                mod_failure,
             },
         );
     });
@@ -279,12 +373,22 @@ pub async fn get_running_versions(app_handle: AppHandle) -> Result<Vec<String>, 
 
 #[tauri::command]
 pub async fn open_game_folder(app_handle: AppHandle, _tag: String) -> Result<(), AppError> {
-    let logs_dir = get_logs_dir(&app_handle)?;
+    match find_game_folder(&app_handle).await {
+        Some(folder) => Ok(open_path(&app_handle, &folder)?),
+        None => Err(LaunchError::GameFolderNotFound(None).into()),
+    }
+}
 
-    // Read all log files, sort by modification time (newest first)
-    let mut entries = fs::read_dir(&logs_dir).await?;
-    let mut log_files: Vec<_> = Vec::new();
-    while let Some(entry) = entries.next_entry().await? {
+/// The game's data folder, as the newest log that names one says. The game prints it at start.
+pub async fn find_game_folder(app_handle: &AppHandle) -> Option<PathBuf> {
+    find_game_folder_in(&get_logs_dir(app_handle).ok()?).await
+}
+
+/// The same, given the launcher's logs folder.
+pub async fn find_game_folder_in(logs_dir: &Path) -> Option<PathBuf> {
+    let mut entries = fs::read_dir(logs_dir).await.ok()?;
+    let mut log_files = Vec::new();
+    while let Ok(Some(entry)) = entries.next_entry().await {
         let path = entry.path();
         if path.extension().and_then(|s| s.to_str()) == Some("log")
             && let Ok(metadata) = entry.metadata().await
@@ -293,33 +397,23 @@ pub async fn open_game_folder(app_handle: AppHandle, _tag: String) -> Result<(),
             log_files.push((path, modified));
         }
     }
-
-    // Sort by modification time, newest first
     log_files.sort_by_key(|a| std::cmp::Reverse(a.1));
 
-    // Search each log file for the "game folder" line
     for (log_path, _) in log_files {
-        let file = fs::File::open(&log_path).await?;
-        let reader = BufReader::new(file);
-        let mut lines = reader.lines();
-
+        let Ok(file) = fs::File::open(&log_path).await else {
+            continue;
+        };
+        let mut lines = BufReader::new(file).lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            if let Some(game_folder) = extract_game_folder_path(&line) {
-                let game_folder_path = PathBuf::from(&game_folder);
-                if game_folder_path.exists() {
-                    open_path(&app_handle, &game_folder_path)?;
-                    return Ok(());
-                }
-                // Path from log doesn't exist, continue searching
+            // A folder that no longer exists may still be named in an old log.
+            if let Some(folder) = extract_game_folder_path(&line).map(PathBuf::from)
+                && folder.exists()
+            {
+                return Some(folder);
             }
         }
     }
-
-    // No valid game folder found in any log
-    Err(
-        LaunchError::GameFolderNotFound("not in the logs yet, start the game once".to_string())
-            .into(),
-    )
+    None
 }
 
 #[tauri::command]
@@ -328,17 +422,13 @@ pub async fn open_log(app_handle: AppHandle, tag: String) -> Result<(), AppError
     let logs_dir = get_logs_dir(&app_handle)?;
     let log_file = logs_dir.join(format!("{tag}.log"));
     if !log_file.exists() {
-        return Err(LaunchError::GameFolderNotFound(format!(
-            "log file not found: {}",
-            log_file.display()
-        ))
-        .into());
+        return Err(LaunchError::GameFolderNotFound(Some(log_file.display().to_string())).into());
     }
     open_path(&app_handle, &log_file)?;
     Ok(())
 }
 
-fn open_path(app_handle: &AppHandle, path: &Path) -> Result<(), LaunchError> {
+pub(crate) fn open_path(app_handle: &AppHandle, path: &Path) -> Result<(), LaunchError> {
     // Programs spawned from the AppImage crash on its bundled libraries; reveal goes over D-Bus.
     if cfg!(target_os = "linux") && std::env::var_os("APPDIR").is_some() {
         app_handle.opener().reveal_item_in_dir(path)?;
@@ -348,4 +438,19 @@ fn open_path(app_handle: &AppHandle, path: &Path) -> Result<(), LaunchError> {
         .opener()
         .open_path(path.to_string_lossy().as_ref(), None::<&str>)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_mods_argument() {
+        assert!(game_args(None).is_empty(), "no folder, no --mods");
+        let dir = Path::new("/data/profiles/v26.11.1/mods");
+        assert_eq!(
+            game_args(Some(dir)),
+            ["--mods", "/data/profiles/v26.11.1/mods"]
+        );
+    }
 }

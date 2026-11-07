@@ -7,12 +7,18 @@
   "scripts": {
     "release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1",
     "dev": "vite",
-    "build": "tsc && vite build",
+    "dev:mock": "vite --mode mock",
+    "build": "node scripts/check-i18n.mjs && tsc && vite build",
+    "check:i18n": "node scripts/check-i18n.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:ui": "playwright test"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.8.4",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-process": "^2.4.0",
     "@tauri-apps/plugin-updater": "^2.14.1",
@@ -20,11 +26,13 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.54.2",
     "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.2",
     "typescript": "~6.0.3",
-    "vite": "^8.0.16"
+    "vite": "^8.0.16",
+    "vitest": "^5.1.0"
   }
 }

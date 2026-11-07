@@ -1,17 +1,12 @@
 import { useI18n } from "../i18n/useI18n";
 import { useInstall } from "../hooks/useInstall";
+import { useModProfiles } from "../hooks/useMods";
 import { PixelIcon } from "../components/PixelIcon";
 import { VersionActions } from "../components/VersionActions";
 import { getLocale } from "../i18n";
-
-const REFRESH_ICON = [
-  ".###.#",
-  "#...##",
-  "#..###",
-  "#.....",
-  "#...#.",
-  ".###..",
-];
+import { REFRESH_ICON } from "../components/icons";
+import { ErrorText } from "../components/ErrorText";
+import type { Shown } from "../i18n/errors";
 
 interface Release {
   tag: string;
@@ -31,10 +26,11 @@ interface Release {
 interface VersionsPageProps {
   releases: Release[];
   loading: boolean;
-  error: string | null;
+  error: Shown | null;
   fromCache: boolean;
   onRefresh: (forceRefresh?: boolean) => void;
   newTag: string | null;
+  onFixMods?: (tag: string) => void;
 }
 
 export function VersionsPage({
@@ -44,9 +40,11 @@ export function VersionsPage({
   fromCache,
   onRefresh,
   newTag,
+  onFixMods,
 }: VersionsPageProps) {
-  const { t, formatSize: fmtSize } = useI18n();
+  const { t, tn, formatSize: fmtSize } = useI18n();
   const { installedVersions } = useInstall();
+  const { profile } = useModProfiles();
 
   const installedMap = new Map(installedVersions.map((v) => [v.tag, v]));
 
@@ -63,11 +61,7 @@ export function VersionsPage({
           {fromCache && !loading && (
             <span className="cache-banner" role="status">{t("cacheBanner")}</span>
           )}
-          {error && (
-            <div className="error-banner" role="alert">
-              {t("errorPrefix")}{error}
-            </div>
-          )}
+          {error && <ErrorText error={error} className="error-banner" />}
           <button
             className="btn-refresh"
             onClick={() => onRefresh(true)}
@@ -95,6 +89,7 @@ export function VersionsPage({
                 key={release.tag}
                 className={`version-entry${installedVersion ? " in-use" : ""}${isNew ? " is-new" : ""}`}
                 role="listitem"
+                data-focus-scope
               >
                 <div className="version-header">
                   <div className="version-main">
@@ -111,6 +106,9 @@ export function VersionsPage({
                     <span className="version-size">
                       {fmtSize(asset.size)}
                     </span>
+                    {installedVersion && profile(release.tag) && (
+                      <span className="version-mods">{tn("versionModCount", profile(release.tag)!.mods.length)}</span>
+                    )}
                   </div>
                 </div>
 
@@ -125,6 +123,7 @@ export function VersionsPage({
                     },
                   }}
                   installedVersion={installedVersion}
+                  onFixMods={onFixMods}
                 />
               </article>
             );

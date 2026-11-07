@@ -1,109 +1,54 @@
-export type Locale = 'pt-BR' | 'en' | 'es' | 'ru';
-
-interface I18nMessages {
-  updateAvailable: string;
-updateDownloading: string;
-updateFailed: string;
-updateTooltip: string;
-updateCloseGame: string;
-  latestBadge: string;
-  appTitle: string;
-  refreshButton: string;
-  loading: string;
-  cacheBanner: string;
-  errorPrefix: string;
-  emptyState: string;
-  installButton: string;
-  installedBadge: string;
-  deleteButton: string;
-  deleteForReal: string;
-  confirmDelete: string;
-  playButton: string;
-  playing: string;
-  progressDownloading: string;
-  progressVerifying: string;
-  progressExtracting: string;
-  progressFinalizing: string;
-  deleteDisabledTooltip: string;
-  playDisabledTooltip: string;
-  installedAtLabel: string;
-  linkDiscord: string;
-  linkWebsite: string;
-  releasedLabel: string;
-  inUseBadge: string;
-  noChangelog: string;
-  newBadge: string;
-  openFolderButton: string;
-  gameClosedError: string;
-  openLogButton: string;
-  tabHome: string;
-  tabVersions: string;
-  tabNotes: string;
-  tabsLabel: string;
-  selectVersionLabel: string;
-  selectVersionHint: string;
-  noVersionsInstalled: string;
-  goToVersionsTab: string;
-  instanceCardTitle: string;
-  versionLabel: string;
-  gameFolderTitle: string;
-  prereleaseBadge: string;
-  heroBadge: string;
-  heroBadgePlaying: string;
-  errors: {
-    network: string;
-    io: string;
-    serialization: string;
-    httpHeader: string;
-    cacheCorrupted: string;
-    assetNotFound: string;
-    missingDigest: string;
-    rateLimited: string;
-    forbidden: string;
-    offlineNoCache: string;
-    zip: string;
-    createDir: string;
-    sha256Mismatch: string;
-    hashMissing: string;
-    alreadyInstalled: string;
-    notInstalled: string;
-    downloadFailed: string;
-    extractFailed: string;
-    gameRunning: string;
-    versionInUse: string;
-    alreadyRunning: string;
-    anotherGameRunning: string;
-    executableNotFound: string;
-    processSpawnFailed: string;
-    logDirCreateFailed: string;
-    gameFolderNotFound: string;
-    unsupportedPlatform: string;
-    openerError: string;
-    invalidName: string;
-    installInProgress: string;
-  };
-  sizeUnits: {
-    B: string;
-    KB: string;
-    MB: string;
-    GB: string;
-  };
-}
+// Messages, typed from en.json: a key that isn't there fails `tsc`. Counted messages have one key
+// per CLDR plural category (`_one`, `_few`, `_many`, `_other`) and are read with `tn`.
 
 import ptBR from './pt-BR.json';
 import en from './en.json';
 import es from './es.json';
 import ru from './ru.json';
 
-const messagesMap: Record<Locale, I18nMessages> = {
-  'pt-BR': ptBR,
-  en,
-  es,
-  ru,
+export type Locale = 'pt-BR' | 'en' | 'es' | 'ru';
+export const LOCALES: Locale[] = ['en', 'pt-BR', 'es', 'ru'];
+
+type Leaves<T, P extends string = ''> = {
+  [K in keyof T & string]: T[K] extends string ? `${P}${K}` : Leaves<T[K], `${P}${K}.`>;
+}[keyof T & string];
+
+type AllKeys = Leaves<typeof en>;
+type PluralCategory = 'zero' | 'one' | 'two' | 'few' | 'many' | 'other';
+type PluralForm<K> = K extends `${string}_${PluralCategory}` ? K : never;
+
+/** A plain message. */
+export type MessageKey = Exclude<AllKeys, PluralForm<AllKeys>>;
+/** A counted message: `mods.noticeCopied` stands for `mods.noticeCopied_one`, `_other`... */
+export type PluralKey = AllKeys extends infer K ? (K extends `${infer B}_other` ? B : never) : never;
+
+/** A message to show later, for code that decides what to say but doesn't render it. */
+export type Msg =
+  | { key: MessageKey; args?: string[] }
+  | { key: PluralKey; count: number; args?: string[] };
+
+type Tree = { [key: string]: string | Tree };
+
+const messagesMap: Record<Locale, Tree> = {
+  'pt-BR': ptBR as Tree,
+  en: en as Tree,
+  es: es as Tree,
+  ru: ru as Tree,
 };
 
 let currentLocale: Locale = 'en';
-let messages: I18nMessages = messagesMap.en;
+let messages: Tree = messagesMap.en;
+let plurals = new Intl.PluralRules('en');
+
+function use(locale: Locale) {
+  currentLocale = locale;
+  messages = messagesMap[locale];
+  plurals = new Intl.PluralRules(locale);
+}
+
+export function isLocale(s: string | null | undefined): s is Locale {
+  return !!s && (LOCALES as string[]).includes(s);
+}
 
 export function initI18n(locale?: Locale): void {
   let saved: string | null = null;
@@ -112,9 +57,8 @@ export function initI18n(locale?: Locale): void {
   } catch {
     saved = null;
   }
-  const candidate = (locale || saved) as Locale | null;
-  currentLocale = candidate && candidate in messagesMap ? candidate : 'en';
-  messages = messagesMap[currentLocale];
+  const candidate = locale ?? saved;
+  use(isLocale(candidate) ? candidate : 'en');
 }
 
 export function getLocale(): Locale {
@@ -122,56 +66,91 @@ export function getLocale(): Locale {
 }
 
 export function setLocale(locale: Locale): void {
-  currentLocale = locale;
+  use(locale);
   try {
     localStorage.setItem('locale', locale);
   } catch {
-    /* ignora */
+    /* ignore */
   }
-  messages = messagesMap[locale];
 }
 
-export function t(key: string, ...args: string[]): string {
-  if (!messages) {
-    return key;
+function lookup(tree: Tree, key: string): string | null {
+  let value: string | Tree | undefined = tree;
+  for (const k of key.split('.')) {
+    if (value && typeof value === 'object' && k in value) value = value[k];
+    else return null;
   }
-  
-  const keys = key.split('.');
-  let value: any = messages;
-  
-  for (const k of keys) {
-    if (value && typeof value === 'object' && k in value) {
-      value = value[k];
-    } else {
-      return key;
-    }
-  }
-  
-  if (typeof value === 'string') {
-    return args.reduce((str, arg, i) => str.replace(`{${i}}`, arg), value);
-  }
-  
-  return key;
+  return typeof value === 'string' ? value : null;
+}
+
+/** Fills `{0}`, `{1}`... and, for counted messages, `{n}`. */
+export function fill(template: string, args: readonly string[], count?: string): string {
+  return template.replace(/\{(\d+|n)\}/g, (whole, name: string) => {
+    if (name === 'n') return count ?? whole;
+    return args[Number(name)] ?? whole;
+  });
+}
+
+export function t(key: MessageKey, ...args: string[]): string {
+  const value = lookup(messages, key) ?? lookup(messagesMap.en, key);
+  return value === null ? key : fill(value, args);
+}
+
+/** The key a count picks in a locale: `mods.noticeCopied_few` for 3 in Russian. */
+export function pluralKey(key: PluralKey, count: number, locale: Locale = currentLocale): string {
+  const rules = locale === currentLocale ? plurals : new Intl.PluralRules(locale);
+  return `${key}_${rules.select(count)}`;
+}
+
+export function tn(key: PluralKey, count: number, ...args: string[]): string {
+  const value =
+    lookup(messages, pluralKey(key, count)) ??
+    lookup(messages, `${key}_other`) ??
+    lookup(messagesMap.en, pluralKey(key, count, 'en'));
+  return value === null ? key : fill(value, args, count.toLocaleString(currentLocale));
+}
+
+export function tm(msg: Msg): string {
+  const args = msg.args ?? [];
+  return 'count' in msg ? tn(msg.key, msg.count, ...args) : t(msg.key, ...args);
+}
+
+/** A list of names the way the language joins them: "A, B and C". */
+export function formatList(items: string[]): string {
+  return new Intl.ListFormat(currentLocale, { style: 'long', type: 'conjunction' }).format(items);
+}
+
+/** A time of day, as the language writes it: "14:32", "2:32 PM". */
+export function formatTime(d: Date): string {
+  return new Intl.DateTimeFormat(currentLocale, { hour: 'numeric', minute: '2-digit' }).format(d);
+}
+
+/** A day, short: "2 Nov" this year, "2 Nov 2025" before it. */
+export function formatDay(iso: string | null | undefined, now: Date = new Date()): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const year = d.getFullYear() === now.getFullYear() ? undefined : 'numeric';
+  // Messages put their own punctuation after a date, so it never ends in a dot of its own:
+  // a short month that is an abbreviation ("нояб.", "nov.") gives way to the long one, and a
+  // trailing marker after the year (Russian "г.") is left off.
+  const day = (month: 'short' | 'long') => {
+    const parts = new Intl.DateTimeFormat(currentLocale, { day: 'numeric', month, year }).formatToParts(d);
+    while (parts.length && parts[parts.length - 1].type === 'literal') parts.pop();
+    return parts.map((p) => p.value).join('');
+  };
+  const short = day('short');
+  return short.endsWith('.') ? day('long') : short;
 }
 
 export function formatSize(bytes: number): string {
-  if (!messages) {
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let size = bytes;
-    let unitIndex = 0;
-    while (size >= 1024 && unitIndex < units.length - 1) {
-      size /= 1024;
-      unitIndex++;
-    }
-    return `${size.toFixed(1)} ${units[unitIndex]}`;
-  }
-  
-  const units = [messages.sizeUnits.B, messages.sizeUnits.KB, messages.sizeUnits.MB, messages.sizeUnits.GB];
+  const units = ['B', 'KB', 'MB', 'GB'] as const;
   let size = bytes;
   let unitIndex = 0;
   while (size >= 1024 && unitIndex < units.length - 1) {
     size /= 1024;
     unitIndex++;
   }
-  return `${size.toFixed(1)} ${units[unitIndex]}`;
+  const unit = lookup(messages, `sizeUnits.${units[unitIndex]}`) ?? units[unitIndex];
+  return `${size.toFixed(1)} ${unit}`;
 }
