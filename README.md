@@ -25,7 +25,7 @@ The builds aren't code-signed yet:
 
 **Mods** -> pick the game version -> **Browse** -> **Install**. Each game version keeps its own mods. Mods are native programs that run with your privileges.
 
-Besides the signed [Weft mod index](https://github.com/Zorro909/weft-mods-index), you can add GitHub repos under **Sources** or install a zip **From file**. Builds pinned in the index are Reviewed; others are Unreviewed or Unverified. See the [mod manager design](docs/mod-manager/PROPOSAL.md).
+Besides the signed [Weft mod index](https://github.com/Weft-Rust/weft-mods-index), you can add GitHub repos under **Sources** or install a zip **From file**. Builds pinned in the index are Reviewed; others are Unreviewed or Unverified. See the [mod manager design](docs/mod-manager/PROPOSAL.md).
 
 ## Data
 

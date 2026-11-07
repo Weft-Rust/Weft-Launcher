@@ -229,7 +229,7 @@ const catalog: Catalog = {
               freshness: "unavailable",
               generated: null,
               signedAt: null,
-              error: err("HttpStatus", "HTTP 404 (https://zorro909.github.io/weft-mods-index/v1/index.json)"),
+              error: err("HttpStatus", "HTTP 404 (https://weft-rust.github.io/weft-mods-index/v1/index.json)"),
               cacheError: null,
             }
           : indexFlag === "unreachable"

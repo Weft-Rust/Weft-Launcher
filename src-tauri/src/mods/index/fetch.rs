@@ -7,7 +7,7 @@ use super::super::error::ModsError;
 use super::cache::{Age, IndexCache, IndexState, decide, from_cache};
 use super::signature::verify;
 
-pub const INDEX_URL: &str = "https://zorro909.github.io/weft-mods-index/v1/index.json";
+pub const INDEX_URL: &str = "https://weft-rust.github.io/weft-mods-index/v1/index.json";
 
 pub const MAX_INDEX_BYTES: usize = 8 * 1024 * 1024;
 

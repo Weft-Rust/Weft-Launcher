@@ -70,7 +70,7 @@ changed release can't change what players install.
 1. Build in GitHub Actions and attest the zip with
    [`actions/attest-build-provenance`](https://github.com/actions/attest-build-provenance), from a
    workflow in `.github/workflows/`.
-2. Open a pull request on `Zorro909/weft-mods-index` that adds the version to your mod's entry
+2. Open a pull request on `Weft-Rust/weft-mods-index` that adds the version to your mod's entry
    (the mod too, the first time): the same fields as your `<id>.mod.json`, with `source.commit`
    the full commit the release was built from.
 3. A reviewer reads the source at that commit, runs `gh attestation verify` on the zip, and adds

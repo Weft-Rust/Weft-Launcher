@@ -230,7 +230,7 @@ mod tests {
             "https://objects.githubusercontent.com/github-production-release-asset/1",
             "https://release-assets.githubusercontent.com/x",
             "https://raw.githubusercontent.com/a/b/main/x",
-            "https://zorro909.github.io/weft-mods-index/v1/index.json",
+            "https://weft-rust.github.io/weft-mods-index/v1/index.json",
         ] {
             assert!(redirect_allowed(&url::Url::parse(ok).unwrap()), "{ok}");
         }

@@ -13,7 +13,7 @@ import { indexProblem, sourceProblem } from "./catalogBanners";
 import type { Catalog, NoModsReason, SourceStatus } from "../../mods/types";
 import type { MessageKey } from "../../i18n";
 
-const INDEX_REPO = "https://github.com/Zorro909/weft-mods-index";
+const INDEX_REPO = "https://github.com/Weft-Rust/weft-mods-index";
 /** What a repo must publish to be a source. */
 const SOURCE_FORMAT = "https://github.com/Zorro909/Weft-Launcher/blob/master/docs/mod-manager/AUTHORING.md#when-a-source-shows-no-mods";
 

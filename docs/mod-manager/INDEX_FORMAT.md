@@ -1,6 +1,6 @@
 # Mod index format, v1
 
-This file is the contract between Weft Launcher and [`Zorro909/weft-mods-index`](https://github.com/Zorro909/weft-mods-index). The launcher accepts exactly this format. A change that breaks it needs a new `schema` number and a new URL path (`/v2/`). Mod authors: the publishing guide is [AUTHORING.md](AUTHORING.md).
+This file is the contract between Weft Launcher and [`Weft-Rust/weft-mods-index`](https://github.com/Weft-Rust/weft-mods-index). The launcher accepts exactly this format. A change that breaks it needs a new `schema` number and a new URL path (`/v2/`). Mod authors: the publishing guide is [AUTHORING.md](AUTHORING.md).
 
 The examples below are complete and valid; `src-tauri/src/mods/doc_tests.rs` checks them against the launcher's parser and the schemas.
 
@@ -8,8 +8,8 @@ The examples below are complete and valid; `src-tauri/src/mods/doc_tests.rs` che
 
 | File | URL |
 |---|---|
-| Index | `https://zorro909.github.io/weft-mods-index/v1/index.json` |
-| Signature | `https://zorro909.github.io/weft-mods-index/v1/index.json.minisig` |
+| Index | `https://weft-rust.github.io/weft-mods-index/v1/index.json` |
+| Signature | `https://weft-rust.github.io/weft-mods-index/v1/index.json.minisig` |
 
 - The signature is a **prehashed** minisign signature of the exact bytes of `index.json` (`minisign -S -H`, the default of current minisign). Legacy signatures are refused.
 - The launcher embeds the public key (`keys/index.pub` in the index repo; `INDEX_PUBLIC_KEY` in `src-tauri/src/mods/index/signature.rs`).

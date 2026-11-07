@@ -223,7 +223,7 @@ mod tests {
         let http = |status| {
             ModsError::Http {
                 status,
-                url: "https://zorro909.github.io/weft-mods-index/v1/index.json".into(),
+                url: "https://weft-rust.github.io/weft-mods-index/v1/index.json".into(),
             }
             .code()
         };
@@ -262,11 +262,11 @@ mod tests {
         // The page reads the status from here (src/mods/select.ts `httpStatus`): keep it first.
         let e = AppError::from(ModsError::Http {
             status: 404,
-            url: "https://zorro909.github.io/weft-mods-index/v1/index.json".into(),
+            url: "https://weft-rust.github.io/weft-mods-index/v1/index.json".into(),
         });
         assert_eq!(
             e.detail.as_deref(),
-            Some("HTTP 404 (https://zorro909.github.io/weft-mods-index/v1/index.json)")
+            Some("HTTP 404 (https://weft-rust.github.io/weft-mods-index/v1/index.json)")
         );
     }
 
