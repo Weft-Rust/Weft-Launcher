@@ -162,7 +162,9 @@ pub fn sweep_leftovers(app_handle: &tauri::AppHandle) {
         && let Ok(entries) = std::fs::read_dir(dir)
     {
         for entry in entries.flatten() {
-            std::fs::remove_file(entry.path()).ok();
+            std::fs::remove_file(entry.path())
+                .or_else(|_| std::fs::remove_dir_all(entry.path()))
+                .ok();
         }
     }
 }
@@ -670,8 +672,9 @@ pub async fn remove_version(app_handle: tauri::AppHandle, tag: String) -> Result
     fs::remove_dir_all(&removing_dir).await.ok();
     match fs::rename(&version_dir, &removing_dir).await {
         Ok(_) => {
-            // Rename succeeded, now delete the renamed folder
+            // Rename succeeded, now delete the renamed folder, and the version's mods with it
             fs::remove_dir_all(&removing_dir).await?;
+            crate::mods::remove_profile(&app_handle, &tag).await;
             Ok(())
         }
         Err(e) => {

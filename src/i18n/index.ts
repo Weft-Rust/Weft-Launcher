@@ -82,6 +82,7 @@ updateCloseGame: string;
     invalidName: string;
     installInProgress: string;
   };
+  mods: (typeof en)['mods'];
   sizeUnits: {
     B: string;
     KB: string;

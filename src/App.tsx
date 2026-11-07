@@ -9,6 +9,7 @@ import { VoxelField } from "./components/VoxelField";
 import { Home } from "./pages/Home";
 import { VersionsPage } from "./pages/Versions";
 import { NotesPage } from "./pages/Notes";
+import { ModsPage } from "./pages/Mods";
 import { getLatestTag, getNewTag } from "./utils/version";
 
 interface AssetInfo {
@@ -28,7 +29,7 @@ interface Release {
   from_cache: boolean;
 }
 
-type TabId = "home" | "versions" | "notes";
+type TabId = "home" | "versions" | "mods" | "notes";
 
 function lastPlayed(): string | null {
   try {
@@ -102,6 +103,8 @@ function App() {
             newTag={newTag}
           />
         );
+      case "mods":
+        return <ModsPage selectedTag={selectedTag} onGoToVersions={() => setActiveTab("versions")} />;
       case "notes":
         return <NotesPage releases={releases} loading={loading} />;
       default:

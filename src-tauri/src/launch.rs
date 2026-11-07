@@ -225,8 +225,13 @@ async fn start_game(
         .await?;
     let log_stderr = log_stdout.try_clone().await?;
 
+    let mods = crate::mods::prepare_launch(app_handle, tag)
+        .await
+        .map_err(|e| LaunchError::Io(std::io::Error::other(e)))?;
     let mut cmd = TokioCommand::new(executable);
-    cmd.current_dir(version_dir)
+    cmd.arg("--mods")
+        .arg(mods)
+        .current_dir(version_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 

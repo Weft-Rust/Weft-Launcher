@@ -18,3 +18,12 @@ export function PixelIcon({ rows, scale = 2 }: { rows: string[]; scale?: number 
     </svg>
   );
 }
+
+export const REFRESH_ICON = [
+  ".###.#",
+  "#...##",
+  "#..###",
+  "#.....",
+  "#...#.",
+  ".###..",
+];

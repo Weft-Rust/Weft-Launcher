@@ -1,17 +1,8 @@
 import { useI18n } from "../i18n/useI18n";
 import { useInstall } from "../hooks/useInstall";
-import { PixelIcon } from "../components/PixelIcon";
+import { PixelIcon, REFRESH_ICON } from "../components/PixelIcon";
 import { VersionActions } from "../components/VersionActions";
 import { getLocale } from "../i18n";
-
-const REFRESH_ICON = [
-  ".###.#",
-  "#...##",
-  "#..###",
-  "#.....",
-  "#...#.",
-  ".###..",
-];
 
 interface Release {
   tag: string;

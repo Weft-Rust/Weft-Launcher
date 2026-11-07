@@ -23,10 +23,12 @@ The builds aren't code-signed yet:
 
 **Versions** -> **Install** -> back to **Home** -> **Play**. Delete a version with a double click on **Delete** (blocked while the game is running).
 
+**Mods** installs mods for one game version at a time, from the [Weft mod index](https://github.com/Weft-Rust/weft-mods-index) or from a file. Mods are programs that can do anything on your computer; the launcher checks that an index build is the reviewed one, made by GitHub Actions in its repository. See [docs/mods.md](docs/mods.md), which also describes the release layout for mod authors.
+
 ## Data
 
 - **Game data** (worlds, settings): `%APPDATA%\Weft` - the launcher never reads or writes it.
-- **Launcher data**: `%APPDATA%\dev.weft.launcher` - `versions/`, `logs/<tag>.log`, `cache/`, `downloads/`.
+- **Launcher data**: `%APPDATA%\dev.weft.launcher` - `versions/`, `profiles/<tag>/` (mods), `logs/<tag>.log`, `logs/launcher.log`, `cache/`, `downloads/`.
 
 Newer versions may write saves older ones can't open - back up `saves` before downgrading.
 
