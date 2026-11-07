@@ -353,7 +353,6 @@ export function ModsPage({ selectedTag, onSelectTag, onGoToVersions }: ModsPageP
           empty ? (
             <div className="empty-state framed-empty">
               <p>{t("mods.emptyInstalled", tag)}</p>
-              <p className="hint">{t("mods.emptyInstalledHint")}</p>
               <div className="empty-actions">
                 <button className="btn-primary" onClick={() => setView("browse")}>
                   {t("mods.browseMods")}
