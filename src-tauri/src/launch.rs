@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -148,6 +149,13 @@ fn get_logs_dir(app_handle: &AppHandle) -> Result<PathBuf, LaunchError> {
     Ok(logs_dir)
 }
 
+/// LD_LIBRARY_PATH minus the AppImage's old bundled libraries,
+/// on which the game may crash with X11.
+fn without_appimage_libs(appdir: &Path, library_path: &OsStr) -> Option<OsString> {
+    let own = std::env::split_paths(library_path).filter(|p| !p.starts_with(appdir));
+    std::env::join_paths(own).ok().filter(|p| !p.is_empty())
+}
+
 // Reads bytes, not text: a driver printing in the system's code page must not end the log.
 async fn copy_to_log(stream: impl AsyncRead + Unpin, mut log: fs::File, label: &'static str) {
     let mut reader = BufReader::new(stream);
@@ -225,6 +233,17 @@ async fn start_game(
     #[cfg(target_os = "windows")]
     {
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    if cfg!(target_os = "linux")
+        && let Some(appdir) = std::env::var_os("APPDIR")
+    {
+        let library_path = std::env::var_os("LD_LIBRARY_PATH")
+            .and_then(|p| without_appimage_libs(Path::new(&appdir), &p));
+        match library_path {
+            Some(p) => cmd.env("LD_LIBRARY_PATH", p),
+            None => cmd.env_remove("LD_LIBRARY_PATH"),
+        };
     }
 
     let mut child = cmd
@@ -348,4 +367,23 @@ fn open_path(app_handle: &AppHandle, path: &Path) -> Result<(), LaunchError> {
         .opener()
         .open_path(path.to_string_lossy().as_ref(), None::<&str>)?;
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn game_keeps_only_the_players_own_libraries() {
+        let strip = |p: &str| without_appimage_libs(Path::new("/tmp/.mount_Weft"), p.as_ref());
+        // What the AppImage sets when the player had no LD_LIBRARY_PATH.
+        assert_eq!(
+            strip("/tmp/.mount_Weft/usr/lib/:/tmp/.mount_Weft/lib64/:"),
+            None
+        );
+        assert_eq!(
+            strip("/tmp/.mount_Weft/usr/lib/:/opt/mine/lib:/tmp/.mount_Weftx/lib"),
+            Some("/opt/mine/lib:/tmp/.mount_Weftx/lib".into())
+        );
+    }
 }
