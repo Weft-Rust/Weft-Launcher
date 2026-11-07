@@ -295,7 +295,11 @@ pub fn admit(
 ) -> Result<ArchiveInfo, ModsError> {
     let result = (|| {
         let info = check(tmp, sha256, id, platform)?;
-        std::fs::File::open(tmp)?.sync_all()?;
+        // Opened for writing: Windows only flushes a file through a handle that may write to it.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(tmp)?
+            .sync_all()?;
         std::fs::create_dir_all(paths.store_dir())?;
         std::fs::rename(tmp, paths.store_object(sha256))?;
         // As every other write: the rename itself survives a power cut, so a lock that names
