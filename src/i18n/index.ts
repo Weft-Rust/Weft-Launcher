@@ -10,7 +10,6 @@ updateCloseGame: string;
   appTitle: string;
   refreshButton: string;
   loading: string;
-  cacheBanner: string;
   errorPrefix: string;
   emptyState: string;
   installButton: string;

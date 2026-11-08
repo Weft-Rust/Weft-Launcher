@@ -8,7 +8,6 @@
   "appTitle": "Weft Launcher",
   "refreshButton": "Refresh list",
   "loading": "Loading...",
-  "cacheBanner": "Showing cache (offline or no updates)",
   "errorPrefix": "Error: ",
   "emptyState": "No versions found.",
   "installButton": "Install",

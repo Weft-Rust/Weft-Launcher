@@ -42,7 +42,6 @@ export function VersionsPage({
   releases,
   loading,
   error,
-  fromCache,
   onRefresh,
   newTag,
 }: VersionsPageProps) {
@@ -61,9 +60,6 @@ export function VersionsPage({
         <h1>{t("tabVersions")}</h1>
         <div className="header-actions">
           {/* Not while loading: at every start the cache shows for a moment before the refresh. */}
-          {fromCache && !loading && (
-            <span className="cache-banner" role="status">{t("cacheBanner")}</span>
-          )}
           {error && (
             <div className="error-banner" role="alert">
               {t("errorPrefix")}{error}
