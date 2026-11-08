@@ -45,7 +45,7 @@
   "versionLabel": "Versión",
   "gameFolderTitle": "Carpeta del juego",
   "prereleaseBadge": "Preliminar",
-  "heroBadge": "VERSIÓN {0} · LISTO",
+  "heroBadge": "VERSIÓN {0}",
   "heroBadgePlaying": "VERSIÓN {0} · JUGANDO",
   "tabMods": "Mods",
   "modsInstalled": "Instalados",

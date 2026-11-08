@@ -45,7 +45,7 @@
   "versionLabel": "Version",
   "gameFolderTitle": "Game folder",
   "prereleaseBadge": "Pre-release",
-  "heroBadge": "VERSION {0} · READY",
+  "heroBadge": "VERSION {0}",
   "heroBadgePlaying": "VERSION {0} · PLAYING",
   "tabMods": "Mods",
   "modsInstalled": "Installed",
