@@ -2,7 +2,7 @@ import { useI18n } from "../i18n/useI18n";
 import { LanguageMenu } from "./LanguageMenu";
 import { UpdateButton } from "./UpdateButton";
 
-type TabId = "home" | "versions" | "notes";
+type TabId = "home" | "versions" | "mods" | "notes";
 
 interface TabsProps {
   activeTab: TabId;
@@ -16,6 +16,7 @@ export function Tabs({ activeTab, onChange, hasNewVersions }: TabsProps) {
   const tabs: { id: TabId; label: string }[] = [
     { id: "home", label: t("tabHome") },
     { id: "versions", label: t("tabVersions") },
+    { id: "mods", label: t("tabMods") },
     { id: "notes", label: t("tabNotes") },
   ];
 

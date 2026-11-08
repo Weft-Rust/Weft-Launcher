@@ -35,7 +35,7 @@ export function NotesPage({ releases, loading }: NotesPageProps) {
             <article key={release.tag} className="note-entry">
               <header className="note-header">
                 <span className="note-tag">{release.tag}</span>
-                <span className="note-date">{formatDate(release.published_at, locale)}</span>
+                <span className="note-date">{formatDate(release.published_at, locale, true)}</span>
                 {release.prerelease && <span className="prerelease-badge">{t("prereleaseBadge")}</span>}
               </header>
               <div className="note-body">

@@ -226,7 +226,8 @@ async fn start_game(
     let log_stderr = log_stdout.try_clone().await?;
 
     let mut cmd = TokioCommand::new(executable);
-    cmd.current_dir(version_dir)
+    cmd.args(crate::mods::launch_args(version_dir))
+        .current_dir(version_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -357,7 +358,7 @@ pub async fn open_log(app_handle: AppHandle, tag: String) -> Result<(), AppError
     Ok(())
 }
 
-fn open_path(app_handle: &AppHandle, path: &Path) -> Result<(), LaunchError> {
+pub(crate) fn open_path(app_handle: &AppHandle, path: &Path) -> Result<(), LaunchError> {
     // Programs spawned from the AppImage crash on its bundled libraries; reveal goes over D-Bus.
     if cfg!(target_os = "linux") && std::env::var_os("APPDIR").is_some() {
         app_handle.opener().reveal_item_in_dir(path)?;

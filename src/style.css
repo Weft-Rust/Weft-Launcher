@@ -269,3 +269,47 @@ button:disabled { cursor: not-allowed; }
 .note-gap { height: 12px; }
 .note-item { position: relative; padding-left: 24px; margin-top: 4px; }
 .note-item::before { content: ""; position: absolute; left: 0; top: 8px; width: 8px; height: 8px; background: var(--a2); box-shadow: 0 2px 0 var(--a1); }
+
+/* Mods */
+.mods-bar { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.mods-tabs { display: flex; gap: 4px; }
+.mods-tab { padding: 4px 16px; line-height: 24px; background: var(--g1); color: var(--g5); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--ink); }
+.mods-tab:hover { color: var(--pale); }
+.mods-tab.active { color: var(--pale); background: var(--g2); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--a2); }
+.mods-count { color: var(--a3); }
+.mods-list { display: grid; gap: 8px; }
+.mods-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.mods-unverified { display: grid; gap: 12px; justify-items: start; margin-top: 16px; }
+.mods-unverified .mods-grid { width: 100%; }
+.mod-empty { grid-column: 1 / -1; padding: 16px 24px 20px; color: var(--g5); }
+.mod-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 16px 24px 20px; }
+.mod-card { display: flex; flex-direction: column; gap: 8px; padding: 16px 24px 20px; }
+.mod-title { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.mod-title .mod-name { font-size: 24px; line-height: 32px; color: var(--a3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mod-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.mod-name { color: var(--pale); line-height: 24px; }
+.mod-version { color: var(--g5); line-height: 24px; }
+.mod-state { line-height: 44px; color: var(--a3); padding: 0 8px; }
+.mod-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 16px; margin-left: auto; }
+.mod-card .mod-actions { margin: auto 0 0; justify-content: space-between; }
+.mod-verified, .mod-unverified { padding: 0 8px; line-height: 24px; }
+.mod-verified { background: var(--a2); color: var(--ink); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--a1); }
+.mod-unverified { background: var(--r2); color: var(--ink); box-shadow: inset 0 calc(-1 * var(--px)) 0 var(--r1); }
+.mod-unverified::before { content: "! "; }
+
+/* The game's LED (gui/led_on, led_off) dimmed to the launcher's greys: a dark rim around a lit
+   square, a pixel of shine on top. */
+.led { flex: none; width: 24px; height: 24px; background: #5c3038; box-shadow: inset 0 0 0 var(--px) var(--ink), inset var(--px) calc(var(--px) * 2) 0 #6e3a42; }
+.led.on { background: #3e7452; box-shadow: inset 0 0 0 var(--px) var(--ink), inset var(--px) calc(var(--px) * 2) 0 #4f8c63; }
+.led:hover:not(:disabled) { outline: var(--px) solid var(--g3); }
+.led:disabled { filter: saturate(0.4) brightness(0.8); }
+
+.modal-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 32px; background: rgba(14, 16, 22, 0.7); }
+.modal { display: grid; gap: 12px; justify-items: start; width: min(720px, 100%); padding: 24px 24px 20px; }
+.modal-title { font-size: 24px; line-height: 32px; color: var(--a3); }
+.modal-text { line-height: 24px; color: var(--pale); overflow-wrap: anywhere; white-space: pre-wrap; }
+.mod-warning { padding: 8px 16px; line-height: 24px; background: var(--ink); color: var(--a3); box-shadow: inset var(--px) 0 0 var(--a2); }
+.mod-warning.danger { color: var(--r3); box-shadow: inset var(--px) 0 0 var(--r2); }
+.modal-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; width: 100%; margin-top: 4px; }
+.link-btn { margin-left: auto; color: var(--pale); text-decoration: underline; line-height: 24px; }
+.link-btn:hover { color: var(--a3); }

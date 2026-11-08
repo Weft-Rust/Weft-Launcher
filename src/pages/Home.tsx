@@ -7,6 +7,7 @@ import { useGameState } from "../hooks/useGameState";
 import { StableLabel } from "../components/StableLabel";
 import { VersionSelect } from "../components/VersionSelect";
 import { compareTags } from "../utils/version";
+import { formatDate } from "../utils/date";
 
 interface HomeProps {
   onGoToVersions: () => void;
@@ -86,7 +87,7 @@ export function Home({ onGoToVersions, latestTag, selectedTag, onSelectTag }: Ho
         <div className="hero-header">
           <h1 className="hero-title">WEFT</h1>
           <div className="hero-version-badge">
-            {t(isSelectedRunning ? "heroBadgePlaying" : "heroBadge", effectiveTag || "—")}
+            {t(isSelectedRunning ? "heroBadgePlaying" : "heroBadge", effectiveTag || "-")}
           </div>
         </div>
         <div className="hero-play-area">
@@ -94,7 +95,7 @@ export function Home({ onGoToVersions, latestTag, selectedTag, onSelectTag }: Ho
             value={effectiveTag || ""}
             options={sortedVersions.map((v) => ({
               value: v.tag,
-              label: latestTag && v.tag === latestTag ? `${v.tag} — ${t("latestBadge")}` : v.tag,
+              label: latestTag && v.tag === latestTag ? `${v.tag} - ${t("latestBadge")}` : v.tag,
             }))}
             onChange={onSelectTag}
             disabled={anyRunning}
@@ -141,7 +142,7 @@ export function Home({ onGoToVersions, latestTag, selectedTag, onSelectTag }: Ho
               <div className="detail-row">
                 <span className="detail-label">{t("installedAtLabel")}</span>
                 <span className="detail-value">
-                  {new Date(selectedVersion.installed_at).toLocaleString(locale)}
+                  {formatDate(selectedVersion.installed_at, locale, true)}
                 </span>
               </div>
               <div className="detail-row">

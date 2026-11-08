@@ -2,6 +2,7 @@ pub mod config;
 pub mod error;
 pub mod install;
 pub mod launch;
+pub mod mods;
 pub mod releases;
 
 use tauri::Manager;
@@ -16,7 +17,8 @@ pub fn run() {
                 let _ = w.set_focus();
             });
         }))
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init());
 
     #[cfg(desktop)]
     {
@@ -40,7 +42,14 @@ pub fn run() {
             launch::launch_version,
             launch::get_running_versions,
             launch::open_game_folder,
-            launch::open_log
+            launch::open_log,
+            mods::mods_index,
+            mods::mods_list,
+            mods::mods_install,
+            mods::mods_set_on,
+            mods::mods_remove,
+            mods::mods_inspect_file,
+            mods::mods_install_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

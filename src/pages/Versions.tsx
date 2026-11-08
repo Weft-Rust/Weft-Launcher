@@ -3,6 +3,7 @@ import { useInstall } from "../hooks/useInstall";
 import { PixelIcon } from "../components/PixelIcon";
 import { VersionActions } from "../components/VersionActions";
 import { getLocale } from "../i18n";
+import { formatDate } from "../utils/date";
 
 const REFRESH_ICON = [
   ".###.#",
@@ -106,7 +107,7 @@ export function VersionsPage({
                   </div>
                   <div className="version-meta">
                     <span className="version-date">
-                      {new Date(release.published_at).toLocaleDateString(getLocale())}
+                      {formatDate(release.published_at, getLocale())}
                     </span>
                     <span className="version-size">
                       {fmtSize(asset.size)}
